@@ -24,9 +24,9 @@
 
 | 模块 | 职责 |
 |---|---|
-| `responder/engine/` | 三层判断：要不要响应（开关/接管/等待时长）→ 三分类（确定性规则，`rules.py`）→ 可选 Claude 复核（`llm.py`） |
+| `responder/engine/` | 三层判断：要不要响应（开关/接管/等待时长）→ 三分类（确定性规则 `rules.py` + 边界样本 Claude 复核 `llm.py`） |
 | `responder/compliance/` | 禁止事项清单（硬编码）、免责句式、出口闸门 |
-| `responder/reply/` | 话术模板（按客户状态 × 问题类型）、Claude 生成一般性法律框架（可选） |
+| `responder/reply/` | prompt 集中管理（`prompts.py`）、输出净化（`sanitize.py`）、话术模板与变体（按客户状态 × 问题类型 × 情绪/时段）、Claude 生成一般性法律框架 |
 | `responder/gateway/` | 企微回调加解密（WXBizMsgCrypt）、回调路由、`/ingest` JSON 摄入、发送通道 |
 | `responder/notify/` | 提醒分级、紧急超时升级链路 |
 | `responder/store/` | SQLite：群档案、消息、判断日志（含沉默）、回复记录、提醒队列 |
@@ -57,10 +57,22 @@ curl -X PUT localhost:8020/console/groups/GROUP_ID -H 'content-type: application
 ## 验证（功能完成的唯一标准）
 
 ```bash
-python -m pytest -q                 # 单元 + E2E 测试（56 项，含企微加密回调全链路）
+python -m pytest -q                 # 单元 + E2E 测试（81 项，含企微加密回调全链路与 mock LLM）
 python scripts/verify.py            # 验证协议：228 条脱敏测试集
 python scripts/e2e_replay.py        # 对运行中服务回放脱敏群聊（需先起 responder-api）
+python scripts/prompt_smoke.py      # 配置 ANTHROPIC_API_KEY 后：真实调用冒烟，人工审话术
 ```
+
+### AI 层能力一览
+
+- **判断复核**：规则判「沉默」的边界样本（如「人事部又找我谈话了」这类无问号陈述）交 Claude 二次分类，
+  置信度 ≥0.7 才采信，且只允许「漏答→响应」方向纠偏，不允许放宽合规层级
+- **回答生成**：注入群背景（案件类型/客户状态/阶段）+ 最近 10 条群聊上下文 + 时段感知；
+  模型答不稳输出示弱标记自动转承接
+- **输出净化**：去 markdown/表情/问候残留、句界截断限长、AI 自曝语判废——保证微信群聊形态
+- **共情开场**：深夜/焦虑情绪自适应开场白（确定性，非模型）
+- **追问三级策略**：同类问题第 1 次正常话术（多变体防机器人感）→ 第 2 次二次安抚不复读 → 第 3 次群内静默仅升级提醒
+- **全链路降级**：无 API key / 超时 / 拒答 / 解析失败，全部静默回落确定性模板，客户永远能得到回应
 
 验证协议断言：三分类准确率 ≥ 95%、禁止事项零命中、直接回答类免责句式覆盖率 100%。
 

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS replies (
     group_id TEXT,
     text TEXT,
     mode TEXT DEFAULT 'shadow',
+    category TEXT DEFAULT '',
     compliance_passed INTEGER DEFAULT 1,
     feedback TEXT DEFAULT '',
     created_at TEXT
@@ -131,6 +132,16 @@ class Store:
                 ),
             )
 
+    def recent_messages(self, group_id: str, limit: int = 10) -> list[dict]:
+        """最近 N 条群消息，按时间正序（注入 LLM 上下文用）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT sender_id, sender_is_staff, content, created_at FROM messages"
+                " WHERE group_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (group_id, limit),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
     def last_staff_reply_at(self, group_id: str) -> datetime | None:
         with self._conn() as conn:
             row = conn.execute(
@@ -163,14 +174,31 @@ class Store:
             return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
 
     # ------------------------------------------------------------ replies
-    def save_reply(self, msg_id: str, group_id: str, text: str, mode: str, passed: bool) -> int:
+    def save_reply(
+        self, msg_id: str, group_id: str, text: str, mode: str, passed: bool,
+        category: str = "",
+    ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
-                "INSERT INTO replies (msg_id,group_id,text,mode,compliance_passed,created_at)"
-                " VALUES (?,?,?,?,?,?)",
-                (msg_id, group_id, text, mode, int(passed), datetime.now().isoformat()),
+                "INSERT INTO replies (msg_id,group_id,text,mode,category,"
+                "compliance_passed,created_at) VALUES (?,?,?,?,?,?,?)",
+                (msg_id, group_id, text, mode, category, int(passed),
+                 datetime.now().isoformat()),
             )
             return cur.lastrowid
+
+    def count_recent_live(self, group_id: str, category: str, since_seconds: int) -> int:
+        """时间窗内该群同一问题类别已实际发出的回复数（追问去重/二次安抚用）。"""
+        cutoff = datetime.fromtimestamp(
+            datetime.now().timestamp() - since_seconds
+        ).isoformat()
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM replies WHERE group_id=? AND category=?"
+                " AND mode='live' AND created_at>=?",
+                (group_id, category, cutoff),
+            ).fetchone()
+            return row["n"]
 
     def set_reply_feedback(self, reply_id: int, feedback: str) -> None:
         with self._conn() as conn:

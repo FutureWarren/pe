@@ -55,8 +55,19 @@ ruff check responder tests       # lint
 ## 自主循环边界
 
 - 可无人值守：基础设施、测试、重构、日志/存储/控制台功能。
-- **必须人工审核后合并**：话术模板（`reply/templates.py`）、判断阈值（等待时长/接管时长/升级时长）、
+- **必须人工审核后合并**：话术模板（`reply/templates.py`）、prompt（`reply/prompts.py`）、
+  判断阈值（等待时长/接管时长/升级时长/复核置信度）、
   合规文本（`compliance/forbidden.py`、`compliance/disclaimer.py`）、测试集标注变更。
+
+## LLM 层架构约定
+
+- system prompt 保持完全静态（不插时间/ID），一切易变上下文进 user 消息（`reply/prompts.py`）。
+- 模型只能在「漏答方向」纠偏：仅复核规则判 default-silence 的边界样本；
+  紧急/费用/案件特定/自指等高优先级规则命中不得交模型改判。
+- 模型有示弱出口 `[[NEED_LAWYER]]`：答不稳一律转承接，禁止移除该机制。
+- 所有模型输出必须过 `reply/sanitize.py`（形态）+ `compliance/guard.py`（语义）双重闸门。
+- 任何 API 异常/拒答/解析失败必须静默降级到确定性路径，不允许让客户等待或看到报错。
+- 配置好 API key 后跑 `python scripts/prompt_smoke.py` 人工审阅真实话术质量。
 
 ## 已定业务决策（2026-07，不要反向修改）
 

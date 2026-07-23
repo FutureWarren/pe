@@ -32,16 +32,21 @@ def decide(
     seconds_unanswered: float = 0.0,
     settings: Settings | None = None,
     now: datetime | None = None,
+    classification: tuple | None = None,
 ) -> Decision:
     """对一条群消息给出三分类判断与最终发言判定。
 
     seconds_since_last_staff_reply: 律师/客服最近一次群内发言距今秒数（None = 从未）。
     seconds_unanswered: 该消息已等待人工回复的秒数（调度器传入；0 表示刚收到）。
+    classification: 可选的外部分类结果 (action, category, urgent, reasons)——
+        供管道在规则分类后经 LLM 复核修正再进门控（见 service.Pipeline）。
     """
     settings = settings or get_settings()
     now = now or datetime.now()
 
-    action, category, urgent, reasons = rules.classify(msg.content, msg.msg_type)
+    action, category, urgent, reasons = classification or rules.classify(
+        msg.content, msg.msg_type
+    )
     decision = Decision(
         msg_id=msg.msg_id,
         group_id=msg.group_id,

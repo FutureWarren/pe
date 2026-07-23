@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     # 免责句式开关：业务决策暂不落地，机制保留，合伙人审定句式后置 True
     disclaimer_required: bool = False
 
+    # ---- LLM 层（未配置 ANTHROPIC_API_KEY 时以下全部自动降级为纯规则/模板路径）
+    # 边界样本复核：规则判「沉默」但可能是漏掉的问题时，交给模型二次确认
+    llm_refine_enabled: bool = True
+    # 直接回答路径用模型生成一般性法律框架
+    llm_answer_enabled: bool = True
+    llm_timeout_seconds: float = 15.0
+    llm_max_tokens_answer: int = 500
+    # 注入模型的群聊上下文条数
+    history_window: int = 10
+    # 群聊单条回复长度上限（字符），超出按句号截断
+    answer_max_chars: int = 240
+
     # AI 补位等待时长（秒）。[待定] 默认白天 2.5 分钟、夜间 1 分钟，可按群配置覆盖。
     wait_seconds_day: int = 150
     wait_seconds_night: int = 60

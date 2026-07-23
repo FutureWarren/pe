@@ -131,6 +131,10 @@ _CHITCHAT = re.compile(
 )
 
 
+# 礼貌语兜底（放在所有承接层之后判定，避免吞掉「麻烦帮我催一下」这类请求）
+_COURTESY = re.compile(r"^(谢谢|多谢|感谢|辛苦|麻烦)[^？?！!]{0,10}[!！。~～]*$")
+
+
 def _match_any(patterns: list[re.Pattern], text: str) -> str | None:
     for p in patterns:
         if p.search(text):
@@ -175,5 +179,9 @@ def classify(content: str, msg_type: str = "text") -> tuple[Action, Category, bo
         if GENERAL_EXCLUDE_SELF_CASE.search(text):
             return Action.HANDOFF, Category.CASE_STATUS, False, ["general-but-self-case"]
         return Action.ANSWER, Category.GENERAL_LAW, False, ["general-law-question"]
+
+    # 礼貌语（谢谢王律师/辛苦各位了…）：明确沉默，且不进 LLM 复核
+    if _COURTESY.match(text):
+        return Action.SILENCE, Category.CHITCHAT, False, ["courtesy"]
 
     return Action.SILENCE, Category.CHITCHAT, False, ["default-silence"]

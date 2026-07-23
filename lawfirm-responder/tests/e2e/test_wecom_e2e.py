@@ -116,11 +116,11 @@ def test_urgent_message_immediate_robot_reply_and_escalating_reminder(env):
     r = _post_encrypted(client, crypto, "m-urgent", "公司把我辞退了我要投诉你们这样处理")
     assert r.status_code == 200 and r.text == "success"
 
-    # 紧急：免等待，机器人立即在群里安抚
+    # 紧急：免等待，机器人立即在群里安抚（话术为稳定变体之一）
     assert len(sender.robot) == 1
     webhook, text = sender.robot[0]
     assert webhook == "robot-key-001"
-    assert "别着急" in text
+    assert "别着急" in text or "别慌" in text
     # 加急单聊提醒承办律师，附原文与 AI 已回复内容
     assert sender.direct and "加急" in sender.direct[0][1]
     assert "投诉" in sender.direct[0][1]
@@ -176,15 +176,19 @@ def test_staff_takeover_suppresses_ai(env):
     assert replies and replies[0]["mode"] == "shadow"
 
 
-def test_followup_dedup_escalates_instead_of_repeating(env):
+def test_followup_policy_second_touch_then_suppress(env):
     client, store, sender, crypto = env
-    for i in range(2):
+    for i in range(3):
         _post_encrypted(client, crypto, f"m-fu-{i}", "我要投诉你们这个服务态度")
-    # 相同话术只发一次，第二次转为升级提醒而非复读
-    assert len(sender.robot) == 1
+    # 第 1 次正常话术，第 2 次二次安抚（不复读），第 3 次群内静默 + 升级
+    assert len(sender.robot) == 2
+    assert sender.robot[0][1] != sender.robot[1][1]
+    assert "久等" in sender.robot[1][1]
     decisions = store.list_decisions("chat_labor_01")
-    assert any("dedup:repeat-followup-escalated" in d["reasons"] for d in decisions)
-    assert len(sender.direct) == 2  # 两次都提醒了律师
+    reasons = [d["reasons"] for d in decisions]
+    assert any("followup:second-touch" in r for r in reasons)
+    assert any("followup:suppressed-escalated" in r for r in reasons)
+    assert len(sender.direct) == 3  # 每次都提醒了律师
 
 
 def test_console_reflects_full_loop(env):
