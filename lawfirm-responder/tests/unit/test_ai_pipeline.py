@@ -152,3 +152,19 @@ def test_handoff_variants_stable_and_diverse():
     assert a == a2  # 同一消息稳定
     texts = {templates.build_handoff(Category.CASE_STATUS, g, seed=f"m{i}") for i in range(20)}
     assert len(texts) > 1  # 不同消息有变化
+
+
+# ---------------------------------------------------------------- CTA 频率控制
+def test_cta_not_repeated_within_window(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(
+        llm, "generate_answer_body",
+        lambda *a, **kw: "按劳动合同法的规定，一般可以主张经济补偿。",
+    )
+    p = make_pipeline(tmp_path)
+    p.handle(_msg("试用期被裁员有赔偿吗？", msg_id="c1"), seconds_unanswered=300)
+    p.handle(_msg("加班费不给可以仲裁吗？", msg_id="c2"), seconds_unanswered=300)
+    replies = p.store.list_replies("g1")
+    first, second = replies[1]["text"], replies[0]["text"]
+    assert any(m in first for m in templates.CTA_MARKERS)  # 第一条带引导收尾
+    assert not any(m in second for m in templates.CTA_MARKERS)  # 时间窗内第二条不再带

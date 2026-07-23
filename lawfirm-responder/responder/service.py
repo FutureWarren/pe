@@ -95,7 +95,10 @@ class Pipeline:
             self.store.save_decision(decision)
             return decision
 
-        result = generate(msg, decision, group, history=history, settings=self.settings)
+        result = generate(
+            msg, decision, group, history=history, settings=self.settings,
+            include_cta=not self._recent_cta(msg.group_id),
+        )
         reply_text = None
         if result:
             mode = "live" if (self.settings.mode == "live" and decision.should_speak) else "shadow"
@@ -119,6 +122,18 @@ class Pipeline:
         escalation.dispatch(reminder, self.store, self.sender)
 
         return decision
+
+    def _recent_cta(self, group_id: str) -> bool:
+        """接管时间窗内该群是否已发过带面谈引导/收尾语的回复——有则本次不再带（防套路感）。"""
+        for r in self.store.list_replies(group_id, limit=6):
+            if r["mode"] != "live":
+                continue
+            age = (datetime.now() - datetime.fromisoformat(r["created_at"])).total_seconds()
+            if age >= self.settings.takeover_seconds:
+                break
+            if any(m in r["text"] for m in templates.CTA_MARKERS):
+                return True
+        return False
 
     # ------------------------------------------------------------ 发送
     def _send_group(self, group: GroupProfile, group_id: str, text: str) -> None:

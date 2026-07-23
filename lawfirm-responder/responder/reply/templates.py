@@ -133,34 +133,48 @@ def answer_opening(question: str, now: datetime | None = None) -> str:
     return ""
 
 
+# 收尾语（含面谈引导 CTA）。真人不会每条都带收尾——由管道按频率控制 include_cta，
+# 时间窗内已带过就不再重复（防套路感）。CTA_MARKERS 供管道识别近期是否已用过。
+CTA_PROSPECT = [
+    "每个人情况不太一样，方便的话可以约个时间，跟律师细聊下您的情况。",
+    "您这个情况具体怎么处理最稳妥，还是当面跟律师过一遍比较清楚，方便的话约个时间。",
+]
+CTA_MARKERS = ("约个时间", "再给您细说")
+
+
 def answer_scaffold(
     group: GroupProfile,
     body: str,
     include_disclaimer: bool = False,
     opening: str | None = None,
+    include_cta: bool = True,
+    seed: str = "",
 ) -> str:
     """将（模型生成或人工维护的）一般性法律框架装入合规结构。
 
     body 只应包含：法条依据 + 一般区间 + 影响因素，不针对本案下结论。
-    未成交群（销售顾问定位）自然收尾带一句面谈引导，做 first screening 后的转化。
+    未成交群（销售顾问定位）在 include_cta 时收尾带面谈引导，做 first screening 后的转化。
     """
     parts = [opening or "", body.strip()]
     if include_disclaimer:
         parts.append(DISCLAIMER)
-    if group.client_status == ClientStatus.PROSPECT:
-        parts.append("每个人情况不太一样，方便的话可以约个时间，跟律师细聊下您的情况。")
-    else:
-        parts.append(f"具体到您这边，等{_lawyer(group)}看到再给您细说。")
+    if include_cta:
+        if group.client_status == ClientStatus.PROSPECT:
+            parts.append(_pick(CTA_PROSPECT, seed))
+        else:
+            parts.append(f"具体到您这边，等{_lawyer(group)}看到再给您细说。")
     return "\n".join(p for p in parts if p)
 
 
-def answer_without_llm(group: GroupProfile, include_disclaimer: bool = False) -> str:
+def answer_without_llm(
+    group: GroupProfile, include_disclaimer: bool = False, include_cta: bool = True
+) -> str:
     """未接入模型时直接回答路径的确定性降级：不编造法律内容，转为承接。"""
     text = (
         f"收到您的咨询。这个为了给您说准确，我已转达{_lawyer(group)}，"
         f"他看到会在群里给您解答。"
     )
-    if group.client_status == ClientStatus.PROSPECT:
+    if include_cta and group.client_status == ClientStatus.PROSPECT:
         text += "方便的话也可以约个时间，跟律师细聊下您的情况。"
     if include_disclaimer:
         text += "\n" + DISCLAIMER

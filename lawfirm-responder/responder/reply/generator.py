@@ -52,6 +52,7 @@ def generate(
     *,
     history: list[dict] | None = None,
     require_disclaimer: bool | None = None,
+    include_cta: bool = True,
     settings: Settings | None = None,
     now: datetime | None = None,
 ) -> GuardResult | None:
@@ -81,8 +82,12 @@ def generate(
             group, body,
             include_disclaimer=require_disclaimer,
             opening=templates.answer_opening(msg.content, now),
+            include_cta=include_cta,
+            seed=msg.msg_id,
         )
     else:
         decision.reasons.append("answer:fallback-no-llm")
-        text = templates.answer_without_llm(group, include_disclaimer=require_disclaimer)
+        text = templates.answer_without_llm(
+            group, include_disclaimer=require_disclaimer, include_cta=include_cta
+        )
     return guard(text, Action.ANSWER, fallback, require_disclaimer=require_disclaimer)
