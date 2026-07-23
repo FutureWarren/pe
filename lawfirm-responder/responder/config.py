@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8020
 
+    # 控制台/ingest 访问令牌：公网部署必填（deploy.sh 自动生成）。
+    # 为空时不鉴权（仅限本机开发）；企微回调路由不受此限（有签名校验）。
+    admin_token: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

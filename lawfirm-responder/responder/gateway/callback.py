@@ -69,7 +69,10 @@ async def receive(
 
 
 @router.post("/ingest")
-def ingest(msg: IncomingMessage, seconds_unanswered: float = 0.0,
+def ingest(msg: IncomingMessage, request: Request, seconds_unanswered: float = 0.0,
            pipeline: Pipeline = Depends(get_pipeline)):
+    from responder.console.api import require_admin
+
+    require_admin(request, request.headers.get("x-admin-token"))
     decision = pipeline.handle(msg, seconds_unanswered=seconds_unanswered)
     return decision.model_dump()

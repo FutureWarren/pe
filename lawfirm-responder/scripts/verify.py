@@ -18,7 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# 验证协议必须确定性、可离线：屏蔽 LLM 供应商 key，强制走规则 + 模板路径
+# 验证协议必须确定性、可离线：屏蔽 LLM 供应商 key，强制走规则 + 模板路径。
+# 必须先触发 config 的 load_dotenv 再删 key，否则 .env 会把 key 重新加回来。
+import responder.config  # noqa: E402,F401
+
 os.environ.pop("DEEPSEEK_API_KEY", None)
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
