@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lawfirm-responder"
+version = "0.1.0"
+description = "律所企业微信客户群 AI 第一响应助手：判断引擎 + 合规护栏 + 人工提醒 + 律师控制台 API"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "pydantic>=2.8,<3.0",
+  "pydantic-settings>=2.4,<3.0",
+  "uvicorn>=0.30,<1.0",
+  "httpx>=0.27,<1.0",
+  "pycryptodome>=3.20,<4.0",
+  "anthropic>=0.40",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9.0",
+  "ruff>=0.6,<1.0",
+]
+
+[project.scripts]
+responder-api = "responder.app:serve"
+
+[tool.setuptools]
+packages = [
+  "responder",
+  "responder.engine",
+  "responder.compliance",
+  "responder.reply",
+  "responder.gateway",
+  "responder.notify",
+  "responder.store",
+  "responder.console",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
