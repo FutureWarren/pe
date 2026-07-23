@@ -82,6 +82,7 @@ def test_refine_not_called_on_rule_hits(tmp_path, monkeypatch):
 
 def test_refine_skipped_without_key(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     called = []
     monkeypatch.setattr(llm, "refine", lambda *a, **kw: called.append(1))
     p = make_pipeline(tmp_path)
@@ -94,7 +95,7 @@ def test_llm_answer_injected_with_history_and_scaffold(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     seen = {}
 
-    def fake_gen(question, model, **kw):
+    def fake_gen(question, **kw):
         seen.update(kw, question=question)
         return "按劳动争议调解仲裁法，仲裁一般四十五天内审结，复杂的可延长。"
 

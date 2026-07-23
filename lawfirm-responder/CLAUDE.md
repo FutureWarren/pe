@@ -62,6 +62,9 @@ ruff check responder tests       # lint
 
 ## LLM 层架构约定
 
+- 双供应商：DeepSeek（默认，成本考虑）与 Anthropic 可切换（`engine/llm.py` 的 resolve()）；
+  两条后端共用同一套 prompt 与净化/合规闸门，新增供应商必须走同一出口。
+
 - system prompt 保持完全静态（不插时间/ID），一切易变上下文进 user 消息（`reply/prompts.py`）。
 - 模型只能在「漏答方向」纠偏：仅复核规则判 default-silence 的边界样本；
   紧急/费用/案件特定/自指等高优先级规则命中不得交模型改判。

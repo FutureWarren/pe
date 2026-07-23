@@ -43,7 +43,7 @@ responder-api          # 默认影子模式（只判断不发言）
 
 - **影子模式（Phase 1，默认）**：`RESPONDER_MODE=shadow`。AI 草稿只入库进控制台，由人工决定是否采用。
 - **自动回复（Phase 2）**：`RESPONDER_MODE=live`。需配置企微 corp_id / secret / agent_id。
-- 未配置 `ANTHROPIC_API_KEY` 时判断走纯规则、直接回答类降级为确定性承接式回复，整条链路可离线运行与验证。
+- LLM 供应商按 `.env` 的 key 自动解析（DeepSeek 优先）；一个 key 都不配时判断走纯规则、直接回答类降级为确定性承接式回复，整条链路可离线运行与验证。
 
 试点群档案通过控制台 API 维护：
 
@@ -107,5 +107,5 @@ python scripts/prompt_smoke.py      # 配置 ANTHROPIC_API_KEY 后：真实调�
 
 ## 技术栈
 
-Python 3.10+ / FastAPI / SQLite / Claude API（`claude-opus-4-8`，可选）/ pycryptodome（企微 AES）。
+Python 3.10+ / FastAPI / SQLite / LLM 双供应商（DeepSeek `deepseek-chat` 默认，成本考虑；Anthropic `claude-opus-4-8` 可切换，`RESPONDER_LLM_PROVIDER` 配置）/ pycryptodome（企微 AES）。
 控制台前端 [待定]（方案建议 React，Phase 1 用 API 直接复核足够）。

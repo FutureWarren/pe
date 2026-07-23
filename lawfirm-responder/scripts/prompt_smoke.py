@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""真实调用冒烟：把一组代表性问题打到 Claude，人工审阅话术质量与合规。
+"""真实调用冒烟：把一组代表性问题打到当前 LLM 供应商（DeepSeek/Anthropic），人工审阅话术质量与合规。
 
-需要环境变量 ANTHROPIC_API_KEY；未配置时跳过并以 0 退出（不阻塞 CI）。
+需要 DEEPSEEK_API_KEY 或 ANTHROPIC_API_KEY；未配置时跳过并以 0 退出（不阻塞 CI）。
 每条输出都会过 sanitize + 合规闸门后展示——看到的即客户会看到的。
 
 用法：python scripts/prompt_smoke.py [--only answer|classify]
 """
 
-import os
+
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,8 +18,6 @@ from responder.compliance import forbidden  # noqa: E402
 from responder.engine import llm  # noqa: E402
 from responder.models import ClientStatus, GroupProfile  # noqa: E402
 from responder.reply import sanitize, templates  # noqa: E402
-
-MODEL = os.environ.get("RESPONDER_CLAUDE_MODEL", "claude-opus-4-8")
 
 # AI 腔红线（docs/voice-guide.md）：真实输出命中即提示人工复核
 AI_TELLS = ["首先", "其次", "综上", "此外", "亲爱的", "希望能帮到您", "~", "～", "！！"]
@@ -54,18 +52,19 @@ CLASSIFY_BATTERY = [
 
 
 def main() -> int:
-    if not llm.llm_available():
-        print("ANTHROPIC_API_KEY 未配置，跳过真实调用冒烟（PASS，无阻塞）")
+    provider = llm.resolve()
+    if provider is None:
+        print("未配置 DEEPSEEK_API_KEY / ANTHROPIC_API_KEY，跳过真实调用冒烟（PASS，无阻塞）")
         return 0
 
     only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else ""
     problems = 0
 
     if only in ("", "answer"):
-        print("=" * 64, f"\n回答生成冒烟（{MODEL}）\n", "=" * 64, sep="")
+        print("=" * 64, f"\n回答生成冒烟（{provider.name}/{provider.model}）\n", "=" * 64, sep="")
         for question, night in ANSWER_BATTERY:
             body = llm.generate_answer_body(
-                question, MODEL,
+                question,
                 case_type=GROUP.case_type, client_status_label="咨询客户（尚未委托）",
                 history_text="", is_night=night,
             )
@@ -95,7 +94,7 @@ def main() -> int:
     if only in ("", "classify"):
         print("\n", "=" * 64, "\n分类复核冒烟\n", "=" * 64, sep="")
         for content in CLASSIFY_BATTERY:
-            r = llm.refine(content, MODEL, case_type=GROUP.case_type)
+            r = llm.refine(content, case_type=GROUP.case_type)
             if r is None:
                 print(f"{content!r:40} → <失败/拒答>")
                 problems += 1

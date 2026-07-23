@@ -30,7 +30,6 @@ def _llm_answer_body(
         return None
     body = llm.generate_answer_body(
         msg.content,
-        settings.claude_model,
         case_type=group.case_type,
         client_status_label=_STATUS_LABEL[group.client_status],
         case_stage=group.case_stage,
@@ -38,6 +37,7 @@ def _llm_answer_body(
         is_night=now.hour >= 22 or now.hour < 6,
         max_tokens=settings.llm_max_tokens_answer,
         timeout=settings.llm_timeout_seconds,
+        settings=settings,
     )
     if body is None or sanitize.is_unusable(body):
         return None

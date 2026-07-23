@@ -129,6 +129,16 @@ CLASSIFY_SCHEMA = {
 }
 
 
+# 供不支持原生 json_schema 的供应商（如 DeepSeek json_object 模式）使用：
+# 在 system 末尾显式声明 JSON 字段要求
+CLASSIFY_JSON_INSTRUCTION = (
+    "输出必须是一个 JSON 对象，且只包含这四个字段："
+    '{"action": "answer|handoff|silence", '
+    '"category": "general_law|case_status|fee|urgent|contact|chitchat|other", '
+    '"confidence": 0到1的数字, "reason": "一句话理由"}'
+)
+
+
 def classify_user_prompt(content: str, history_text: str, case_type: str) -> str:
     lines = [f"群的案件类型：{case_type or '未标注'}"]
     if history_text:

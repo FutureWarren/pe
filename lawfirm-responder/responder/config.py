@@ -2,7 +2,11 @@
 
 from functools import lru_cache
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 把 .env 中的非 RESPONDER_ 前缀变量（DEEPSEEK_API_KEY / ANTHROPIC_API_KEY）载入环境
+load_dotenv()
 
 
 class Settings(BaseSettings):
@@ -19,6 +23,10 @@ class Settings(BaseSettings):
     wecom_corp_secret: str = ""
     wecom_agent_id: str = ""
 
+    # LLM 供应商：deepseek | anthropic | auto（auto = 谁的 key 在就用谁，deepseek 优先）
+    # 业务决策 2026-07：默认 DeepSeek（成本考虑）；Anthropic 路径保留可随时切回
+    llm_provider: str = "auto"
+    deepseek_model: str = "deepseek-chat"
     claude_model: str = "claude-opus-4-8"
 
     # AI 在群内的身份定位：普通销售顾问角色，不明示 AI 身份（业务决策 2026-07）。

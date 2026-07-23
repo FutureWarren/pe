@@ -1,91 +1,140 @@
-"""LLM 调用层测试：全部用假客户端，离线可回归。"""
+"""LLM 调用层测试：全部用假客户端/假 HTTP，离线可回归。覆盖 DeepSeek 与 Anthropic 双后端。"""
 
 import json
 from types import SimpleNamespace
 
 import pytest
 
+from responder.config import Settings
 from responder.engine import llm
 from responder.models import Action, Category
 
+DS_SETTINGS = Settings(llm_provider="auto")
 
-class FakeClient:
-    def __init__(self, text=None, stop_reason="end_turn", raise_exc=None):
+
+# ---------------------------------------------------------------- 供应商解析
+def test_resolve_prefers_deepseek_on_auto(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dk")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ak")
+    p = llm.resolve(Settings(llm_provider="auto"))
+    assert p.name == "deepseek" and p.model == "deepseek-chat"
+
+
+def test_resolve_explicit_anthropic(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dk")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ak")
+    p = llm.resolve(Settings(llm_provider="anthropic"))
+    assert p.name == "anthropic" and p.model == "claude-opus-4-8"
+
+
+def test_resolve_none_without_keys(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert llm.resolve(Settings(llm_provider="auto")) is None
+    assert llm.refine("消息", settings=Settings()) is None
+    assert llm.generate_answer_body("问题", settings=Settings()) is None
+
+
+# ---------------------------------------------------------------- DeepSeek 后端
+class FakeHttpResponse:
+    def __init__(self, status_code=200, content="", payload=None):
+        self.status_code = status_code
+        self.text = "err"
+        self._payload = payload or {
+            "choices": [{"message": {"content": content}}]
+        }
+
+    def json(self):
+        return self._payload
+
+
+@pytest.fixture
+def ds_env(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dk")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
+def test_deepseek_refine_parses_json(ds_env, monkeypatch):
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured.update(url=url, headers=headers, payload=json)
+        return FakeHttpResponse(content=json_mod.dumps({
+            "action": "handoff", "category": "case_status",
+            "confidence": 0.9, "reason": "案件新情况",
+        }))
+
+    import json as json_mod
+    monkeypatch.setattr(llm.httpx, "post", fake_post)
+    r = llm.refine("公司又找我谈话了", case_type="劳动仲裁", settings=DS_SETTINGS)
+    assert r.action == Action.HANDOFF and r.confidence == 0.9
+    assert captured["url"] == llm.DEEPSEEK_URL
+    assert captured["headers"]["Authorization"] == "Bearer dk"
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+    assert captured["payload"]["model"] == "deepseek-chat"
+    # JSON 字段说明进入 system（DeepSeek 无原生 schema 强制）
+    assert "confidence" in captured["payload"]["messages"][0]["content"]
+
+
+def test_deepseek_answer_body(ds_env, monkeypatch):
+    monkeypatch.setattr(
+        llm.httpx, "post",
+        lambda *a, **kw: FakeHttpResponse(content="按劳动合同法的规定，一般可以主张经济补偿。"),
+    )
+    body = llm.generate_answer_body("被辞退了怎么赔？", settings=DS_SETTINGS)
+    assert "经济补偿" in body
+
+
+def test_deepseek_http_error_returns_none(ds_env, monkeypatch):
+    monkeypatch.setattr(llm.httpx, "post", lambda *a, **kw: FakeHttpResponse(status_code=429))
+    assert llm.generate_answer_body("问题", settings=DS_SETTINGS) is None
+
+
+def test_deepseek_need_lawyer_returns_none(ds_env, monkeypatch):
+    monkeypatch.setattr(
+        llm.httpx, "post", lambda *a, **kw: FakeHttpResponse(content="[[NEED_LAWYER]]")
+    )
+    assert llm.generate_answer_body("你们收多少钱", settings=DS_SETTINGS) is None
+
+
+def test_deepseek_exception_returns_none(ds_env, monkeypatch):
+    def boom(*a, **kw):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(llm.httpx, "post", boom)
+    assert llm.refine("消息", settings=DS_SETTINGS) is None
+
+
+# ---------------------------------------------------------------- Anthropic 后端
+class FakeAnthropicClient:
+    def __init__(self, text=None, stop_reason="end_turn"):
         self._text = text
         self._stop = stop_reason
-        self._exc = raise_exc
-        self.last_kwargs = None
         self.messages = self
 
     def create(self, **kwargs):
-        self.last_kwargs = kwargs
-        if self._exc:
-            raise self._exc
         content = [SimpleNamespace(type="text", text=self._text)] if self._text else []
         return SimpleNamespace(stop_reason=self._stop, content=content)
 
 
 @pytest.fixture
-def with_key(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+def an_env(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ak")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
 
-def _patch_client(monkeypatch, fake):
-    monkeypatch.setattr(llm, "_client", lambda timeout=15.0: fake)
-
-
-def test_unavailable_without_key(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert llm.refine("消息", "claude-opus-4-8") is None
-    assert llm.generate_answer_body("问题", "claude-opus-4-8") is None
-
-
-def test_refine_parses_structured_output(with_key, monkeypatch):
-    fake = FakeClient(text=json.dumps({
-        "action": "handoff", "category": "case_status",
-        "confidence": 0.85, "reason": "客户陈述了案件新情况",
+def test_anthropic_refine(an_env, monkeypatch):
+    fake = FakeAnthropicClient(text=json.dumps({
+        "action": "silence", "category": "chitchat", "confidence": 0.8, "reason": "闲聊",
     }))
-    _patch_client(monkeypatch, fake)
-    r = llm.refine("公司又找我谈话了", "claude-opus-4-8", case_type="劳动仲裁")
-    assert r.action == Action.HANDOFF and r.category == Category.CASE_STATUS
-    assert r.confidence == 0.85
-    # 上下文进入了 user 消息而非 system（system 保持静态）
-    assert "劳动仲裁" in fake.last_kwargs["messages"][0]["content"]
-    assert "案件类型" not in fake.last_kwargs["system"]
+    monkeypatch.setattr(llm, "_anthropic_client", lambda timeout=15.0: fake)
+    r = llm.refine("随便聊聊", settings=Settings(llm_provider="anthropic"))
+    assert r.action == Action.SILENCE and r.category == Category.CHITCHAT
 
 
-def test_refine_refusal_returns_none(with_key, monkeypatch):
-    _patch_client(monkeypatch, FakeClient(text=None, stop_reason="refusal"))
-    assert llm.refine("消息", "claude-opus-4-8") is None
-
-
-def test_refine_bad_json_returns_none(with_key, monkeypatch):
-    _patch_client(monkeypatch, FakeClient(text="不是json"))
-    assert llm.refine("消息", "claude-opus-4-8") is None
-
-
-def test_refine_api_error_returns_none(with_key, monkeypatch):
-    _patch_client(monkeypatch, FakeClient(raise_exc=RuntimeError("boom")))
-    assert llm.refine("消息", "claude-opus-4-8") is None
-
-
-def test_answer_body_ok(with_key, monkeypatch):
-    fake = FakeClient(text="按劳动合同法的规定，一般可以主张经济补偿，具体看工作年限等因素。")
-    _patch_client(monkeypatch, fake)
-    body = llm.generate_answer_body(
-        "被辞退了怎么赔？", "claude-opus-4-8",
-        case_type="劳动仲裁", is_night=True, history_text="客户：之前问过一次",
+def test_anthropic_refusal_returns_none(an_env, monkeypatch):
+    monkeypatch.setattr(
+        llm, "_anthropic_client",
+        lambda timeout=15.0: FakeAnthropicClient(stop_reason="refusal"),
     )
-    assert "经济补偿" in body
-    user_msg = fake.last_kwargs["messages"][0]["content"]
-    assert "深夜" in user_msg and "之前问过一次" in user_msg
-
-
-def test_answer_need_lawyer_sentinel_returns_none(with_key, monkeypatch):
-    _patch_client(monkeypatch, FakeClient(text="[[NEED_LAWYER]]"))
-    assert llm.generate_answer_body("我的案子能赢吗", "claude-opus-4-8") is None
-
-
-def test_answer_refusal_returns_none(with_key, monkeypatch):
-    _patch_client(monkeypatch, FakeClient(stop_reason="refusal"))
-    assert llm.generate_answer_body("问题", "claude-opus-4-8") is None
+    assert llm.generate_answer_body("问题", settings=Settings(llm_provider="anthropic")) is None

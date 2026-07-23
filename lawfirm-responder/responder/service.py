@@ -48,10 +48,10 @@ class Pipeline:
         ):
             refined = llm.refine(
                 msg.content,
-                self.settings.claude_model,
                 history_text=_history_text(history),
                 case_type=group.case_type,
                 timeout=self.settings.llm_timeout_seconds,
+                settings=self.settings,
             )
             if (
                 refined

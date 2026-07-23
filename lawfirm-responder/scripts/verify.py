@@ -12,10 +12,15 @@
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# 验证协议必须确定性、可离线：屏蔽 LLM 供应商 key，强制走规则 + 模板路径
+os.environ.pop("DEEPSEEK_API_KEY", None)
+os.environ.pop("ANTHROPIC_API_KEY", None)
 
 from responder.compliance import disclaimer, forbidden  # noqa: E402
 from responder.engine import rules  # noqa: E402
