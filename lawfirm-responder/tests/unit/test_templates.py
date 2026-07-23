@@ -28,10 +28,21 @@ def test_fee_prospect_invites_meeting():
     assert "面谈" not in templates.handoff_fee(SIGNED)
 
 
-def test_answer_scaffold_structure():
-    text = templates.answer_scaffold(SIGNED, "一般性法律框架说明。")
+def test_answer_scaffold_with_disclaimer():
+    text = templates.answer_scaffold(SIGNED, "一般性法律框架说明。", include_disclaimer=True)
     assert DISCLAIMER in text
     assert "王律师" in text
+
+
+def test_answer_scaffold_default_no_disclaimer():
+    text = templates.answer_scaffold(SIGNED, "一般性法律框架说明。")
+    assert DISCLAIMER not in text
+
+
+def test_answer_scaffold_prospect_invites_meeting():
+    # 未成交群：销售顾问定位，first screening 后自然引导面谈
+    text = templates.answer_scaffold(PROSPECT, "一般性法律框架说明。")
+    assert "约个时间" in text
 
 
 def test_fallback_without_lawyer_name():

@@ -61,6 +61,28 @@ class WeComSender:
             {"chatid": chat_id, "msgtype": "text", "text": {"content": text}},
         )
 
+    def send_robot_text(self, webhook: str, text: str) -> bool:
+        """通过群机器人 webhook 发言（AI 以群成员「销售顾问」身份出现时的首选通道）。
+
+        webhook 可传完整 URL 或仅 key。无需 access_token。
+        """
+        url = (
+            webhook
+            if webhook.startswith("http")
+            else f"{_API}/webhook/send?key={webhook}"
+        )
+        try:
+            resp = httpx.post(
+                url, json={"msgtype": "text", "text": {"content": text}}, timeout=10
+            ).json()
+            if resp.get("errcode"):
+                logger.error("robot send failed: %s", resp)
+                return False
+            return True
+        except Exception:
+            logger.exception("robot send error")
+            return False
+
     def send_direct_text(self, userid: str, text: str) -> bool:
         """单聊推送承办律师/客服（message.send）。"""
         return self._post(

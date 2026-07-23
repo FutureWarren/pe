@@ -220,3 +220,9 @@
 {"content": "照这么说我的案子是不是没希望了？", "action": "handoff", "category": "case_status", "persona": "anxious"}
 {"content": "律师上次说的方案我考虑好了，就按那个来", "action": "handoff", "category": "case_status", "persona": "plain"}
 {"content": "上次开庭对方说的那些是真的吗？", "action": "handoff", "category": "case_status", "persona": "plain"}
+{"content": "那仲裁大概要多久出结果？", "action": "answer", "category": "general_law", "persona": "repeat"}
+{"content": "公司今天突然让我签自愿离职书，说不签就不给工资！", "action": "handoff", "category": "urgent", "persona": "anxious"}
+{"content": "老板逼我写保证书，不写就扣钱，这合法吗？", "action": "handoff", "category": "urgent", "persona": "anxious"}
+{"content": "仲裁输了还能去法院起诉吗？", "action": "answer", "category": "general_law", "persona": "plain"}
+{"content": "申请劳动仲裁需要准备什么材料？", "action": "answer", "category": "general_law", "persona": "plain"}
+{"content": "公司拖欠三个月工资，仲裁能拿回来吗？", "action": "answer", "category": "general_law", "persona": "plain"}

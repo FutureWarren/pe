@@ -17,14 +17,16 @@ class GuardResult:
     violations: list[str]
 
 
-def guard(text: str, action: Action, safe_fallback: str) -> GuardResult:
+def guard(
+    text: str, action: Action, safe_fallback: str, *, require_disclaimer: bool = False
+) -> GuardResult:
     violations = forbidden.check(text)
     if violations:
         # 回退文本同样过一遍闸门要求：不允许回退模板本身违规
         assert not forbidden.check(safe_fallback), "safe_fallback 违反禁止事项清单"
         return GuardResult(text=safe_fallback, passed=False, violations=violations)
 
-    if action == Action.ANSWER:
+    if action == Action.ANSWER and require_disclaimer:
         text = disclaimer.ensure_disclaimer(text)
 
     return GuardResult(text=text, passed=True, violations=[])

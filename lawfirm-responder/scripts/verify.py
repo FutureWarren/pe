@@ -74,7 +74,8 @@ def main() -> int:
                 msg_id=msg.msg_id, group_id=group.group_id, action=action,
                 category=category, urgent=urgent, should_speak=True,
             )
-            result = generate(msg, decision, group)
+            # 免责句式机制以开启状态验证（生产默认关闭，属业务决策，机制必须保持可用）
+            result = generate(msg, decision, group, require_disclaimer=True)
             assert result is not None
             hits = forbidden.check(result.text)
             if hits:
@@ -99,6 +100,7 @@ def main() -> int:
     print(f"禁止事项命中:        {len(forbidden_hits)} (要求 = 0)")
     print(f"免责句式覆盖率:      {disclaimer_coverage:.2%} "
           f"({answer_replies - len(missing_disclaimer)}/{answer_replies}, 要求 = 100%)")
+    print("  （机制验证按开启态执行；生产配置 disclaimer_required 当前默认关闭）")
 
     if mismatches and (verbose or len(mismatches) <= 15):
         print(f"\n--- 分类不一致 ({len(mismatches)}) ---")

@@ -45,21 +45,42 @@ class Pipeline:
             seconds_unanswered=seconds_unanswered,
             settings=self.settings,
         )
-        self.store.save_decision(decision)
 
         if decision.action == Action.SILENCE:
+            self.store.save_decision(decision)
             return decision
 
         result = generate(msg, decision, group)
         reply_text = result.text if result else None
         if result:
             mode = "live" if (self.settings.mode == "live" and decision.should_speak) else "shadow"
+
+            # 追问去重：同一群短时间内重复同样话术不再刷屏，升级提醒力度代替复读
+            if mode == "live" and self._is_repeat(msg.group_id, result.text):
+                mode = "shadow"
+                decision.urgent = True
+                decision.reasons.append("dedup:repeat-followup-escalated")
+
             self.store.save_reply(msg.msg_id, msg.group_id, result.text, mode, result.passed)
             if mode == "live" and self.sender:
-                self.sender.send_group_text(msg.group_id, result.text)
+                if group.robot_webhook:
+                    self.sender.send_robot_text(group.robot_webhook, result.text)
+                else:
+                    self.sender.send_group_text(msg.group_id, result.text)
+
+        # 判断日志在去重/门控修饰后入库，控制台看到的即最终裁决
+        self.store.save_decision(decision)
 
         # 承接类一律触发人工提醒；直接回答类也提醒律师补充
         reminder = escalation.build_reminder(msg, decision, group, reply_text)
         escalation.dispatch(reminder, self.store, self.sender)
 
         return decision
+
+    def _is_repeat(self, group_id: str, text: str) -> bool:
+        """最近一次已发出的回复与本次相同 → 视为客户追问，不复读。"""
+        last = self.store.list_replies(group_id, limit=1)
+        if not last or last[0]["mode"] != "live" or last[0]["text"] != text:
+            return False
+        age = (datetime.now() - datetime.fromisoformat(last[0]["created_at"])).total_seconds()
+        return age < self.settings.takeover_seconds

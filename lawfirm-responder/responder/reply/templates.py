@@ -81,23 +81,33 @@ def build_handoff(category: Category, group: GroupProfile) -> str:
 
 
 # ---------------------------------------------------------------- ① 直接回答
-def answer_scaffold(group: GroupProfile, body: str) -> str:
+def answer_scaffold(group: GroupProfile, body: str, include_disclaimer: bool = False) -> str:
     """将（模型生成或人工维护的）一般性法律框架装入合规结构。
 
     body 只应包含：法条依据 + 一般区间 + 影响因素，不针对本案下结论。
+    未成交群（销售顾问定位）自然收尾带一句面谈引导，做 first screening 后的转化。
     """
-    return (
-        f"您好，理解您想先了解一下相关规定。\n"
-        f"{body.strip()}\n"
-        f"{DISCLAIMER}\n"
-        f"{_lawyer(group)}看到后会结合您的具体情况再为您补充。"
-    )
+    parts = [
+        "您好，理解您想先了解一下相关规定。",
+        body.strip(),
+    ]
+    if include_disclaimer:
+        parts.append(DISCLAIMER)
+    if group.client_status == ClientStatus.PROSPECT:
+        parts.append("每个人情况不太一样，如果方便的话，可以约个时间和律师详细聊聊您的情况。")
+    else:
+        parts.append(f"{_lawyer(group)}看到后会结合您的具体情况再为您补充。")
+    return "\n".join(parts)
 
 
-def answer_without_llm(group: GroupProfile) -> str:
+def answer_without_llm(group: GroupProfile, include_disclaimer: bool = False) -> str:
     """未接入模型时直接回答路径的确定性降级：不编造法律内容，转为承接。"""
-    return (
+    text = (
         f"您好，收到您的咨询。为了给您准确的说明，这个问题我已转达{_lawyer(group)}，"
-        f"看到后会在群里给您解答。\n"
-        f"{DISCLAIMER}"
+        f"看到后会在群里给您解答。"
     )
+    if group.client_status == ClientStatus.PROSPECT:
+        text += "如果方便的话，也可以约个时间和律师详细聊聊您的情况。"
+    if include_disclaimer:
+        text += "\n" + DISCLAIMER
+    return text

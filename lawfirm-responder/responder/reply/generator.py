@@ -42,10 +42,24 @@ def _llm_answer_body(question: str, case_type: str) -> str | None:
         return None
 
 
-def generate(msg: IncomingMessage, decision: Decision, group: GroupProfile) -> GuardResult | None:
-    """按判断结果生成回复文本并过合规闸门。SILENCE 返回 None。"""
+def generate(
+    msg: IncomingMessage,
+    decision: Decision,
+    group: GroupProfile,
+    *,
+    require_disclaimer: bool | None = None,
+) -> GuardResult | None:
+    """按判断结果生成回复文本并过合规闸门。SILENCE 返回 None。
+
+    require_disclaimer 缺省时读取运行配置（当前业务决策默认关闭）。
+    """
     if decision.action == Action.SILENCE:
         return None
+
+    if require_disclaimer is None:
+        from responder.config import get_settings
+
+        require_disclaimer = get_settings().disclaimer_required
 
     fallback = templates.safe_fallback(group)
 
@@ -56,7 +70,7 @@ def generate(msg: IncomingMessage, decision: Decision, group: GroupProfile) -> G
     # ANSWER：优先 Claude 生成一般性框架，未配置/失败时确定性降级为承接式回答
     body = _llm_answer_body(msg.content, group.case_type)
     if body:
-        text = templates.answer_scaffold(group, body)
+        text = templates.answer_scaffold(group, body, include_disclaimer=require_disclaimer)
     else:
-        text = templates.answer_without_llm(group)
-    return guard(text, Action.ANSWER, fallback)
+        text = templates.answer_without_llm(group, include_disclaimer=require_disclaimer)
+    return guard(text, Action.ANSWER, fallback, require_disclaimer=require_disclaimer)

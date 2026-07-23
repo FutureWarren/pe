@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS groups (
     lawyer_name TEXT DEFAULT '',
     lawyer_userid TEXT DEFAULT '',
     backup_userid TEXT DEFAULT '',
-    ai_enabled INTEGER DEFAULT 1
+    ai_enabled INTEGER DEFAULT 1,
+    robot_webhook TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS messages (
     msg_id TEXT PRIMARY KEY,
@@ -86,15 +87,17 @@ class Store:
     def upsert_group(self, g: GroupProfile) -> None:
         with self._conn() as conn:
             conn.execute(
-                """INSERT INTO groups VALUES (?,?,?,?,?,?,?,?,?)
+                """INSERT INTO groups VALUES (?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(group_id) DO UPDATE SET
                    name=excluded.name, client_status=excluded.client_status,
                    case_type=excluded.case_type, case_stage=excluded.case_stage,
                    lawyer_name=excluded.lawyer_name, lawyer_userid=excluded.lawyer_userid,
-                   backup_userid=excluded.backup_userid, ai_enabled=excluded.ai_enabled""",
+                   backup_userid=excluded.backup_userid, ai_enabled=excluded.ai_enabled,
+                   robot_webhook=excluded.robot_webhook""",
                 (
                     g.group_id, g.name, g.client_status.value, g.case_type, g.case_stage,
                     g.lawyer_name, g.lawyer_userid, g.backup_userid, int(g.ai_enabled),
+                    g.robot_webhook,
                 ),
             )
 

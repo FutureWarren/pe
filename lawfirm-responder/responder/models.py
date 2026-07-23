@@ -43,6 +43,7 @@ class GroupProfile(BaseModel):
     lawyer_userid: str = ""  # 企微 userid，提醒推送用
     backup_userid: str = ""  # 第二责任人，升级提醒用
     ai_enabled: bool = True  # 控制台可按群开关 AI
+    robot_webhook: str = ""  # 群机器人 webhook（key 或完整 URL），有则优先用机器人发言
 
 
 class IncomingMessage(BaseModel):

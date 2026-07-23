@@ -21,6 +21,13 @@ class Settings(BaseSettings):
 
     claude_model: str = "claude-opus-4-8"
 
+    # AI 在群内的身份定位：普通销售顾问角色，不明示 AI 身份（业务决策 2026-07）。
+    # 全量消息留痕入库，可溯源。
+    ai_persona_name: str = "顾问助理"
+
+    # 免责句式开关：业务决策暂不落地，机制保留，合伙人审定句式后置 True
+    disclaimer_required: bool = False
+
     # AI 补位等待时长（秒）。[待定] 默认白天 2.5 分钟、夜间 1 分钟，可按群配置覆盖。
     wait_seconds_day: int = 150
     wait_seconds_night: int = 60

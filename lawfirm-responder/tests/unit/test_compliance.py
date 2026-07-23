@@ -38,10 +38,17 @@ def test_guard_blocks_and_falls_back():
     assert result.violations
 
 
-def test_guard_appends_disclaimer_on_answer():
-    result = guard("一般性说明内容。", Action.ANSWER, SAFE_FALLBACK)
+def test_guard_appends_disclaimer_when_required():
+    result = guard("一般性说明内容。", Action.ANSWER, SAFE_FALLBACK, require_disclaimer=True)
     assert result.passed
     assert disclaimer.has_disclaimer(result.text)
+
+
+def test_guard_no_disclaimer_by_default():
+    # 业务决策：免责句式暂不落地，默认关闭
+    result = guard("一般性说明内容。", Action.ANSWER, SAFE_FALLBACK)
+    assert result.passed
+    assert not disclaimer.has_disclaimer(result.text)
 
 
 def test_guard_handoff_no_forced_disclaimer():
