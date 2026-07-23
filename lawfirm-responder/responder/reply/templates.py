@@ -14,7 +14,7 @@ import re
 import zlib
 from datetime import datetime
 
-from responder.compliance.disclaimer import DISCLAIMER, HANDOFF_NOTE
+from responder.compliance.disclaimer import DISCLAIMER
 from responder.models import Category, ClientStatus, GroupProfile
 
 
@@ -32,15 +32,13 @@ def _pick(variants: list[str], seed: str) -> str:
 
 
 # ---------------------------------------------------------------- ② 承接类
+# 语感依据见 docs/voice-guide.md：先接住，再给预期；短句；不打公文腔。
 def handoff_case_status(group: GroupProfile, seed: str = "") -> str:
     L, C = _lawyer(group), _case(group)
     variants = [
-        f"您好，消息已收到。{C}的具体进展需要{L}核实后回复您，"
-        f"我已经提醒{L}，看到后会尽快在群里答复您。\n{HANDOFF_NOTE}",
-        f"收到您的消息了。{C}的最新情况我这边不掌握完整信息，"
-        f"已经转给{L}了，核实后会尽快回复您。\n{HANDOFF_NOTE}",
-        f"您好，这个需要{L}那边确认一下最新进展。我已经提醒{L}了，"
-        f"一有消息就会在群里跟您说。\n{HANDOFF_NOTE}",
+        f"收到，{C}的最新进展我帮您问下{L}哈，一有消息马上在群里说。",
+        f"看到您消息了。具体进展得{L}那边确认，我已经跟{L}说了，回头就答复您。",
+        f"收到您的消息，这个我帮您催一下{L}，他核实了就在群里回您。",
     ]
     return _pick(variants, seed)
 
@@ -49,17 +47,15 @@ def handoff_fee(group: GroupProfile, seed: str = "") -> str:
     L = _lawyer(group)
     if group.client_status == ClientStatus.PROSPECT:
         variants = [
-            f"您好，收到您的咨询。费用需要{L}结合案件的具体情况来说明，"
-            f"我已提醒{L}尽快与您沟通。"
-            f"如方便的话，也欢迎您预约到所里面谈，律师可以当面帮您把情况理一理。",
-            f"收到。费用这块跟案件的具体情况关系很大，得由{L}了解情况后才能给您准数，"
-            f"我已经转达了。方便的话可以约个时间当面聊，把您的情况一次说清楚。",
+            f"收到。费用这块跟案子具体情况关系很大，得{L}了解情况后才能给您准数，我已经转达了。\n"
+            f"方便的话可以约个时间当面聊，把您的情况一次说清楚。",
+            f"这个得{L}结合您的情况来说才准确，我让他尽快跟您联系哈。"
+            f"要是方便，也欢迎约个时间来所里坐坐，当面把情况理一理。",
         ]
     else:
         variants = [
-            f"您好，消息已收到。费用相关的问题由{L}和您直接确认，"
-            f"我已提醒{L}，看到后会尽快回复您。",
-            f"收到您的消息。费用的事需要{L}跟您直接沟通确认，我已经提醒{L}了，请您稍等。",
+            f"收到，费用的事由{L}跟您直接确认，我已经提醒他了，稍等哈。",
+            f"看到您消息了。这块{L}会跟您直接沟通，我这边也催着，请您稍等。",
         ]
     return _pick(variants, seed)
 
@@ -67,9 +63,9 @@ def handoff_fee(group: GroupProfile, seed: str = "") -> str:
 def handoff_urgent(group: GroupProfile, seed: str = "") -> str:
     L = _lawyer(group)
     variants = [
-        f"您好，看到您的消息了，请您先别着急。"
-        f"这个情况比较重要，我已第一时间加急提醒{L}，会尽快联系您。",
-        f"收到，您先别慌，这个情况我们很重视。已经加急通知{L}了，会尽快跟您联系，请稍等。",
+        f"看到您的消息了，您先别急。这个情况比较要紧，我已经第一时间加急联系{L}了，"
+        f"会尽快跟您联系。",
+        f"收到，您先别慌，这个情况我们很重视。已经加急通知{L}了，尽快给您答复。",
     ]
     return _pick(variants, seed)
 
@@ -77,8 +73,9 @@ def handoff_urgent(group: GroupProfile, seed: str = "") -> str:
 def handoff_contact(group: GroupProfile, seed: str = "") -> str:
     L = _lawyer(group)
     variants = [
-        f"您好，消息已收到。{L}可能暂时在忙，我已经提醒，看到后会尽快回复您，请您稍候。",
-        f"收到您的消息。{L}这会儿应该在忙，我已经跟{L}说了，忙完会第一时间回您。",
+        f"看到您消息了，{L}这会儿应该在忙。我已经提醒他了，忙完会第一时间回您。",
+        f"在的。{L}可能暂时腾不出手，我已经跟他说了，看到就回您哈。",
+        f"收到，我这就帮您叫一下{L}，他看到会尽快回复您。",
     ]
     return _pick(variants, seed)
 
@@ -86,8 +83,8 @@ def handoff_contact(group: GroupProfile, seed: str = "") -> str:
 def handoff_generic(group: GroupProfile, seed: str = "") -> str:
     L = _lawyer(group)
     variants = [
-        f"您好，消息已收到。这个问题需要{L}确认后答复您，我已提醒{L}尽快回复。{HANDOFF_NOTE}",
-        f"收到您的消息。这个得让{L}来跟您说比较准确，我已经转达了，请您稍等。{HANDOFF_NOTE}",
+        f"收到您的消息，这个得让{L}来说比较准确，我已经转达了，请您稍等。",
+        f"看到您消息了，这个我帮您转给{L}确认下，有回复马上告诉您。",
     ]
     return _pick(variants, seed)
 
@@ -95,20 +92,15 @@ def handoff_generic(group: GroupProfile, seed: str = "") -> str:
 def safe_fallback(group: GroupProfile) -> str:
     """合规拦截后的兜底回复：只承接，不含任何实质内容。固定文本，不走变体。"""
     L = _lawyer(group)
-    return (
-        f"您好，消息已收到。这个问题需要{L}确认后答复您，我已提醒{L}尽快回复。{HANDOFF_NOTE}"
-    )
+    return f"收到您的消息，这个得让{L}来说比较准确，我已经转达了，请您稍等。"
 
 
 def second_touch(group: GroupProfile, urgent: bool = False) -> str:
     """客户追问同一件事时的二次安抚：不复读，升级姿态。"""
     L = _lawyer(group)
     if urgent:
-        return (
-            f"实在抱歉让您久等了，我刚刚又加急联系了{L}，也同步给了所里其他同事，"
-            f"一定尽快给您答复。"
-        )
-    return f"抱歉让您久等了，我刚又跟{L}那边催了一下，一有回复马上在群里告诉您。"
+        return f"实在抱歉让您久等了，我刚又加急催了{L}，也跟所里其他同事说了，一定尽快回您。"
+    return f"抱歉让您久等了，我刚又跟{L}那边催了一下，一有回复马上在群里说。"
 
 
 HANDOFF_BY_CATEGORY = {
@@ -128,17 +120,17 @@ _ANXIOUS = re.compile(r"(害怕|好怕|慌|担心|着急|焦虑|睡不着|紧张
 
 
 def answer_opening(question: str, now: datetime | None = None) -> str:
-    """按情绪与时段选择共情开场（确定性）。"""
+    """按情绪与时段选择共情开场（确定性）。常规情况不加开场——直接说事最像真人。"""
     now = now or datetime.now()
     late = now.hour >= 22 or now.hour < 6
     anxious = bool(_ANXIOUS.search(question))
     if late and anxious:
         return "这么晚还没休息，能感觉到您心里不踏实，先别太担心。"
     if anxious:
-        return "理解您现在心里着急，先别慌，我给您说说一般的情况。"
+        return "理解您心里着急，先别慌，我给您说说一般的情况。"
     if late:
         return "这么晚还在为这事操心，辛苦了。"
-    return "您好，理解您想先了解一下相关规定。"
+    return ""
 
 
 def answer_scaffold(
@@ -152,27 +144,24 @@ def answer_scaffold(
     body 只应包含：法条依据 + 一般区间 + 影响因素，不针对本案下结论。
     未成交群（销售顾问定位）自然收尾带一句面谈引导，做 first screening 后的转化。
     """
-    parts = [
-        opening or "您好，理解您想先了解一下相关规定。",
-        body.strip(),
-    ]
+    parts = [opening or "", body.strip()]
     if include_disclaimer:
         parts.append(DISCLAIMER)
     if group.client_status == ClientStatus.PROSPECT:
-        parts.append("每个人情况不太一样，如果方便的话，可以约个时间和律师详细聊聊您的情况。")
+        parts.append("每个人情况不太一样，方便的话可以约个时间，跟律师细聊下您的情况。")
     else:
-        parts.append(f"{_lawyer(group)}看到后会结合您的具体情况再为您补充。")
-    return "\n".join(parts)
+        parts.append(f"具体到您这边，等{_lawyer(group)}看到再给您细说。")
+    return "\n".join(p for p in parts if p)
 
 
 def answer_without_llm(group: GroupProfile, include_disclaimer: bool = False) -> str:
     """未接入模型时直接回答路径的确定性降级：不编造法律内容，转为承接。"""
     text = (
-        f"您好，收到您的咨询。为了给您准确的说明，这个问题我已转达{_lawyer(group)}，"
-        f"看到后会在群里给您解答。"
+        f"收到您的咨询。这个为了给您说准确，我已转达{_lawyer(group)}，"
+        f"他看到会在群里给您解答。"
     )
     if group.client_status == ClientStatus.PROSPECT:
-        text += "如果方便的话，也可以约个时间和律师详细聊聊您的情况。"
+        text += "方便的话也可以约个时间，跟律师细聊下您的情况。"
     if include_disclaimer:
         text += "\n" + DISCLAIMER
     return text

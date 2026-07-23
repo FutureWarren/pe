@@ -21,6 +21,9 @@ from responder.reply import sanitize, templates  # noqa: E402
 
 MODEL = os.environ.get("RESPONDER_CLAUDE_MODEL", "claude-opus-4-8")
 
+# AI 腔红线（docs/voice-guide.md）：真实输出命中即提示人工复核
+AI_TELLS = ["首先", "其次", "综上", "此外", "亲爱的", "希望能帮到您", "~", "～", "！！"]
+
 GROUP = GroupProfile(
     group_id="smoke", name="劳动仲裁咨询群", client_status=ClientStatus.PROSPECT,
     case_type="劳动仲裁", lawyer_name="王", lawyer_userid="wang",
@@ -79,8 +82,13 @@ def main() -> int:
                 opening=templates.answer_opening(question, datetime.now()),
             )
             hits = forbidden.check(text)
-            flag = f"  ⚠️ 禁止事项命中: {hits}" if hits else ""
+            tells = [t for t in AI_TELLS if t in text]
+            flag = ""
             if hits:
+                flag += f"  ⚠️ 禁止事项命中: {hits}"
+                problems += 1
+            if tells:
+                flag += f"  ⚠️ AI 腔特征: {tells}"
                 problems += 1
             print(f"【答】{text}{flag}")
 

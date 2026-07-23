@@ -56,6 +56,7 @@ ruff check responder tests       # lint
 
 - 可无人值守：基础设施、测试、重构、日志/存储/控制台功能。
 - **必须人工审核后合并**：话术模板（`reply/templates.py`）、prompt（`reply/prompts.py`）、
+  语感规范（`docs/voice-guide.md`，模板与 prompt 的话术依据，三者须同步演进）、
   判断阈值（等待时长/接管时长/升级时长/复核置信度）、
   合规文本（`compliance/forbidden.py`、`compliance/disclaimer.py`）、测试集标注变更。
 

@@ -139,7 +139,8 @@ def test_opening_variants():
     assert "别慌" in templates.answer_opening("我好害怕，一般会判几年", day)
     assert "这么晚" in templates.answer_opening("仲裁要多久？", night)
     assert "不踏实" in templates.answer_opening("睡不着，好担心结果", night)
-    assert templates.answer_opening("仲裁要多久？", day).startswith("您好")
+    # 常规情况不加开场，直接说事最像真人
+    assert templates.answer_opening("仲裁要多久？", day) == ""
 
 
 # ---------------------------------------------------------------- 话术变体

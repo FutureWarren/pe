@@ -5,6 +5,7 @@
 """
 
 import logging
+import time
 from datetime import datetime
 
 from responder.config import Settings, get_settings
@@ -13,7 +14,7 @@ from responder.engine.decision import decide
 from responder.gateway.sender import WeComSender
 from responder.models import Action, Decision, GroupProfile, IncomingMessage
 from responder.notify import escalation
-from responder.reply import templates
+from responder.reply import sanitize, templates
 from responder.reply.generator import generate
 from responder.store.db import Store
 
@@ -107,10 +108,7 @@ class Pipeline:
                 result.passed, category=decision.category.value,
             )
             if mode == "live" and self.sender:
-                if group.robot_webhook:
-                    self.sender.send_robot_text(group.robot_webhook, final_text)
-                else:
-                    self.sender.send_group_text(msg.group_id, final_text)
+                self._send_group(group, msg.group_id, final_text)
             reply_text = final_text
 
         # 判断日志在去重/门控修饰后入库，控制台看到的即最终裁决
@@ -121,6 +119,22 @@ class Pipeline:
         escalation.dispatch(reminder, self.store, self.sender)
 
         return decision
+
+    # ------------------------------------------------------------ 发送
+    def _send_group(self, group: GroupProfile, group_id: str, text: str) -> None:
+        """分条发送：多句内容拆成多条消息，条间隔模拟打字（见 docs/voice-guide.md）。"""
+        chunks = (
+            sanitize.split_messages(text, self.settings.split_max_parts)
+            if self.settings.split_messages
+            else [text]
+        )
+        for i, chunk in enumerate(chunks):
+            if i and self.settings.split_delay_seconds > 0:
+                time.sleep(self.settings.split_delay_seconds)
+            if group.robot_webhook:
+                self.sender.send_robot_text(group.robot_webhook, chunk)
+            else:
+                self.sender.send_group_text(group_id, chunk)
 
     # ------------------------------------------------------------ 追问策略
     def _apply_followup_policy(

@@ -24,8 +24,9 @@ def test_lawyer_name_injected():
 
 
 def test_fee_prospect_invites_meeting():
-    assert "面谈" in templates.handoff_fee(PROSPECT)
-    assert "面谈" not in templates.handoff_fee(SIGNED)
+    for seed in ("a", "b", "c"):
+        assert "约个时间" in templates.handoff_fee(PROSPECT, seed=seed)
+        assert "约个时间" not in templates.handoff_fee(SIGNED, seed=seed)
 
 
 def test_answer_scaffold_with_disclaimer():

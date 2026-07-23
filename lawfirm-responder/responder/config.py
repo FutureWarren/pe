@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # 群聊单条回复长度上限（字符），超出按句号截断
     answer_max_chars: int = 240
 
+    # 分条发送：多句内容拆成 1~3 条微信消息，条间隔模拟打字节奏（真人感）
+    split_messages: bool = True
+    split_max_parts: int = 3
+    split_delay_seconds: float = 1.5
+
     # AI 补位等待时长（秒）。[待定] 默认白天 2.5 分钟、夜间 1 分钟，可按群配置覆盖。
     wait_seconds_day: int = 150
     wait_seconds_night: int = 60

@@ -26,6 +26,9 @@ _MD_CODE = re.compile(r"`+")
 _EMOJI = re.compile(
     "[\U0001f300-\U0001faff\U00002600-\U000027bf\U0001f000-\U0001f0ff️]"
 )
+# 书面连接词 = AI 腔最大暴露点（见 docs/voice-guide.md），出现即剥离
+_FORMAL_OPENERS = re.compile(r"(首先|其次|再次|此外|另外|综上所述|综上|总而言之|总之|因此)[，,、]?")
+_TILDE = re.compile(r"[~～]+")
 _SENTENCE_END = "。！？!?；;"
 
 
@@ -55,8 +58,28 @@ def sanitize(text: str, max_chars: int = 240) -> str:
     t = _MD_BOLD.sub(r"\1", t)
     t = _MD_CODE.sub("", t)
     t = _EMOJI.sub("", t)
+    t = _FORMAL_OPENERS.sub("", t)
+    t = _TILDE.sub("", t)
     t = _GREETING.sub("", t)
     # 压掉多余空行与行尾空白
     t = re.sub(r"[ \t]+\n", "\n", t)
     t = re.sub(r"\n{2,}", "\n", t).strip()
     return clamp(t, max_chars)
+
+
+def split_messages(text: str, max_parts: int = 3) -> list[str]:
+    """按换行拆成多条微信消息（真人不发大段文字，见 docs/voice-guide.md）。
+
+    超出 max_parts 的行并入最后一条；≤20 字的短条去掉结尾句号（更像随手打字）。
+    """
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return []
+    if len(lines) > max_parts:
+        lines = lines[: max_parts - 1] + ["\n".join(lines[max_parts - 1 :])]
+    out = []
+    for ln in lines:
+        if len(ln) <= 20 and ln.endswith("。"):
+            ln = ln[:-1]
+        out.append(ln)
+    return out
