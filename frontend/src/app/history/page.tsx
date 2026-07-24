@@ -8,6 +8,7 @@ import { ArrowLeft, FolderClock, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -74,72 +75,77 @@ export default function HistoryPage() {
 
   return (
     <div className="page-shell space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="animate-fade-up flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
             <FolderClock className="h-4 w-4" />
-           历史记录
+            History
           </div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            已生成的项目
+            Generated runs
           </h1>
           <p className="max-w-2xl text-sm leading-7 text-muted-foreground">
-            列表来自本机 Python 引擎写入的 <span className="font-mono text-xs">outputs/</span>{" "}
-            目录。每条记录对应一次完整流水线运行；点击「打开」可将该次结果载入当前工作区并进入处理流程。
+            Each entry is one full pipeline run written by the local Python engine to{" "}
+            <span className="font-mono text-xs">outputs/</span>. Open a run to load its results
+            into the current workspace and continue processing.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => void loadRuns()} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            刷新列表
+            {loading ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
+            Refresh
           </Button>
           <Button asChild size="sm">
             <Link href="/">
               <ArrowLeft className="h-4 w-4" />
-              新建导入
+              New Import
             </Link>
           </Button>
         </div>
       </div>
 
       {error ? (
-        <Card className="border-destructive/40 bg-destructive/5">
+        <Card role="alert" className="animate-scale-in border-danger/30 bg-danger/5">
           <CardHeader>
-            <CardTitle className="text-base text-destructive">加载出现问题</CardTitle>
+            <CardTitle className="text-base text-danger">Something went wrong</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
         </Card>
       ) : null}
 
-      <Card>
+      <Card className="animate-fade-up animate-delay-1">
         <CardHeader>
-          <CardTitle>运行列表</CardTitle>
+          <CardTitle>Run list</CardTitle>
           <CardDescription>
-            按运行时间倒序，最多显示最近 500 次。较早的记录仍保留在磁盘上，可通过 CLI 或 API 调整 limit。
+            Newest first, up to the most recent 500 runs. Older runs remain on disk and are
+            available through the CLI or API.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center gap-2 py-12 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              正在读取历史记录…
+            <div role="status" aria-label="Loading history" className="space-y-3 py-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
             </div>
           ) : runs.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              暂无运行记录。完成一次导入后，将在此出现。
+              No runs yet. Finish an import and it will appear here.
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-border">
+            <div className="table-scroll overflow-x-auto rounded-lg border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>名称</TableHead>
-                    <TableHead>运行 ID</TableHead>
-                    <TableHead>时间</TableHead>
-                    <TableHead>抽取后端</TableHead>
-                    <TableHead>校验</TableHead>
-                    <TableHead className="text-right">源文件数</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Run ID</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Extraction</TableHead>
+                    <TableHead>Validation</TableHead>
+                    <TableHead className="text-right">Files</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -155,8 +161,10 @@ export default function HistoryPage() {
                             {label}
                           </div>
                         </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {run.run_id}
+                        <TableCell className="max-w-[160px] font-mono text-xs text-muted-foreground">
+                          <div className="truncate" title={run.run_id}>
+                            {run.run_id}
+                          </div>
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                           {formatDateTime(run.created_at)}
@@ -165,7 +173,7 @@ export default function HistoryPage() {
                         <TableCell className="text-sm text-muted-foreground">
                           {summarizeValidation(run)}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell className="text-right font-mono text-sm tabular-nums">
                           {run.document_count ?? "—"}
                         </TableCell>
                         <TableCell className="text-right">
@@ -176,10 +184,9 @@ export default function HistoryPage() {
                             onClick={() => void openRun(run.run_id)}
                           >
                             {openingId === run.run_id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              "打开"
-                            )}
+                              <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                            ) : null}
+                            Open
                           </Button>
                         </TableCell>
                       </TableRow>

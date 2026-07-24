@@ -3,7 +3,7 @@
 import { ChangeEvent, DragEvent, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
-import { ArrowRight, FilePlus2, ScanSearch, UploadCloud } from "lucide-react";
+import { ArrowRight, FilePlus2, ScanSearch, UploadCloud, X } from "lucide-react";
 
 import { PageIntro } from "@/components/deals/page-intro";
 import { StatusBadge } from "@/components/deals/status-badge";
@@ -76,7 +76,8 @@ function buildStagedUpload(
     uploadDate: new Date().toISOString(),
     detectedCategory: file.detectedCategory,
     status: file.status ?? "Connected",
-    pages: file.fileType === "PDF" ? 24 : 1,
+    // Page count is unknown until the backend parses the file — don't invent one.
+    pages: undefined,
     owner,
     supportedForParsing: isSupportedStructuredFile(file.name),
     file: file.file,
@@ -276,7 +277,12 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
         }
       />
 
-      <div className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-muted-foreground">
+      <div
+        key={activityNote}
+        role="status"
+        aria-live="polite"
+        className="animate-note-in rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-muted-foreground"
+      >
         {activityNote}
       </div>
 
@@ -334,7 +340,7 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
 
         <div className="space-y-6">
           <Card
-            className={`border-dashed transition ${dragActive ? "border-accent bg-white" : "border-border-strong"}`}
+            className={`border-dashed transition-[transform,border-color,background-color,box-shadow] duration-200 ${dragActive ? "scale-[1.005] border-accent bg-white ring-2 ring-accent/25" : "border-border-strong"}`}
             onDragEnter={(event) => {
               event.preventDefault();
               setDragActive(true);
@@ -342,6 +348,11 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
             onDragOver={(event) => event.preventDefault()}
             onDragLeave={(event) => {
               event.preventDefault();
+              // Only deactivate when the pointer actually leaves the dropzone —
+              // dragleave also fires when crossing child elements.
+              if (event.currentTarget.contains(event.relatedTarget as Node)) {
+                return;
+              }
               setDragActive(false);
             }}
             onDrop={handleDrop}
@@ -403,27 +414,52 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
                         <TableHead>Upload date</TableHead>
                         <TableHead>Detected category</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead className="text-right">
+                          <span className="sr-only">Remove</span>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {manifest.map((file) => (
-                        <TableRow key={file.id}>
-                          <TableCell className="font-medium">
-                            <div className="space-y-1">
-                              <div>{file.name}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {file.supportedForParsing ? "Real local parse supported" : "Mock placeholder for now"}
+                      {manifest.map((file) => {
+                        const isStaged = stagedUploads.some((staged) => staged.id === file.id);
+                        return (
+                          <TableRow key={file.id} className="animate-scale-in">
+                            <TableCell className="max-w-[260px] font-medium">
+                              <div className="space-y-1">
+                                <div className="truncate" title={file.name}>
+                                  {file.name}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {file.supportedForParsing ? "Parsed by the pipeline" : "Placeholder — not parsed"}
+                                </div>
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>{file.fileType}</TableCell>
-                          <TableCell>{formatDate(file.uploadDate)}</TableCell>
-                          <TableCell>{file.detectedCategory}</TableCell>
-                          <TableCell>
-                            <StatusBadge value={file.status} />
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                            </TableCell>
+                            <TableCell>{file.fileType}</TableCell>
+                            <TableCell>{formatDate(file.uploadDate)}</TableCell>
+                            <TableCell>{file.detectedCategory}</TableCell>
+                            <TableCell>
+                              <StatusBadge value={file.status} />
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {isStaged ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  aria-label={`Remove ${file.name}`}
+                                  onClick={() =>
+                                    setStagedUploads((current) =>
+                                      current.filter((staged) => staged.id !== file.id),
+                                    )
+                                  }
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              ) : null}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>

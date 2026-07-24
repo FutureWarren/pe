@@ -179,7 +179,8 @@ export interface SourceFile {
   uploadDate: string;
   detectedCategory: FileCategory;
   status: FileStatus;
-  pages: number;
+  /** Real page/sheet count when known; omit rather than fabricate. */
+  pages?: number;
   owner: string;
   supportedForParsing?: boolean;
 }

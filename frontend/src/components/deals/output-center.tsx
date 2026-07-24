@@ -24,15 +24,20 @@ interface OutputCenterViewProps {
 export function OutputCenterView({ deal }: OutputCenterViewProps) {
   const { regenerateOutput: regenerateOutputInStore } = useDealsStore();
   const [activityNote, setActivityNote] = useState(
-    "Export now generates a real databook-style CSV from the current local mapping state.",
+    "Exports are generated from the current mapping state of this deal.",
   );
   const outputs = deal.outputs;
+  const isBackendDeal = deal.processingEngine === "backend_python";
 
-  const regenerateOutput = (outputId: string) => {
-    regenerateOutputInStore(deal.id, outputId);
-    const refreshedOutput = outputs.find((output) => output.id === outputId);
+  const regenerateOutput = (output: OutputAsset) => {
+    regenerateOutputInStore(deal.id, output.id);
+    // Use the clicked output directly — reading from the render-time `outputs`
+    // closure reported on pre-update state. For backend deals the store only
+    // refreshes metadata, so say that rather than claiming a regeneration.
     setActivityNote(
-      `Regenerated ${refreshedOutput?.name ?? "selected output"} from the current local extraction and mapping state.`,
+      isBackendDeal
+        ? `Refreshed the status of ${output.name}. Re-run the import to regenerate backend outputs.`
+        : `Regenerated ${output.name} from the current local extraction and mapping state.`,
     );
   };
 
@@ -141,7 +146,7 @@ export function OutputCenterView({ deal }: OutputCenterViewProps) {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => regenerateOutput(output.id)}
+                  onClick={() => regenerateOutput(output)}
                 >
                   <RefreshCcw className="h-4 w-4" />
                   Regenerate

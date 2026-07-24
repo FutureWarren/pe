@@ -27,7 +27,7 @@ export function ReviewQueueView({ deal }: ReviewQueueViewProps) {
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [unresolvedOnly, setUnresolvedOnly] = useState(true);
   const [activityNote, setActivityNote] = useState(
-    "Review items now come from the actual local mapping and extraction state, not only from seeded mock text.",
+    "Review items reflect the current mapping and extraction state of this deal.",
   );
   const queueRef = useRef<HTMLDivElement>(null);
   const items = deal.exceptions;
@@ -64,7 +64,8 @@ export function ReviewQueueView({ deal }: ReviewQueueViewProps) {
     setUnresolvedOnly(true);
     setActivityNote(note);
     window.requestAnimationFrame(() => {
-      queueRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      queueRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
     });
   };
 
@@ -72,13 +73,12 @@ export function ReviewQueueView({ deal }: ReviewQueueViewProps) {
     workflow.blockingExceptions > 0 ? (
       <Button
         onClick={() => {
-          focusQueue(
-            criticalOpenCount > 0 ? "Critical" : "High",
-            "Focused the queue on unresolved high-severity items.",
-          );
+          // "All" + unresolved-only: a single-severity filter would hide other
+          // open blockers (e.g. picking Critical hid the open High items).
+          focusQueue("All", "Focused the queue on unresolved items.");
         }}
       >
-        Focus High-Severity Items
+        Focus Unresolved Items
         <ArrowRight className="h-4 w-4" />
       </Button>
     ) : workflow.openExceptions > 0 ? (
@@ -249,15 +249,6 @@ export function ReviewQueueView({ deal }: ReviewQueueViewProps) {
                   }
                 >
                   Approve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    updateItem(item.id, "Edited", `Marked ${item.affectedLineItem} as edited for manual adjustment.`)
-                  }
-                >
-                  Edit
                 </Button>
                 <Button
                   size="sm"

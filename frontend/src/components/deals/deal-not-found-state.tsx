@@ -1,14 +1,27 @@
+"use client";
+
 import Link from "next/link";
 
 import { ArrowLeft } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataroomSkeleton } from "@/components/ui/skeleton";
+import { useDealsStore } from "@/lib/deals-store";
 import { cn } from "@/lib/utils";
 
 export function DealNotFoundState() {
+  // Deals live in localStorage; until the store hydrates it only holds seeds,
+  // so a real deal would otherwise flash "Deal not found" on a hard refresh.
+  // This guard lives here so every caller gets it for free.
+  const { hydrated } = useDealsStore();
+
+  if (!hydrated) {
+    return <DataroomSkeleton />;
+  }
+
   return (
-    <Card className="mx-auto max-w-2xl">
+    <Card className="animate-scale-in mx-auto max-w-2xl">
       <CardHeader>
         <CardTitle>Deal not found</CardTitle>
         <CardDescription>
@@ -22,7 +35,7 @@ export function DealNotFoundState() {
         </p>
         <Link href="/" className={cn(buttonVariants({ variant: "secondary" }))}>
           <ArrowLeft className="h-4 w-4" />
-          Back to Deals
+          Back to Import
         </Link>
       </CardContent>
     </Card>

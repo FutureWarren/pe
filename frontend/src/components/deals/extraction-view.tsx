@@ -79,7 +79,8 @@ export function ExtractionView({ deal }: ExtractionViewProps) {
                   <div>
                     <p className="truncate text-sm font-semibold">{file.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {file.detectedCategory} • {file.pages} pages
+                      {file.detectedCategory}
+                      {file.pages ? ` • ${file.pages} page${file.pages === 1 ? "" : "s"}` : ""}
                     </p>
                   </div>
                   <StatusBadge value={file.status} />

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useDealById, useDealsStore } from "@/lib/deals-store";
+import { useDealById } from "@/lib/deals-store";
 import { buildBackendRunSubtitle, isBackendDealReadyForExport } from "@/lib/backend-pipeline";
 import { downloadDatabookCsv, downloadDatabookXlsx } from "@/lib/export";
 import { getDatabookReadiness } from "@/lib/formula-engine";
@@ -26,16 +26,13 @@ interface DataroomExportViewProps {
 
 export function DataroomExportView({ dealId }: DataroomExportViewProps) {
   const deal = useDealById(dealId);
-  const { hydrated } = useDealsStore();
   const backendRunSubtitle = deal ? buildBackendRunSubtitle(deal) : null;
+  const [downloading, setDownloading] = useState(false);
   const [activityNote, setActivityNote] = useState(
     "The export output is a workbook with source rows, understood rows, databook inputs, final metrics, traceability, and any open review items.",
   );
 
   if (!deal) {
-    if (!hydrated) {
-      return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
-    }
     return <DealNotFoundState />;
   }
 
@@ -86,6 +83,8 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
                 <Button
                   type="button"
                   onClick={async () => {
+                    if (downloading) return;
+                    setDownloading(true);
                     try {
                       await downloadDatabookXlsx(deal);
                       setActivityNote(
@@ -99,13 +98,15 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
                           ? `Download failed: ${err.message}`
                           : "Download failed. Please try again.",
                       );
+                    } finally {
+                      setDownloading(false);
                     }
                   }}
-                  disabled={!ready}
+                  disabled={!ready || downloading}
                   className="shadow-raised"
                 >
                   <Download className="h-4 w-4" />
-                  Download XLSX
+                  {downloading ? "Downloading…" : "Download XLSX"}
                 </Button>
                 {reviewEntryCount > 0 ? (
                   <Button asChild variant="secondary">
@@ -248,7 +249,12 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
         </Card>
       </div>
 
-      <div className="surface-panel animate-fade-up animate-delay-3 px-4 py-3 text-sm text-muted-foreground">
+      <div
+        key={activityNote}
+        role="status"
+        aria-live="polite"
+        className="surface-panel animate-note-in px-4 py-3 text-sm text-muted-foreground"
+      >
         {activityNote}
       </div>
 
@@ -330,7 +336,7 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
                 {metrics.map((metric) => (
                   <TableRow key={metric.key}>
                     <TableCell className="font-medium">{metric.label}</TableCell>
-                    <TableCell>{metric.formattedValue}</TableCell>
+                    <TableCell className="font-mono text-sm tabular-nums">{metric.formattedValue}</TableCell>
                     <TableCell>{metric.directOrDerived}</TableCell>
                     <TableCell>
                       <StatusBadge value={metric.status} />

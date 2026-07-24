@@ -881,9 +881,16 @@ function buildTraceabilityRecordsFromBackend(
   const sourceNameIndex = new Map(
     payload.source_manifest.documents.map((document) => [document.source_id, document.file_name]),
   );
-  const sourceMapIndex = new Map(
-    payload.source_map_entries.map((entry) => [`${entry.period_key}:${entry.line_item_code}`, entry]),
-  );
+  const sourceMapIndex = new Map<string, (typeof payload.source_map_entries)[number]>();
+  for (const entry of payload.source_map_entries) {
+    sourceMapIndex.set(`${entry.period_key}:${entry.line_item_code}`, entry);
+    // Margin metrics look up by outputLineKey ("gross_margin") while the source
+    // map is keyed by line_item_code ("gross_margin_pct") — register the
+    // suffix-stripped alias so margin rows resolve their traceability records.
+    if (entry.line_item_code.endsWith("_pct")) {
+      sourceMapIndex.set(`${entry.period_key}:${entry.line_item_code.replace(/_pct$/, "")}`, entry);
+    }
+  }
 
   return metrics.flatMap((metric) => {
     const entry = sourceMapIndex.get(`${metric.period}:${metric.outputLineKey}`);
@@ -897,7 +904,8 @@ function buildTraceabilityRecordsFromBackend(
       outputLineKey: metric.outputLineKey,
       outputMetricLabel: metric.label,
       outputMetricValue: metric.formattedValue,
-      sourceInputId: metric.sourceInputIds[index],
+      // locators can outnumber sourceInputIds — don't leak undefined.
+      sourceInputId: metric.sourceInputIds[index] ?? metric.sourceInputIds[0] ?? "",
       sourceFileId: entry.source_ids[index],
       sourceFileName:
         sourceNameIndex.get(entry.source_ids[index] ?? "") ?? "Unknown source",
@@ -1020,7 +1028,7 @@ function buildExceptionFromAnalystRow(
     issueClass: isCoreMetricBlocker ? "real_core_blocker" : "non_blocking_mapping_bug",
     severity:
       item.severity === "Critical"
-        ? "High"
+        ? "Critical"
         : item.severity === "Review"
           ? "Medium"
           : "Low",
@@ -1480,7 +1488,11 @@ function formatBackendMetricValue(value: number | null, format: DatabookMetricRe
   }
 
   if (format === "percentage") {
-    return `${(value * 100).toFixed(1)}%`;
+    // Derived margins arrive as fractions (0.45 → 45%), but provided percent
+    // metrics can arrive already expressed in points (45 → 45%). Multiplying
+    // blindly rendered those as "4500.0%".
+    const percent = Math.abs(value) > 1.5 ? value : value * 100;
+    return `${percent.toFixed(1)}%`;
   }
 
   if (format === "number") {
@@ -1500,7 +1512,8 @@ function formatCanonicalMetricValue(metric: FinalMetricRecord) {
   }
 
   if (metric.unit === "%") {
-    return `${(metric.finalValue * 100).toFixed(1)}%`;
+    const percent = Math.abs(metric.finalValue) > 1.5 ? metric.finalValue : metric.finalValue * 100;
+    return `${percent.toFixed(1)}%`;
   }
 
   if (metric.unit === "count") {

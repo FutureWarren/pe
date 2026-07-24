@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 
-import { ArrowRight, Combine, Link2, ShieldCheck, Sparkles, Split } from "lucide-react";
+import { ArrowRight, Link2, ShieldCheck } from "lucide-react";
 
 import { PageIntro } from "@/components/deals/page-intro";
 import { StatusBadge } from "@/components/deals/status-badge";
@@ -27,7 +27,7 @@ export function MappingStudioView({ deal }: MappingStudioViewProps) {
   const { updateMappingRow } = useDealsStore();
   const [activeRowId, setActiveRowId] = useState(deal.mappingRows[0]?.id ?? "");
   const [activityNote, setActivityNote] = useState(
-    "Mapping changes now write back into the local workflow store, so review and outputs update from the same row state.",
+    "Mapping changes update review items and outputs from the same row state.",
   );
   const rows = deal.mappingRows;
   const selectedRowId = rows.some((row) => row.id === activeRowId) ? activeRowId : rows[0]?.id ?? "";
@@ -109,73 +109,21 @@ export function MappingStudioView({ deal }: MappingStudioViewProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Action rail</CardTitle>
+          <CardTitle>Active row</CardTitle>
           <CardDescription>
-            Keep review actions concrete and visible rather than hidden in automated output.
+            Select a row below, then approve it or flag it for review directly in the table.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-3">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!activeRow}
-              onClick={() =>
-                activeRow
-                  ? updateRow(
-                      activeRow.id,
-                      (row) => ({
-                        ...row,
-                        status: "Needs Review",
-                        reasoning: `${row.reasoning} Split-line review requested.`,
-                      }),
-                      `Split line item requested for ${activeRow.rawLineItemLabel}.`,
-                    )
-                  : null
-              }
-            >
-              <Split className="h-4 w-4" />
-              Split a line item
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!activeRow}
-              onClick={() =>
-                activeRow
-                  ? updateRow(
-                      activeRow.id,
-                      (row) => ({
-                        ...row,
-                        status: "Approved",
-                        reasoning: `${row.reasoning} Duplicate merge confirmed in mock flow.`,
-                      }),
-                      `Duplicate rows merged around ${activeRow.rawLineItemLabel}.`,
-                    )
-                  : null
-              }
-            >
-              <Combine className="h-4 w-4" />
-              Merge duplicates
-            </Button>
-            <Button
-              size="sm"
-              disabled={!activeRow}
-              onClick={() =>
-                activeRow
-                  ? updateRow(
-                      activeRow.id,
-                      (row) => ({ ...row, status: "Rule Applied" }),
-                      `Mock rule saved for future rows using the ${activeRow.mappedCategory} mapping.`,
-                    )
-                  : null
-              }
-            >
-              <Sparkles className="h-4 w-4" />
-              Apply rule to future rows
-            </Button>
-          </div>
-          <div className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-muted-foreground">
+          {/* The former "Split / Merge / Apply rule" action rail was removed: the
+              buttons only relabeled row status (no split/merge/rule logic exists),
+              which misled users into thinking real actions had happened. */}
+          <div
+            key={activityNote}
+            role="status"
+            aria-live="polite"
+            className="animate-note-in rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-muted-foreground"
+          >
             Active row: <span className="font-semibold text-foreground">{activeRow?.rawLineItemLabel}</span>
             {" • "}
             {activityNote}
@@ -183,26 +131,9 @@ export function MappingStudioView({ deal }: MappingStudioViewProps) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[2.2fr_1.3fr_1.7fr]">
-        <Card className="border-border bg-white/70">
-          <CardHeader>
-            <CardDescription>Source line items</CardDescription>
-            <CardTitle className="text-lg">Raw labels, values, and period context</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="border-border bg-white/70">
-          <CardHeader>
-            <CardDescription>Mapped standard tags</CardDescription>
-            <CardTitle className="text-lg">Explicit databook classification</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="border-border bg-white/70">
-          <CardHeader>
-            <CardDescription>Traceability and reasoning</CardDescription>
-            <CardTitle className="text-lg">Source link visibility and review status</CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
+      {/* The decorative three-card "column captions" row was removed — the table
+          below scrolls independently, so the captions never lined up with the
+          actual columns and cost ~120px of vertical space. */}
 
       <Card className="overflow-hidden">
         <CardContent className="table-scroll mt-0 overflow-x-auto p-0">
@@ -230,14 +161,25 @@ export function MappingStudioView({ deal }: MappingStudioViewProps) {
                   className="cursor-pointer"
                   onClick={() => setActiveRowId(row.id)}
                 >
-                  <TableCell className="min-w-52 font-medium">
-                    {getFileName(deal, row.sourceFileId)}
+                  <TableCell className="min-w-52 max-w-[260px] font-medium">
+                    <div className="truncate" title={getFileName(deal, row.sourceFileId)}>
+                      {getFileName(deal, row.sourceFileId)}
+                    </div>
                   </TableCell>
                   <TableCell className="min-w-40 text-muted-foreground">{row.sourceLocator}</TableCell>
                   <TableCell className="min-w-56">
                     <div className="space-y-1">
-                      <p className="font-semibold text-foreground">{row.rawLineItemLabel}</p>
-                      <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                      {/* A real button so keyboard users can change which row the
+                          detail panel targets (row-level onClick is mouse-only). */}
+                      <button
+                        type="button"
+                        onClick={() => setActiveRowId(row.id)}
+                        aria-pressed={row.id === activeRowId}
+                        className="text-left font-semibold text-foreground"
+                      >
+                        {row.rawLineItemLabel}
+                      </button>
+                      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                         Selected for review
                       </p>
                     </div>
@@ -247,6 +189,7 @@ export function MappingStudioView({ deal }: MappingStudioViewProps) {
                   <TableCell className="min-w-44">
                     <Select
                       value={row.mappedCategory}
+                      aria-label={`Mapped category for ${row.rawLineItemLabel}`}
                       onChange={(event) =>
                         updateRow(
                           row.id,

@@ -31,9 +31,19 @@ export function StatusBadge({ value }: StatusBadgeProps) {
     normalized.includes("review") ||
     normalized.includes("warning") ||
     normalized.includes("deferred") ||
-    normalized.includes("partial")
+    normalized.includes("partial") ||
+    normalized.includes("skipped") ||
+    normalized.includes("unsupported")
   ) {
     return <Badge tone="warning">{value}</Badge>;
+  }
+
+  // Confidence badges ("96% confidence") should signal their level rather than
+  // all rendering the same neutral tone.
+  const confidenceMatch = normalized.match(/^(\d{1,3})%\s*confidence/);
+  if (confidenceMatch) {
+    const level = Number(confidenceMatch[1]);
+    return <Badge tone={level >= 85 ? "success" : level >= 65 ? "warning" : "danger"}>{value}</Badge>;
   }
 
   if (

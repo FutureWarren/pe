@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { LoaderCircle, Sparkles } from "lucide-react";
 
@@ -31,7 +31,9 @@ function formatMetricValue(record: FinalMetricRecord | undefined) {
   }
 
   if (record.unit === "%") {
-    return `${(record.finalValue * 100).toFixed(1)}%`;
+    // Fractions (0.45) and already-in-points values (45) both mean 45%.
+    const percent = Math.abs(record.finalValue) > 1.5 ? record.finalValue : record.finalValue * 100;
+    return `${percent.toFixed(1)}%`;
   }
   if (record.unit === "count") {
     return formatInteger(record.finalValue);
@@ -86,6 +88,7 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
   const [answer, setAnswer] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const askSeqRef = useRef(0);
 
   const metricsByMetric = useMemo(() => {
     const index = new Map<string, Map<string, FinalMetricRecord>>();
@@ -121,6 +124,10 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
       return;
     }
 
+    // Sequence guard: switching metrics fires a new request while older ones
+    // may still be in flight — a slow older response must not overwrite the
+    // answer for the newly selected metric/question.
+    const seq = ++askSeqRef.current;
     setActiveQuestion(question);
     setLoading(true);
     setError(null);
@@ -132,11 +139,17 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
         periodKey: selectedRecord.periodKey,
         question,
       });
-      setAnswer(response.answer);
+      if (askSeqRef.current === seq) {
+        setAnswer(response.answer);
+      }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Unable to load the explanation.");
+      if (askSeqRef.current === seq) {
+        setError(nextError instanceof Error ? nextError.message : "Unable to load the explanation.");
+      }
     } finally {
-      setLoading(false);
+      if (askSeqRef.current === seq) {
+        setLoading(false);
+      }
     }
   }
 
@@ -163,7 +176,9 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.35fr_0.95fr]">
+    // The metrics table needs ~950px with a few periods; splitting at xl left it
+    // permanently horizontal-scrolling on 1280-1440px laptops. Stack until 2xl.
+    <div className="grid gap-6 2xl:grid-cols-[1.35fr_0.95fr]">
       <Card className="lift-card animate-fade-up animate-delay-4 bg-white/[0.88]">
         <CardHeader>
           <CardTitle>Model input preview</CardTitle>
@@ -209,8 +224,9 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
                             <button
                               type="button"
                               onClick={() => setSelectedKey(cellKey)}
+                              aria-pressed={selected}
                               className={cn(
-                                "min-w-[92px] rounded-lg border px-2 py-1 text-left text-sm transition",
+                                "min-w-[92px] rounded-lg border px-2 py-1 text-right font-mono text-sm tabular-nums transition-[border-color,background-color,box-shadow] duration-200",
                                 selected
                                   ? "border-accent bg-accent/10 text-foreground shadow-sm"
                                   : "border-border bg-background/80 text-foreground hover:border-accent/40 hover:bg-accent/5",
@@ -219,7 +235,10 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
                               {formatMetricValue(record)}
                             </button>
                           ) : (
-                            <span className="text-sm text-muted-foreground">&nbsp;</span>
+                            /* Same box metrics as a valued cell so sparse rows don't jitter. */
+                            <span className="inline-block min-w-[92px] px-2 py-1 text-right font-mono text-sm text-muted-foreground">
+                              —
+                            </span>
                           )}
                         </TableCell>
                       );
@@ -301,6 +320,8 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
                   type="button"
                   size="sm"
                   variant={activeQuestion === "summary" ? "default" : "secondary"}
+                  aria-pressed={activeQuestion === "summary"}
+                  disabled={loading}
                   onClick={() => void ask("summary")}
                 >
                   Summary
@@ -311,6 +332,8 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
                     type="button"
                     size="sm"
                     variant={activeQuestion === item.question ? "default" : "secondary"}
+                    aria-pressed={activeQuestion === item.question}
+                    disabled={loading}
                     onClick={() => void ask(item.question)}
                   >
                     {item.label}
@@ -323,12 +346,12 @@ export function ModelInputWorkbench({ deal }: ModelInputWorkbenchProps) {
                   Analyst explanation
                 </div>
                 {loading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />
                     Loading grounded explanation...
                   </div>
                 ) : error ? (
-                  <div className="text-sm text-destructive">{error}</div>
+                  <div role="alert" className="text-sm text-danger">{error}</div>
                 ) : (
                   <div className="space-y-3 text-sm leading-7 text-foreground">
                     <p>{answer || "Select a number to load an explanation."}</p>

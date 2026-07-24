@@ -3,7 +3,7 @@
 import { ChangeEvent, DragEvent, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { ArrowRight, FilePlus2, UploadCloud } from "lucide-react";
+import { ArrowRight, FilePlus2, UploadCloud, X } from "lucide-react";
 
 import { DataroomStepStrip } from "@/components/dataroom/dataroom-step-strip";
 import { StatusBadge } from "@/components/deals/status-badge";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useDealsStore } from "@/lib/deals-store";
 import { IntakeUploadInput } from "@/lib/local-pipeline";
+import { useCountUp } from "@/lib/use-count-up";
 import { FileCategory } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -73,20 +74,28 @@ export function DataroomHome() {
 
   const supportedCount = files.filter((file) => isBackendSupportedFile(file.name)).length;
   const unsupportedCount = files.length - supportedCount;
-  const pendingUploads = files.map(
-    (file): IntakeUploadInput => ({
-      file: file.file,
-      name: file.name,
-      fileType: file.fileType,
-      detectedCategory: file.category,
-      uploadDate: file.uploadedAt,
-      status: "Connected",
-    }),
-  );
+  // Only supported files are sent — the backend rejects the whole import (415)
+  // if an unsupported type is included, so one stray .png must not sink 20
+  // good files. Unsupported rows stay listed and are explicitly "skipped".
+  const pendingUploads = files
+    .filter((file) => isBackendSupportedFile(file.name))
+    .map(
+      (file): IntakeUploadInput => ({
+        file: file.file,
+        name: file.name,
+        fileType: file.fileType,
+        detectedCategory: file.category,
+        uploadDate: file.uploadedAt,
+        status: "Connected",
+      }),
+    );
   const detectedTypes = useMemo(
     () => Array.from(new Set(files.map((file) => file.fileType))),
     [files],
   );
+  const stagedDisplay = useCountUp(files.length);
+  const readyDisplay = useCountUp(supportedCount);
+  const unsupportedDisplay = useCountUp(unsupportedCount);
 
   const addFiles = (selectedFiles: File[]) => {
     setErrorMessage(null);
@@ -96,6 +105,10 @@ export function DataroomHome() {
   const handleSelection = (event: ChangeEvent<HTMLInputElement>) => {
     addFiles(Array.from(event.target.files ?? []));
     event.target.value = "";
+  };
+
+  const removeFile = (id: string) => {
+    setFiles((current) => current.filter((file) => file.id !== id));
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -202,7 +215,7 @@ export function DataroomHome() {
 
       <div className="grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
         <Card
-          className={`lift-card data-grid animate-fade-up animate-delay-3 border-dashed ${dragActive ? "border-accent bg-white shadow-[0_30px_70px_rgba(31,57,80,0.12)]" : "border-border-strong bg-white/[0.84]"}`}
+          className={`lift-card data-grid animate-fade-up animate-delay-3 border-dashed ${dragActive ? "scale-[1.005] border-accent bg-white ring-2 ring-accent/25" : "border-border-strong bg-white/[0.84]"}`}
           onDragEnter={(event) => {
             event.preventDefault();
             setDragActive(true);
@@ -210,13 +223,20 @@ export function DataroomHome() {
           onDragOver={(event) => event.preventDefault()}
           onDragLeave={(event) => {
             event.preventDefault();
+            // dragleave fires when crossing child elements; only deactivate
+            // when the pointer actually left the dropzone (prevents strobing).
+            if (event.currentTarget.contains(event.relatedTarget as Node)) {
+              return;
+            }
             setDragActive(false);
           }}
           onDrop={handleDrop}
         >
           <CardContent className="relative mt-0 flex flex-col items-center justify-center gap-5 py-14 text-center">
             <div className="absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(31,57,80,0.2),transparent)]" />
-            <div className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-[1.4rem] border border-border bg-white/[0.92] shadow-[0_20px_36px_rgba(19,32,45,0.08)]">
+            <div
+              className={`flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-3xl border border-border bg-white/[0.92] shadow-[0_20px_36px_rgba(19,32,45,0.08)] transition-transform duration-200 motion-reduce:transform-none ${dragActive ? "-translate-y-1" : ""}`}
+            >
               <UploadCloud className="h-7 w-7 text-accent" />
             </div>
             <div className="space-y-2">
@@ -231,8 +251,12 @@ export function DataroomHome() {
               <Button onClick={() => fileInputRef.current?.click()} variant="secondary">
                 Select files
               </Button>
-              <Button onClick={startProcessing} disabled={files.length === 0 || isProcessing} className="shadow-raised">
-                {isProcessing ? "Processing files..." : "Process Files"}
+              <Button onClick={startProcessing} disabled={supportedCount === 0 || isProcessing} className="shadow-raised">
+                {isProcessing
+                  ? "Processing files..."
+                  : unsupportedCount > 0
+                    ? `Process ${supportedCount} Supported File${supportedCount === 1 ? "" : "s"}`
+                    : "Process Files"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
@@ -261,15 +285,17 @@ export function DataroomHome() {
             <div className="grid w-full max-w-2xl gap-3 pt-2 sm:grid-cols-3">
               <div className="metric-panel px-4 py-3">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Files staged</div>
-                <div className="mt-2 text-2xl font-semibold">{files.length}</div>
+                <div className="mt-2 text-2xl font-semibold tabular-nums">{stagedDisplay}</div>
               </div>
               <div className="metric-panel px-4 py-3">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Ready for backend</div>
-                <div className="mt-2 text-2xl font-semibold">{supportedCount}</div>
+                <div className="mt-2 text-2xl font-semibold tabular-nums">{readyDisplay}</div>
               </div>
               <div className="metric-panel px-4 py-3">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Unsupported</div>
-                <div className="mt-2 text-2xl font-semibold">{unsupportedCount}</div>
+                <div className={`mt-2 text-2xl font-semibold tabular-nums ${unsupportedCount > 0 ? "text-warning" : ""}`}>
+                  {unsupportedDisplay}
+                </div>
               </div>
             </div>
           </CardContent>
@@ -327,12 +353,15 @@ export function DataroomHome() {
       </div>
 
       {files.length > 0 ? (
-        <Card className="lift-card animate-fade-up animate-delay-5 bg-white/[0.88]">
+        <Card className="lift-card animate-scale-in bg-white/[0.88]">
           <CardHeader>
             <CardTitle>Imported files</CardTitle>
             <CardDescription>
               {supportedCount} of {files.length} files are supported by the Python processing
               pipeline. Detected types: {detectedTypes.join(", ")}.
+              {unsupportedCount > 0
+                ? ` ${unsupportedCount} unsupported file${unsupportedCount === 1 ? "" : "s"} will be skipped.`
+                : ""}
             </CardDescription>
           </CardHeader>
           <CardContent className="table-scroll mt-0 overflow-x-auto">
@@ -344,21 +373,39 @@ export function DataroomHome() {
                   <TableHead>Detected category</TableHead>
                   <TableHead>Uploaded</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="text-right">
+                    <span className="sr-only">Remove</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {files.map((file) => (
-                  <TableRow key={file.id}>
-                    <TableCell className="font-medium">{file.name}</TableCell>
+                  <TableRow key={file.id} className="animate-scale-in">
+                    <TableCell className="max-w-[280px] font-medium">
+                      <div className="truncate" title={file.name}>
+                        {file.name}
+                      </div>
+                    </TableCell>
                     <TableCell>{file.fileType}</TableCell>
                     <TableCell>{file.category}</TableCell>
                     <TableCell>{formatDate(file.uploadedAt)}</TableCell>
                     <TableCell>
                       <StatusBadge
                         value={
-                          isBackendSupportedFile(file.name) ? "Ready to process" : "Unsupported"
+                          isBackendSupportedFile(file.name) ? "Ready to process" : "Skipped"
                         }
                       />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => removeFile(file.id)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

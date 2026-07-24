@@ -1331,7 +1331,7 @@ function buildPlaceholderUpload(input: IntakeUploadInput) {
     sourceFile: buildSourceFile(input, {
       status: input.status ?? "Connected",
       supportedForParsing: false,
-      pages: input.fileType === "PDF" ? 24 : 1,
+      pages: undefined,
     }),
     extractedItems: [] as ExtractedItem[],
     mappingRows: [] as MappingRow[],

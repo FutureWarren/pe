@@ -19,12 +19,9 @@ interface DataroomReviewViewProps {
 
 export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
   const deal = useDealById(dealId);
-  const { updateReviewItemStatus, hydrated } = useDealsStore();
+  const { updateReviewItemStatus } = useDealsStore();
 
   if (!deal) {
-    if (!hydrated) {
-      return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
-    }
     return <DealNotFoundState />;
   }
 
@@ -276,14 +273,9 @@ export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
                     >
                       Mark reviewed
                     </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => updateReviewItemStatus(deal.id, item.id, "Deferred")}
-                    >
-                      Keep open
-                    </Button>
+                    {/* Intentionally NOT a status write: setting "Deferred" here
+                        hid the card (only Open items render) and silently removed
+                        it from the blocking-count that gates export. */}
                   </div>
                 </CardContent>
               </Card>
