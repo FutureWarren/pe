@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230F2D4A'/%3E%3Ctext x='16' y='21' font-size='13' fill='%23fff' text-anchor='middle' font-family='serif'%3E%E6%9D%BE%3C/text%3E%3C/svg%3E">
 <title>松沪律所 · AI 响应助手控制台</title>
 <style>
 /* ================= 设计令牌（规范 v2.0 §1） ================= */
@@ -11,7 +12,7 @@
   color-scheme: light;
   --bg: #F7F5F0; --card: #FFFFFF; --card-2: #F2EFE9;
   --line: #E7E2D8; --line-strong: #D9D2C3;
-  --ink-1: #1C2B3A; --ink-2: #4C5A68; --ink-3: #8A939D;
+  --ink-1: #1C2B3A; --ink-2: #4C5A68; --ink-3: #6E7883;
   --brand: #1E4E79; --brand-deep: #0F2D4A; --brand-tint: #EAF1F8;
   --brand-btn: #1E4E79; --brand-btn-ink: #FFFFFF;
   --accent: #8A6D1E; --accent-line: #C2A65C;
@@ -25,6 +26,7 @@
   --shadow-2: 0 2px 8px rgba(16,32,54,.08);
   --shadow-3: 0 12px 32px rgba(15,45,74,.18);
   --topbar-ink: #FFFFFF; --topbar-bg: #0F2D4A;
+  --topbar-line: rgba(194,166,92,.6);
   --capsule-bg: rgba(255,255,255,.12); --capsule-ink: #FFFFFF;
 }
 @media (prefers-color-scheme: dark) {
@@ -32,7 +34,7 @@
     color-scheme: dark;
     --bg: #12171E; --card: #1A2129; --card-2: #212A34;
     --line: #2C3642; --line-strong: #3A4654;
-    --ink-1: #EDF0F4; --ink-2: #A7B1BC; --ink-3: #6F7A86;
+    --ink-1: #EDF0F4; --ink-2: #A7B1BC; --ink-3: #8B96A4;
     --brand: #8FB3DE; --brand-deep: #1A2129; --brand-tint: #223245;
     --brand-btn: #33628F; --brand-btn-ink: #F2F7FC;
     --accent: #C9AC63; --accent-line: #C9AC63;
@@ -41,9 +43,10 @@
     --bad: #E5726C; --bad-bg: #3A2422;
     --chip-bg: #232D38; --scrim: rgba(0,0,0,.55);
     --s1: #3987E5; --s2: #D95926; --s3: #199E70;
-    --shadow-1: none; --shadow-2: none;
+    --shadow-1: none; --shadow-2: 0 0 #0000;
     --shadow-3: 0 8px 24px rgba(0,0,0,.4);
     --topbar-ink: var(--ink-1); --topbar-bg: var(--card);
+    --topbar-line: var(--line);
     --capsule-bg: #232D38; --capsule-ink: var(--ink-1);
   }
 }
@@ -117,6 +120,9 @@ button:disabled { opacity: .4; cursor: default; }
   max-width: 46vw; overflow: hidden; text-overflow: ellipsis;
 }
 .chip { background: var(--chip-bg); color: var(--ink-2); }
+.chip .tx, .badge .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.badge, button.time { position: relative; }
+button.badge::after, button.time::after { content: ""; position: absolute; inset: -8px; }
 .badge.ok { background: var(--ok-bg); color: var(--ok); }
 .badge.warn { background: var(--warn-bg); color: var(--warn); }
 .badge.bad { background: var(--bad-bg); color: var(--bad); font-weight: 600; }
@@ -128,11 +134,9 @@ button:disabled { opacity: .4; cursor: default; }
 header#topbar {
   position: sticky; top: 0; z-index: 6;
   background: var(--topbar-bg); color: var(--topbar-ink);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--topbar-line);
   height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 16px;
 }
-header#topbar { box-shadow: inset 0 -1px 0 rgba(194,166,92,.6); }
-@media (prefers-color-scheme: dark) { header#topbar { box-shadow: none; } }
 header#topbar .word { font-size: 16px; }
 header#topbar .app { font-size: 13px; opacity: .75; display: flex; align-items: center; gap: 8px; }
 header#topbar .app::before { content: ""; width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .6; }
@@ -176,13 +180,13 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 16px 32px; }
 .overview { font-size: 15px; color: var(--ink-2); margin: 4px 0 12px; }
 
 .empty { text-align: center; padding: 48px 24px; color: var(--ink-3); }
-.empty svg { width: 40px; height: 40px; color: var(--ink-3); }
+.empty svg { width: 40px; height: 40px; color: var(--ink-3); stroke-width: 1.5; }
 .empty .t1 { font-size: 15px; color: var(--ink-2); margin-top: 12px; }
 .empty .t2 { font-size: 13px; margin-top: 6px; line-height: 1.6; }
 
 .skel .bar { background: var(--card-2); border-radius: 6px; height: 14px; margin: 8px 0; }
 .err-card { text-align: center; padding: 40px 24px; }
-.err-card svg { width: 40px; height: 40px; color: var(--ink-3); }
+.err-card svg { width: 40px; height: 40px; color: var(--ink-3); stroke-width: 1.5; }
 .err-card p { margin: 12px 0 16px; color: var(--ink-2); font-size: 15px; }
 
 /* ================= 底部导航 / 桌面侧栏 ================= */
@@ -204,6 +208,7 @@ nav#nav .navbtn .nbadge {
   border-radius: var(--r-full); min-width: 16px; height: 16px; line-height: 16px;
   padding: 0 4px; text-align: center; box-shadow: 0 0 0 1.5px var(--card);
 }
+@media (prefers-color-scheme: dark) { nav#nav .navbtn .nbadge { color: #12171E; } }
 
 /* ================= 看板 ================= */
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -234,7 +239,7 @@ nav#nav .navbtn .nbadge {
   font-size: 16px; line-height: 1.7; margin: 8px 0 6px;
   white-space: pre-wrap; word-break: break-word;
 }
-@media (prefers-color-scheme: dark) { .quote { border-left-color: var(--brand-btn); } }
+@media (prefers-color-scheme: dark) { .quote { border-left-color: var(--brand-tint); } }
 .quote.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .fb-row { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 6px; }
 .fb-note { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
@@ -244,7 +249,7 @@ nav#nav .navbtn .nbadge {
 .field label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
 .field label .req { color: var(--bad); }
 .field input, .field select, .field textarea {
-  font: inherit; font-size: 16px; width: 100%; height: 48px; padding: 0 14px;
+  font: inherit; font-size: 16px; width: 100%; height: 44px; padding: 0 14px;
   border-radius: var(--r-2); border: 1px solid var(--line); background: var(--bg); color: var(--ink-1);
 }
 .field textarea { height: auto; min-height: 84px; padding: 10px 14px; resize: vertical; }
@@ -255,6 +260,8 @@ nav#nav .navbtn .nbadge {
 .field.error input { border-color: var(--bad); }
 .field.error .help { color: var(--bad); }
 .field input[readonly] { background: var(--chip-bg); color: var(--ink-2); }
+#sheet .field input, #sheet .field select { height: 48px; }
+.btn-danger { color: var(--bad); }
 
 /* ================= 开关 ================= */
 .switch { position: relative; width: 46px; height: 28px; flex: none; }
@@ -266,6 +273,7 @@ nav#nav .navbtn .nbadge {
 }
 .switch input:checked + span { background: var(--ok); }
 .switch input:checked + span::after { left: 20px; }
+.switch input:focus-visible + span { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 /* ================= Sheet / Modal ================= */
 #sheetWrap { position: fixed; inset: 0; z-index: 30; display: none; }
@@ -348,9 +356,11 @@ nav#nav .navbtn .nbadge {
   nav#nav .navbtn svg { width: 20px; height: 20px; }
   nav#nav .navbtn.on { background: var(--brand-tint); color: var(--brand); }
   nav#nav .navbtn .nbadge { position: static; margin-left: auto; box-shadow: none; }
+  .tile .n { font-size: 32px; }
+  #toast .undo { color: #8FB3DE; }
   nav#nav .nav-foot { display: block; margin-top: auto; padding: 0 12px; }
   nav#nav .nav-foot .capsule { margin: 0 0 10px; background: var(--chip-bg); color: var(--ink-1); cursor: pointer; }
-  main { padding: 28px 32px 48px; max-width: 812px; }
+  main { padding: 28px 32px 48px; max-width: 780px; }
   .page-title {
     display: block; font-size: 17px; font-weight: 600; margin-bottom: 16px;
     padding-top: 12px; border-top: 2px solid var(--accent-line);
@@ -365,7 +375,7 @@ nav#nav .navbtn .nbadge {
   .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); }
 }
 @media (min-width: 1200px) {
-  main { max-width: 1080px; }
+  main { max-width: 1024px; }
   .tiles { grid-template-columns: repeat(5, 1fr); }
   .board-split { display: grid; grid-template-columns: 7fr 5fr; gap: 10px; align-items: start; }
   .board-split .tiles { grid-template-columns: 1fr 1fr; }
@@ -402,8 +412,8 @@ nav#nav .navbtn .nbadge {
 <!-- ================= 登录 ================= -->
 <div id="login" hidden>
   <div class="box">
-    <div class="goldline"></div>
     <span class="seal lg serif">松沪</span>
+    <div class="goldline" style="margin-top:16px;margin-bottom:0"></div>
     <div class="firm serif">上海松沪律师事务所</div>
     <div class="app">AI 响应助手 · 管理控制台</div>
     <form onsubmit="return doLogin(event)">
@@ -416,7 +426,7 @@ nav#nav .navbtn .nbadge {
             <svg class="ico" id="eyeIco"><use href="#i-eye"/></svg>
           </button>
         </div>
-        <div class="help">令牌（X-Admin-Token）由系统管理员在部署时提供，输入一次即可，下次自动进入</div>
+        <div class="help">令牌由系统管理员在部署时提供，输入一次即可，下次自动进入</div>
       </div>
       <div class="errline" id="loginErr"></div>
       <button type="submit" class="btn-primary xl" id="loginBtn">进入控制台</button>
@@ -504,14 +514,14 @@ nav#nav .navbtn .nbadge {
 
 <div id="sheetWrap">
   <div class="scrim" onclick="closeSheet()"></div>
-  <div id="sheet" role="dialog" aria-modal="true">
+  <div id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1">
     <div class="grab"></div>
     <button class="close" onclick="closeSheet()" aria-label="关闭"><svg class="ico"><use href="#i-x"/></svg></button>
     <div id="sheetBody"></div>
   </div>
 </div>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 "use strict";
@@ -526,10 +536,16 @@ const ZH = {
 const zh = (map, key) => (map && map[key]) || "—";
 const ico = (name, cls) => `<svg class="ico ${cls || ""}"><use href="#i-${name}"/></svg>`;
 
-let token = localStorage.getItem("admin_token") || "";
+/* localStorage 在部分 WebView/隐私模式下会抛异常：全部经安全封装，失败退内存 */
+const _mem = {};
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return _mem[k] ?? null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} _mem[k] = v; }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} delete _mem[k]; }
+
+let token = lsGet("admin_token") || "";
 let tab = "todo", logView = "replies", groupsCache = [], loadedOnce = {};
-let lastSuccess = null, offline = false;
-const expanded = new Set();
+let lastSuccess = null, offline = false, logReq = 0;
+const expanded = new Set(), lastSig = {}, repliesFb = {};
 
 /* ============ 基础设施 ============ */
 async function api(path, opts = {}) {
@@ -618,25 +634,78 @@ function toast(msg, ok = true, undo = null) {
   el.innerHTML = ico(ok ? "check" : "alert") + `<span>${esc(msg)}</span>` +
     (undo ? `<button class="undo" onclick="runUndo()">撤销</button>` : "");
   el.classList.add("show");
-  toastTimer = setTimeout(() => el.classList.remove("show"), undo ? 5000 : 2500);
+  toastTimer = setTimeout(() => el.classList.remove("show"), undo ? 8000 : 2500);
 }
 async function runUndo() {
   document.getElementById("toast").classList.remove("show");
   if (undoFn) { const f = undoFn; undoFn = null; try { await f(); } catch (e) { toast("操作失败，请重试", false); } }
 }
 
-/* ============ Sheet ============ */
+/* ============ Sheet：焦点圈禁 + 还焦 + 脏表单保护 ============ */
+let sheetDirty = false, sheetReturnFocus = null;
+function sheetOpen() { return document.getElementById("sheetWrap").classList.contains("show"); }
+function _setInert(on) {
+  for (const id of ["topbar", "nav", "banner"]) {
+    const el = document.getElementById(id);
+    if (el) try { el.inert = on; } catch (e) {}
+  }
+  const m = document.querySelector("main");
+  if (m) try { m.inert = on; } catch (e) {}
+}
 function openSheet(html, wide = false) {
-  document.getElementById("sheetBody").innerHTML = html;
+  sheetDirty = false;
+  sheetReturnFocus = document.activeElement;
+  const body = document.getElementById("sheetBody");
+  body.innerHTML = html;
+  const h2 = body.querySelector("h2");
+  if (h2) h2.id = "sheetTitle";
   document.getElementById("sheet").classList.toggle("wide", wide);
   document.getElementById("sheetWrap").classList.add("show");
   document.body.style.overflow = "hidden";
+  _setInert(true);
+  document.getElementById("sheet").focus();
 }
+/* 有未保存输入时，误触遮罩/Esc 先确认再关（P0 级防丢单） */
 function closeSheet() {
+  if (sheetDirty && !document.getElementById("discardBar")) {
+    const bar = document.createElement("div");
+    bar.id = "discardBar";
+    bar.style.cssText = "display:flex;align-items:center;gap:10px;margin-top:14px;" +
+      "padding:12px 14px;background:var(--warn-bg);border-radius:10px";
+    bar.innerHTML = `<span style="font-size:14px;color:var(--warn)">放弃已填写的内容？</span>
+      <button class="btn-text muted" style="margin-left:auto;min-height:36px"
+        onclick="this.parentNode.remove()">继续填写</button>
+      <button class="btn-text" style="min-height:36px;color:var(--bad)"
+        onclick="forceCloseSheet()">放弃</button>`;
+    document.getElementById("sheetBody").appendChild(bar);
+    bar.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  forceCloseSheet();
+}
+function forceCloseSheet() {
+  sheetDirty = false;
   document.getElementById("sheetWrap").classList.remove("show");
   document.body.style.overflow = "";
+  _setInert(false);
+  if (sheetReturnFocus && sheetReturnFocus.isConnected) {
+    try { sheetReturnFocus.focus(); } catch (e) {}
+  }
+  sheetReturnFocus = null;
 }
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
+document.getElementById("sheetBody").addEventListener("input", () => { sheetDirty = true; });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && sheetOpen()) { closeSheet(); return; }
+  if (e.key === "Tab" && sheetOpen()) {
+    const els = document.getElementById("sheet").querySelectorAll(
+      "button, input, select, textarea, [tabindex]:not([tabindex='-1'])");
+    const list = Array.from(els).filter(el => !el.disabled && el.offsetParent !== null);
+    if (!list.length) return;
+    const first = list[0], last = list[list.length - 1];
+    if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+    else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+  }
+});
 
 /* ============ 登录 ============ */
 function showLogin(msg) {
@@ -656,11 +725,11 @@ async function doLogin(ev) {
   btn.disabled = true; btn.textContent = "验证中…";
   try {
     await api("/metrics");
-    localStorage.setItem("admin_token", token);
+    lsSet("admin_token", token);
     document.getElementById("login").hidden = true;
     refresh();
-    if (!localStorage.getItem("help_seen")) {
-      localStorage.setItem("help_seen", "1");
+    if (!lsGet("help_seen")) {
+      lsSet("help_seen", "1");
       setTimeout(openStatusPanel, 400);
     }
   } catch (e) {
@@ -673,8 +742,8 @@ async function doLogin(ev) {
   return false;
 }
 function logout() {
-  localStorage.removeItem("admin_token"); token = "";
-  closeSheet(); showLogin("");
+  lsDel("admin_token"); token = "";
+  forceCloseSheet(); showLogin("");
   toast("已退出登录");
 }
 
@@ -748,9 +817,11 @@ async function loadTodo() {
   catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadTodo"); return; }
   loadedOnce.todo = true;
   list = list.filter(r => r.status !== "done");
-  const badge = document.getElementById("todoBadge");
-  badge.hidden = list.length === 0;
-  badge.textContent = list.length > 99 ? "99+" : list.length;
+  paintTodoBadge(list.length);
+  /* 数据未变不重渲染：轮询静默、不打断阅读与操作（P1-9） */
+  const sig = JSON.stringify(list);
+  if (lastSig.todo === sig) return;
+  lastSig.todo = sig;
   if (!list.length) {
     el.innerHTML = emptyState("clipboard", "暂无待跟进事项",
       "客户消息一切正常，AI 正在值守。需要人工跟进的事项会出现在这里，并在下方角标提醒您。");
@@ -761,7 +832,7 @@ async function loadTodo() {
     <div class="card ${r.urgent ? "urgent" : ""}" id="todo-${r.id}">
       <div class="row">
         ${r.urgent ? `<span class="badge bad"><span class="dot" style="background:var(--bad)"></span>紧急</span>` : ""}
-        <span class="chip">${esc(groupName(r.group_id))}</span>
+        <span class="chip"><span class="tx">${esc(groupName(r.group_id))}</span></span>
         ${timeEl(r.created_at)}
       </div>
       <div class="body-l">${esc(r.summary)}</div>
@@ -777,17 +848,31 @@ async function loadTodo() {
     (urgent.length ? `<div class="eyebrow">紧急 · ${urgent.length}</div>` + urgent.map(cardHtml).join("") : "") +
     (normal.length ? `<div class="eyebrow">其他待办 · ${normal.length}</div>` + normal.map(cardHtml).join("") : "");
 }
+function paintTodoBadge(n) {
+  const badge = document.getElementById("todoBadge");
+  badge.hidden = n === 0;
+  badge.textContent = n > 99 ? "99+" : n;
+}
+/* 角标是跨页告警：不在待办页时轮询也要更新计数 */
+async function refreshTodoBadge() {
+  try {
+    const list = await api("/todo");
+    paintTodoBadge(list.filter(r => r.status !== "done").length);
+  } catch (e) { /* 静默 */ }
+}
 async function doneTodo(id) {
   const card = document.getElementById("todo-" + id);
   try {
     await api(`/todo/${id}/done`, { method: "POST" });
     if (card) { card.style.transition = "opacity .2s, transform .2s"; card.style.opacity = "0"; card.style.transform = "translateY(-6px)"; }
+    lastSig.todo = null;
     setTimeout(loadTodo, 220);
     toast("已标记处理", true, async () => {
       await api(`/todo/${id}/reopen`, { method: "POST" });
+      lastSig.todo = null;
       loadTodo();
     });
-  } catch (e) { toast("操作失败，请重试", false); loadTodo(); }
+  } catch (e) { toast("操作失败，请重试", false); lastSig.todo = null; loadTodo(); }
 }
 
 /* ============ 记录 ============ */
@@ -796,6 +881,7 @@ function setLogView(v) {
   document.getElementById("segReplies").classList.toggle("on", v === "replies");
   document.getElementById("segDecisions").classList.toggle("on", v === "decisions");
   loadedOnce.log = false;
+  lastSig.log = null;
   loadLog();
 }
 function withDayGroups(list, render) {
@@ -809,11 +895,17 @@ function withDayGroups(list, render) {
 }
 async function loadLog() {
   const el = document.getElementById("logList");
+  const seq = ++logReq; // 分段快速切换/轮询重叠时，过期响应直接丢弃
   if (!loadedOnce.log) el.innerHTML = skeleton();
   try {
     if (logView === "replies") {
       const list = await api("/replies?limit=100");
+      if (seq !== logReq) return;
       loadedOnce.log = true;
+      for (const r of list) repliesFb[r.id] = r.feedback || "";
+      const sig = "r" + JSON.stringify(list);
+      if (lastSig.log === sig) return;
+      lastSig.log = sig;
       if (!list.length) {
         const shadow = !healthCache || healthCache.mode !== "live";
         el.innerHTML = emptyState("message", "还没有 AI 回复记录", shadow
@@ -823,7 +915,7 @@ async function loadLog() {
       }
       el.innerHTML = withDayGroups(list, r => {
         const fb = !r.feedback ? `
-            <button class="btn-text" style="margin-left:auto" onclick="feedback(${r.id}, 'good')">${ico("thumb")}有帮助</button>
+            <button class="btn-text" style="margin-left:auto" onclick="feedbackGood(${r.id})">${ico("thumb")}有帮助</button>
             <button class="btn-text" onclick="openFeedback(${r.id})">${ico("edit")}需修正</button>`
           : r.feedback === "good"
             ? `<button class="badge ok" style="margin-left:auto" onclick="openFeedback(${r.id})">${ico("check")}已标记：有帮助</button>`
@@ -837,14 +929,15 @@ async function loadLog() {
               ${r.mode === "live" ? `<span class="badge ok">已发出</span>`
                                   : `<span class="badge brand">草稿</span>`}
               <span class="chip">${zh(ZH.category, r.category)}</span>
-              ${r.compliance_passed ? "" : `<button class="badge warn" onclick="toast('该回复触碰合规红线，已自动替换为安全话术')">${ico("shield")}已替换为安全话术</button>`}
-              <span class="chip">${esc(groupName(r.group_id))}</span>
+              ${r.compliance_passed ? "" : `<button class="badge warn" onclick="toggleNote(${r.id})">${ico("shield")}已替换为安全话术</button>`}
+              <span class="chip"><span class="tx">${esc(groupName(r.group_id))}</span></span>
               ${timeEl(r.created_at)}
             </div>
+            <div class="fb-note" id="cmp-${r.id}" hidden>该回复触碰合规红线，已自动替换为安全话术——这是系统在保护所里，不是故障。</div>
             <div class="quote ${isOpen ? "" : "clamp"}" id="q-${r.id}">${esc(r.text)}</div>
-            <button class="btn-text muted" id="qx-${r.id}" style="display:none;min-height:32px"
+            <button class="btn-text muted" id="qx-${r.id}" style="display:none;min-height:40px"
                     onclick="toggleQuote(${r.id})">${isOpen ? "收起" : "展开"}</button>
-            <div class="row fb-row">${note ? "" : ""}${fb}</div>
+            <div class="row fb-row">${fb}</div>
             ${note}
           </div>`;
       });
@@ -857,12 +950,18 @@ async function loadLog() {
       });
     } else {
       const list = await api("/decisions?limit=150");
+      if (seq !== logReq) return;
       loadedOnce.log = true;
+      const sig = "d" + JSON.stringify(list);
+      if (lastSig.log === sig) return;
+      lastSig.log = sig;
       if (!list.length) {
         el.innerHTML = emptyState("message", "还没有判断记录",
           "AI 对每条客户消息的处理判断（包括保持沉默）都会记录在这里，便于随时复查。");
         return;
       }
+      /* should_speak 是「判定应发言」：影子模式下措辞不得暗示已发出 */
+      const live = healthCache && healthCache.mode === "live";
       el.innerHTML = withDayGroups(list, d => {
         let reasons = [];
         try { reasons = JSON.parse(d.reasons); } catch (e) {}
@@ -871,14 +970,17 @@ async function loadLog() {
           : d.action === "handoff"
             ? `<span class="badge warn">${ico("handoff")}安抚承接</span>`
             : `<span class="chip">${ico("silence")}${zh(ZH.action, d.action)}</span>`;
+        const spoke = !d.should_speak ? ""
+          : live ? `<span class="badge ok">已发言</span>`
+                 : `<span class="badge brand">已起草（演练）</span>`;
         return `
           <div class="card" style="padding:10px 14px">
             <div class="row">
               ${act}
               <span class="chip">${zh(ZH.category, d.category)}</span>
-              ${d.urgent ? `<span class="badge bad">紧急</span>` : ""}
-              ${d.should_speak ? `<span class="badge ok">已发言</span>` : ""}
-              <span class="chip">${esc(groupName(d.group_id))}</span>
+              ${d.urgent ? `<span class="badge bad"><span class="dot" style="background:var(--bad)"></span>紧急</span>` : ""}
+              ${spoke}
+              <span class="chip"><span class="tx">${esc(groupName(d.group_id))}</span></span>
               ${timeEl(d.created_at)}
             </div>
             <div class="meta" style="margin-top:6px">${esc(reasons.join(" · "))}</div>
@@ -893,31 +995,63 @@ function toggleQuote(id) {
   if (expanded.has(key)) { expanded.delete(key); q.classList.add("clamp"); x.textContent = "展开"; }
   else { expanded.add(key); q.classList.remove("clamp"); x.textContent = "收起"; }
 }
-async function feedback(id, val) {
+function toggleNote(id) {
+  const n = document.getElementById("cmp-" + id);
+  if (n) n.hidden = !n.hidden;
+}
+async function setFeedback(id, val) {
+  await api(`/replies/${id}/feedback`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ feedback: val }),
+  });
+  repliesFb[id] = val;
+  lastSig.log = null;
+}
+/* 「有帮助」也可撤销：误触不污染话术迭代库 */
+async function feedbackGood(id) {
   try {
-    await api(`/replies/${id}/feedback`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ feedback: val }),
-    });
-    toast(val === "good" ? "已记录，感谢反馈" : "已记录，感谢反馈");
+    await setFeedback(id, "good");
+    toast("已记录，感谢反馈", true, async () => { await setFeedback(id, ""); loadLog(); });
     loadLog();
   } catch (e) { toast("操作失败，请重试", false); }
 }
 let fbChoice = "";
+const FB_OPTS = ["内容不准确", "语气不合适", "不该由 AI 回复", "话术太长"];
 function openFeedback(id) {
+  /* 重开时回填已有反馈，且可改标回「有帮助」或清除标记 */
+  const cur = repliesFb[id] || "";
+  let note = "";
   fbChoice = "";
-  const OPTS = ["内容不准确", "语气不合适", "不该由 AI 回复", "话术太长"];
+  if (cur.startsWith("needs_fix:")) {
+    const body = cur.slice(10);
+    const hit = FB_OPTS.find(o => body === o || body.startsWith(o + "："));
+    if (hit) { fbChoice = hit; note = body === hit ? "" : body.slice(hit.length + 1); }
+    else note = body;
+  }
   openSheet(`
     <h2>哪里需要修正？</h2>
     <div class="sub">您的反馈会进入话术迭代库，帮助 AI 下次说得更好</div>
-    <div class="fb-opts">${OPTS.map(o =>
-      `<button onclick="pickFb(this,'${o}')">${o}</button>`).join("")}</div>
+    <div class="fb-opts">${FB_OPTS.map(o =>
+      `<button onclick="pickFb(this,'${o}')" class="${o === fbChoice ? "on" : ""}">${o}</button>`).join("")}</div>
     <div class="field">
       <label for="fbNote">补充说明（选填）</label>
-      <textarea id="fbNote" placeholder="例如：应该先安抚客户情绪" oninput="fbValidate()"></textarea>
+      <textarea id="fbNote" placeholder="例如：应该先安抚客户情绪" oninput="fbValidate()">${esc(note)}</textarea>
     </div>
     <button class="btn-primary xl" id="fbSubmit" disabled onclick="submitFb(${id})">提交反馈</button>
+    ${cur ? `<button class="btn-text" style="width:100%;justify-content:center;margin-top:6px"
+        onclick="relabel(${id}, 'good')">改标为：有帮助</button>
+      <button class="btn-text muted" style="width:100%;justify-content:center"
+        onclick="relabel(${id}, '')">清除反馈标记</button>` : ""}
   `);
+  fbValidate();
+}
+async function relabel(id, val) {
+  try {
+    await setFeedback(id, val);
+    forceCloseSheet();
+    toast(val ? "已改标为「有帮助」" : "已清除反馈标记");
+    loadLog();
+  } catch (e) { toast("操作失败，请重试", false); }
 }
 function pickFb(btn, val) {
   fbChoice = fbChoice === val ? "" : val;
@@ -935,11 +1069,8 @@ async function submitFb(id) {
   const btn = document.getElementById("fbSubmit");
   btn.disabled = true; btn.textContent = "提交中…";
   try {
-    await api(`/replies/${id}/feedback`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ feedback: "needs_fix:" + text }),
-    });
-    closeSheet(); toast("已记录，感谢反馈"); loadLog();
+    await setFeedback(id, "needs_fix:" + text);
+    forceCloseSheet(); toast("已记录，感谢反馈"); loadLog();
   } catch (e) {
     btn.disabled = false; btn.textContent = "提交反馈";
     toast("操作失败，请重试", false);
@@ -954,6 +1085,11 @@ async function loadBoard() {
   try { m = await api("/metrics"); }
   catch (e) { if (String(e.message) !== "401") t.innerHTML = errCard("loadBoard"); return; }
   loadedOnce.board = true;
+  document.getElementById("boardFoot").textContent =
+    "数据每分钟自动更新" + (lastSuccess ? ` · 最后更新 ${fmtHM(lastSuccess)}` : "");
+  const sig = JSON.stringify(m);
+  if (lastSig.board === sig) return;
+  lastSig.board = sig;
   t.innerHTML = `
     <div class="tile"><div class="n">${m.decisions_total}</div><div class="l">消息判断总数</div></div>
     <div class="tile"><div class="n">${m.replies_total}</div><div class="l">AI 回复条数</div></div>
@@ -975,8 +1111,6 @@ async function loadBoard() {
         const n = m.by_action[k] || 0;
         return `<span><i style="background:var(${c})"></i>${ZH.action[k]} ${n} · ${Math.round(n / total * 100)}%</span>`;
       }).join("");
-  document.getElementById("boardFoot").textContent =
-    "数据每分钟自动更新" + (lastSuccess ? ` · 最后更新 ${fmtHM(lastSuccess)}` : "");
 }
 
 /* ============ 群管理 ============ */
@@ -986,6 +1120,9 @@ async function loadGroups() {
   try { groupsCache = await api("/groups"); }
   catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadGroups"); return; }
   loadedOnce.groups = true;
+  const sig = JSON.stringify(groupsCache);
+  if (lastSig.groups === sig) return;
+  lastSig.groups = sig;
   if (!groupsCache.length) {
     el.innerHTML = `
       <div class="card">
@@ -1001,47 +1138,62 @@ async function loadGroups() {
       </div>`;
     return;
   }
+  /* 值一律走 data-* + 事件委托：group_id 拼进内联 onclick 的 JS 字符串
+     无法安全转义（HTML 实体在事件属性里会先解码），是注入面 */
   el.innerHTML = groupsCache.map(g => {
     const metaBits = [g.lawyer_name ? g.lawyer_name + "律师" : "", g.case_type, g.case_stage]
       .filter(Boolean).join(" · ");
     return `
     <div class="card">
       <div class="row" style="flex-wrap:nowrap">
-        <b style="font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.name || g.group_id)}</b>
-        <span class="badge ${g.client_status === "signed" ? "ok" : "brand"}">${zh(ZH.status, g.client_status)}</span>
+        <b style="font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(g.name || g.group_id)}</b>
+        <span class="badge ${g.client_status === "signed" ? "ok" : "brand"}" style="flex:none">${zh(ZH.status, g.client_status)}</span>
         <label class="switch" style="margin-left:auto">
           <input type="checkbox" ${g.ai_enabled ? "checked" : ""} aria-label="AI 开关"
-                 onchange="toggleAi('${esc(g.group_id)}', this)">
+                 data-act="ai" data-gid="${esc(g.group_id)}">
           <span></span>
         </label>
       </div>
       ${metaBits ? `<div class="meta" style="margin-top:4px">${esc(metaBits)}</div>` : ""}
       <div class="row" style="margin-top:10px">
         ${g.robot_webhook
-          ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已绑定</span>`
+          ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
           : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
-        <button class="btn-text muted" style="margin-left:auto" onclick='editGroup(${JSON.stringify(g.group_id)})'>编辑${ico("chevron")}</button>
+        <button class="btn-text muted" style="margin-left:auto" data-act="edit" data-gid="${esc(g.group_id)}">编辑${ico("chevron")}</button>
       </div>
     </div>`;
   }).join("");
 }
+document.getElementById("groupList").addEventListener("click", e => {
+  const btn = e.target.closest("[data-act='edit']");
+  if (btn) editGroup(btn.dataset.gid);
+});
+document.getElementById("groupList").addEventListener("change", e => {
+  const input = e.target.closest("[data-act='ai']");
+  if (input) toggleAi(input.dataset.gid, input);
+});
+let pendingEnableGid = null;
 async function toggleAi(gid, input) {
   const on = input.checked;
-  if (on && healthCache && healthCache.mode === "live") {
+  /* 从严处理：健康状态未知时按正式模式对待（对外发言不可逆） */
+  if (on && (!healthCache || healthCache.mode === "live")) {
     input.checked = false; // 待确认
+    pendingEnableGid = gid;
     openSheet(`
       <h2>在正式模式下开启该群 AI？</h2>
       <p style="font-size:15px;margin:12px 0 20px">开启后，AI 的回复将直接发送到该客户群，客户会立即看到。</p>
-      <button class="btn-primary xl" onclick="confirmEnable('${esc(gid)}')">确认开启</button>
+      <button class="btn-primary xl" onclick="confirmEnable()">确认开启</button>
       <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">暂不开启</button>
     `);
     return;
   }
   await postAiSwitch(gid, on, input);
 }
-async function confirmEnable(gid) {
-  closeSheet();
-  await postAiSwitch(gid, true, null);
+async function confirmEnable() {
+  const gid = pendingEnableGid;
+  pendingEnableGid = null;
+  forceCloseSheet();
+  if (gid) await postAiSwitch(gid, true, null);
 }
 async function postAiSwitch(gid, on, input) {
   try {
@@ -1050,6 +1202,7 @@ async function postAiSwitch(gid, on, input) {
       body: JSON.stringify({ enabled: on }),
     });
     toast(on ? "已开启本群 AI" : "已暂停本群 AI，将不再自动回复");
+    lastSig.groups = null;
     loadGroups();
   } catch (e) {
     if (input) input.checked = !on;
@@ -1057,9 +1210,10 @@ async function postAiSwitch(gid, on, input) {
   }
 }
 function editGroup(gid) {
+  /* 新档案 AI 默认关闭：正式模式下的开启必须走确认闸门（引导卡第 3 步即开 AI） */
   const g = groupsCache.find(x => x.group_id === gid) || {
     group_id: "", name: "", client_status: "prospect", case_type: "", case_stage: "",
-    lawyer_name: "", lawyer_userid: "", backup_userid: "", ai_enabled: true, robot_webhook: "",
+    lawyer_name: "", lawyer_userid: "", backup_userid: "", ai_enabled: false, robot_webhook: "",
   };
   const isNew = !gid;
   openSheet(`
@@ -1068,7 +1222,7 @@ function editGroup(gid) {
     <div class="field" id="fw_gid">
       <label>群 ID ${isNew ? '<span class="req">*</span>' : ""}</label>
       <input id="f_gid" value="${esc(g.group_id)}" ${isNew ? "" : "readonly"}>
-      <div class="help">企业微信群的 ChatId，创建后不可修改</div>
+      <div class="help">企业微信群的 ChatId，创建后不可修改；填错时可在本页底部删除档案后重建</div>
     </div>
     <div class="field"><label>群名称</label>
       <input id="f_name" value="${esc(g.name)}" placeholder="例如：张女士劳动仲裁服务群"></div>
@@ -1093,12 +1247,36 @@ function editGroup(gid) {
     <div class="field"><label>第二责任人企微账号</label>
       <input id="f_buid" value="${esc(g.backup_userid)}">
       <div class="help">律师超时未处理时升级提醒此人，可留空</div></div>
-    <div class="field"><label>群机器人 Webhook</label>
+    <div class="field" id="fw_hook"><label>群机器人 Webhook</label>
       <input id="f_hook" value="${esc(g.robot_webhook)}">
-      <div class="help">在企业微信群 → 群机器人 → Webhook 地址中复制，粘贴完整地址或 key 均可</div></div>
+      <div class="help">在企业微信群 → 群机器人 → Webhook 地址中复制，粘贴完整地址或 key 均可。如群里收不到消息，请回来核对此处地址</div></div>
     <button class="btn-primary xl" id="gSave" onclick="saveGroup(${isNew}, ${JSON.stringify(!!g.ai_enabled)})">保存群档案</button>
     <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">取消</button>
+    ${isNew ? "" : `<button class="btn-text btn-danger" style="width:100%;justify-content:center;margin-top:14px"
+      onclick="askDeleteGroup()">删除群档案</button>`}
   `, true);
+}
+let pendingDeleteGid = null;
+function askDeleteGroup() {
+  pendingDeleteGid = document.getElementById("f_gid").value.trim();
+  sheetDirty = false;
+  openSheet(`
+    <h2>删除该群档案？</h2>
+    <p style="font-size:15px;margin:12px 0 20px">删除后 AI 将不再关注该群；历史消息与记录会保留。此操作不可恢复。</p>
+    <button class="btn-primary xl" style="background:var(--bad)" onclick="confirmDeleteGroup()">确认删除</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="forceCloseSheet()">取消</button>
+  `);
+}
+async function confirmDeleteGroup() {
+  const gid = pendingDeleteGid;
+  pendingDeleteGid = null;
+  try {
+    await api(`/groups/${encodeURIComponent(gid)}`, { method: "DELETE" });
+    forceCloseSheet();
+    toast("群档案已删除");
+    lastSig.groups = null;
+    loadGroups();
+  } catch (e) { toast("操作失败，请重试", false); }
 }
 async function saveGroup(isNew, aiEnabled) {
   const gid = document.getElementById("f_gid").value.trim();
@@ -1107,6 +1285,19 @@ async function saveGroup(isNew, aiEnabled) {
     wrap.classList.add("error");
     wrap.querySelector(".help").textContent = "请填写群 ID";
     wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  /* Webhook 最低限度形态校验：拦下粘错内容导致的「显示已配置、实际发不出」 */
+  const hook = document.getElementById("f_hook").value.trim();
+  const hookWrap = document.getElementById("fw_hook");
+  const hookOk = !hook
+    || /^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?key=[\w-]+$/.test(hook)
+    || /^[A-Za-z0-9-]{16,64}$/.test(hook);
+  if (!hookOk) {
+    hookWrap.classList.add("error");
+    hookWrap.querySelector(".help").textContent =
+      "地址格式看起来不对：请粘贴完整的 Webhook 地址，或只粘贴其中 key= 后面的部分";
+    hookWrap.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
   }
   const btn = document.getElementById("gSave");
@@ -1128,7 +1319,9 @@ async function saveGroup(isNew, aiEnabled) {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(profile),
     });
-    closeSheet(); toast("群档案已保存"); loadGroups();
+    forceCloseSheet(); toast("群档案已保存");
+    lastSig.groups = null;
+    loadGroups();
   } catch (e) {
     btn.disabled = false; btn.textContent = "保存群档案";
     toast("操作失败，请重试", false);
@@ -1151,21 +1344,23 @@ async function refresh() {
       try { groupsCache = await api("/groups"); } catch (e) { /* 各板块自行处理 */ }
     }
     if (tab === "todo") await loadTodo();
+    else refreshTodoBadge(); // 角标跨页告警，不在待办页也保持新鲜
     if (tab === "log") await loadLog();
     if (tab === "board") await loadBoard();
     if (tab === "groups") await loadGroups();
   } catch (e) { /* 401 已弹登录层 */ }
 }
 setInterval(() => {
-  if (document.getElementById("login").hidden) refresh();
+  // 弹层打开时跳过本轮：不打断正在填写/阅读的用户
+  if (document.getElementById("login").hidden && !sheetOpen()) refresh();
 }, 60000);
 (async () => {
   if (!token) { showLogin(""); return; }
   try {
     await api("/metrics");
     refresh();
-    if (!localStorage.getItem("help_seen")) {
-      localStorage.setItem("help_seen", "1");
+    if (!lsGet("help_seen")) {
+      lsSet("help_seen", "1");
       setTimeout(openStatusPanel, 400);
     }
   } catch (e) { /* 401 已弹登录层；网络错误走离线横幅 */ refresh(); }

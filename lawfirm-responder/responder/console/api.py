@@ -92,6 +92,13 @@ def upsert_group(group_id: str, profile: GroupProfile, store: Store = Depends(ge
     return {"ok": True}
 
 
+@router.delete("/groups/{group_id}")
+def delete_group(group_id: str, store: Store = Depends(get_store)):
+    """删除群档案（群 ID 填错的唯一出口；消息/判断/回复留痕不受影响）。"""
+    store.delete_group(group_id)
+    return {"ok": True}
+
+
 class AiSwitch(BaseModel):
     enabled: bool
 

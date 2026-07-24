@@ -25,6 +25,23 @@ def test_ui_served_in_chinese():
         assert banned not in r.text
 
 
+def test_group_delete(tmp_path):
+    """群 ID 填错的出口：删除档案（留痕数据不动）。"""
+    from responder.models import GroupProfile
+
+    settings = Settings(mode="shadow", db_path=str(tmp_path / "g.db"), admin_token="")
+    store = Store(settings.db_path)
+    store.upsert_group(GroupProfile(group_id="g-typo", name="手滑群"))
+    app = FastAPI()
+    app.state.store = store
+    app.state.pipeline = Pipeline(store, None, settings)
+    app.include_router(console_router)
+    c = TestClient(app)
+
+    assert c.delete("/console/groups/g-typo").json()["ok"]
+    assert store.get_group("g-typo") is None
+
+
 def test_todo_done_then_reopen(tmp_path):
     """「标记已处理」的 5 秒撤销依赖 reopen 接口回滚。"""
     settings = Settings(mode="shadow", db_path=str(tmp_path / "u.db"), admin_token="")

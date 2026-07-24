@@ -120,6 +120,11 @@ class Store:
         d["ai_enabled"] = bool(d["ai_enabled"])
         return GroupProfile(**d)
 
+    def delete_group(self, group_id: str) -> None:
+        """仅删档案；该群的消息/判断/回复留痕保持不动。"""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM groups WHERE group_id=?", (group_id,))
+
     def set_group_ai(self, group_id: str, enabled: bool) -> None:
         with self._conn() as conn:
             conn.execute(
