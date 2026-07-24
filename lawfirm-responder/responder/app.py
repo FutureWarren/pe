@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from responder.config import get_settings
 from responder.console.api import router as console_router
+from responder.console.api import ui_router
 from responder.engine import llm
 from responder.gateway.callback import router as callback_router
 from responder.gateway.sender import WeComSender
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.state.worker = worker
     app.include_router(callback_router)
     app.include_router(console_router)
+    app.include_router(ui_router)
 
     @app.get("/health")
     def health():

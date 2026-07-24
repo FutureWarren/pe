@@ -4,12 +4,24 @@
 """
 
 import hmac
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from responder.models import GroupProfile
 from responder.store.db import Store
+
+# 控制台网页（中文单页，手机友好）。页面本身公开（相当于登录页），
+# 页内所有数据请求仍走 /console/* 的 X-Admin-Token 鉴权。
+ui_router = APIRouter()
+_UI_FILE = Path(__file__).parent / "static" / "index.html"
+
+
+@ui_router.get("/ui", include_in_schema=False)
+def console_ui() -> HTMLResponse:
+    return HTMLResponse(_UI_FILE.read_text(encoding="utf-8"))
 
 
 def require_admin(request: Request, x_admin_token: str | None = Header(default=None)):

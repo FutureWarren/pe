@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>律所 AI 响应助手 · 控制台</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb; --card: #ffffff; --line: #e7e6e2;
+  --ink: #0b0b0b; --ink-2: #52514e; --ink-3: #8a887f;
+  --accent: #2a78d6;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;   /* 三分类：回答/承接/沉默 */
+  --ok: #008300; --bad: #e34948; --warn: #c98500;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface: #1a1a19; --card: #232322; --line: #3a3936;
+    --ink: #ffffff; --ink-2: #c3c2b7; --ink-3: #8a887f;
+    --accent: #3987e5;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --ok: #55b455; --bad: #e66767; --warn: #eda100;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--surface); color: var(--ink); font-size: 15px; line-height: 1.55;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+header {
+  position: sticky; top: 0; z-index: 5; background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 16px 10px; display: flex; align-items: baseline; gap: 8px;
+}
+header h1 { font-size: 17px; }
+header .sub { font-size: 12px; color: var(--ink-3); margin-left: auto; }
+main { max-width: 720px; margin: 0 auto; padding: 12px 12px 24px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; margin-bottom: 10px;
+}
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chip {
+  display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap;
+}
+.chip.red { color: var(--bad); border-color: var(--bad); }
+.chip.green { color: var(--ok); border-color: var(--ok); }
+.chip.blue { color: var(--accent); border-color: var(--accent); }
+.time { font-size: 12px; color: var(--ink-3); margin-left: auto; white-space: nowrap; }
+.txt { margin: 8px 0 6px; white-space: pre-wrap; word-break: break-word; }
+.meta { font-size: 12px; color: var(--ink-3); word-break: break-all; }
+button {
+  font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  cursor: pointer;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.ghost { color: var(--ink-2); }
+button:disabled { opacity: .5; }
+.empty { text-align: center; color: var(--ink-3); padding: 40px 0 24px; font-size: 14px; }
+/* 登录 */
+#login {
+  position: fixed; inset: 0; z-index: 20; background: var(--surface);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 24px; text-align: center;
+}
+#login[hidden] { display: none; }
+#login input {
+  font: inherit; width: min(340px, 90%); padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+}
+#login .err { color: var(--bad); font-size: 13px; min-height: 1.2em; }
+/* 底部导航 */
+nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  display: flex; background: var(--card); border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+nav button {
+  flex: 1; border: 0; border-radius: 0; background: none; padding: 10px 0 8px;
+  font-size: 12px; color: var(--ink-3); display: flex; flex-direction: column; gap: 2px;
+  align-items: center;
+}
+nav button .ico { font-size: 20px; line-height: 1; }
+nav button.on { color: var(--accent); font-weight: 600; }
+nav button .badge {
+  position: absolute; transform: translate(16px, -2px);
+  background: var(--bad); color: #fff; font-size: 10px; border-radius: 999px;
+  padding: 0 5px; line-height: 15px; min-width: 15px;
+}
+/* 看板 */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.tile .n { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tile .l { font-size: 12px; color: var(--ink-2); }
+.dist { display: flex; height: 22px; border-radius: 6px; overflow: hidden; gap: 2px; margin: 10px 0 8px; }
+.dist div { min-width: 3px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+/* 表单 */
+.form label { display: block; font-size: 12px; color: var(--ink-2); margin: 8px 0 2px; }
+.form input, .form select {
+  font: inherit; width: 100%; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+/* 开关 */
+.switch { position: relative; width: 44px; height: 26px; flex: none; }
+.switch input { opacity: 0; width: 100%; height: 100%; position: absolute; margin: 0; cursor: pointer; }
+.switch span {
+  position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: .15s;
+  pointer-events: none;
+}
+.switch span::after {
+  content: ""; position: absolute; width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; top: 3px; left: 3px; transition: .15s; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
+.switch input:checked + span { background: var(--ok); }
+.switch input:checked + span::after { left: 21px; }
+.seg { display: flex; gap: 6px; margin-bottom: 10px; }
+.seg button { border-radius: 999px; padding: 5px 14px; }
+.seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="login" hidden>
+  <div style="font-size:38px">🔐</div>
+  <div style="font-size:17px;font-weight:600">律所 AI 响应助手 · 控制台</div>
+  <div style="font-size:13px;color:var(--ink-2)">请输入访问令牌（部署时生成的 X-Admin-Token）</div>
+  <input id="tokenInput" type="password" placeholder="访问令牌" autocomplete="off">
+  <div class="err" id="loginErr"></div>
+  <button class="primary" onclick="doLogin()">进入控制台</button>
+</div>
+
+<header>
+  <h1>AI 响应助手</h1>
+  <span class="chip" id="modeChip">…</span>
+  <span class="sub" id="healthSub"></span>
+</header>
+
+<main>
+  <section id="tab-todo">
+    <div id="todoList"></div>
+  </section>
+
+  <section id="tab-log" hidden>
+    <div class="seg">
+      <button id="segReplies" class="on" onclick="setLogView('replies')">AI 回复</button>
+      <button id="segDecisions" onclick="setLogView('decisions')">全部判断</button>
+    </div>
+    <div id="logList"></div>
+  </section>
+
+  <section id="tab-board" hidden>
+    <div class="tiles" id="tiles"></div>
+    <div class="card" style="margin-top:10px">
+      <div style="font-size:13px;color:var(--ink-2);margin-bottom:2px">消息三分类分布</div>
+      <div class="dist" id="dist"></div>
+      <div class="legend" id="distLegend"></div>
+    </div>
+    <div class="meta" id="boardFoot" style="margin-top:8px"></div>
+  </section>
+
+  <section id="tab-groups" hidden>
+    <div id="groupList"></div>
+    <button style="width:100%" onclick="editGroup(null)">＋ 新增群档案</button>
+    <div id="groupForm"></div>
+  </section>
+</main>
+
+<nav>
+  <button id="nav-todo" class="on" onclick="setTab('todo')" style="position:relative">
+    <span class="ico">📋</span>待办<span class="badge" id="todoBadge" hidden></span>
+  </button>
+  <button id="nav-log" onclick="setTab('log')"><span class="ico">💬</span>记录</button>
+  <button id="nav-board" onclick="setTab('board')"><span class="ico">📊</span>看板</button>
+  <button id="nav-groups" onclick="setTab('groups')"><span class="ico">⚙️</span>群管理</button>
+</nav>
+
+<script>
+"use strict";
+const ACTION_ZH = { answer: "直接回答", handoff: "安抚承接", silence: "保持沉默" };
+const CAT_ZH = {
+  general_law: "通用法律", case_status: "案件进展", fee: "费用咨询",
+  urgent: "紧急", contact: "找人/催复", chitchat: "闲聊", other: "其他",
+};
+const STATUS_ZH = { signed: "已成交", prospect: "咨询中" };
+let token = localStorage.getItem("admin_token") || "";
+let tab = "todo", logView = "replies", groupsCache = [];
+
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({ "X-Admin-Token": token }, opts.headers || {});
+  const r = await fetch("/console" + path, opts);
+  if (r.status === 401) { showLogin("令牌无效或已更换，请重新输入"); throw new Error("401"); }
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function showLogin(msg) {
+  document.getElementById("loginErr").textContent = msg || "";
+  document.getElementById("login").hidden = false;
+}
+async function doLogin() {
+  token = document.getElementById("tokenInput").value.trim();
+  try {
+    await api("/metrics");
+    localStorage.setItem("admin_token", token);
+    document.getElementById("login").hidden = true;
+    refresh();
+  } catch (e) { /* 401 已提示 */ }
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+function ago(iso) {
+  if (!iso) return "";
+  const t = new Date(iso), s = (Date.now() - t.getTime()) / 1000;
+  if (s < 60) return "刚刚";
+  if (s < 3600) return Math.floor(s / 60) + " 分钟前";
+  if (s < 86400) return Math.floor(s / 3600) + " 小时前";
+  return (t.getMonth() + 1) + "月" + t.getDate() + "日 " +
+    String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
+}
+function groupName(gid) {
+  const g = groupsCache.find(x => x.group_id === gid);
+  return g && g.name ? g.name : gid;
+}
+
+// ---------------- 待办
+async function loadTodo() {
+  const list = await api("/todo");
+  const badge = document.getElementById("todoBadge");
+  badge.hidden = list.length === 0;
+  badge.textContent = list.length;
+  const el = document.getElementById("todoList");
+  if (!list.length) { el.innerHTML = '<div class="empty">🎉 暂无待跟进事项</div>'; return; }
+  el.innerHTML = list.map(r => `
+    <div class="card">
+      <div class="row">
+        ${r.urgent ? '<span class="chip red">🔴 紧急</span>' : '<span class="chip">普通</span>'}
+        <span class="chip">${esc(groupName(r.group_id))}</span>
+        <span class="time">${ago(r.created_at)}</span>
+      </div>
+      <div class="txt">${esc(r.summary)}</div>
+      <div class="row">
+        <span class="meta">状态：${esc(r.status)}${r.escalated_at ? " · 已升级" : ""}</span>
+        <button style="margin-left:auto" onclick="doneTodo(${r.id})">✓ 已处理</button>
+      </div>
+    </div>`).join("");
+}
+async function doneTodo(id) {
+  await api(`/todo/${id}/done`, { method: "POST" });
+  loadTodo();
+}
+
+// ---------------- 记录
+function setLogView(v) {
+  logView = v;
+  document.getElementById("segReplies").classList.toggle("on", v === "replies");
+  document.getElementById("segDecisions").classList.toggle("on", v === "decisions");
+  loadLog();
+}
+async function loadLog() {
+  const el = document.getElementById("logList");
+  if (logView === "replies") {
+    const list = await api("/replies?limit=100");
+    if (!list.length) { el.innerHTML = '<div class="empty">暂无 AI 回复记录</div>'; return; }
+    el.innerHTML = list.map(r => `
+      <div class="card">
+        <div class="row">
+          ${r.mode === "live" ? '<span class="chip green">已发出</span>'
+                              : '<span class="chip blue">草稿</span>'}
+          <span class="chip">${esc(CAT_ZH[r.category] || r.category || "—")}</span>
+          ${r.compliance_passed ? "" : '<span class="chip red">合规拦截→安全话术</span>'}
+          <span class="chip">${esc(groupName(r.group_id))}</span>
+          <span class="time">${ago(r.created_at)}</span>
+        </div>
+        <div class="txt">${esc(r.text)}</div>
+        <div class="row">
+          <span class="meta">${r.feedback ? "反馈：" + esc(r.feedback) : ""}</span>
+          <span style="margin-left:auto"></span>
+          <button class="ghost" onclick="feedback(${r.id}, 'good')">👍 好</button>
+          <button class="ghost" onclick="feedbackFix(${r.id})">✏️ 需修正</button>
+        </div>
+      </div>`).join("");
+  } else {
+    const list = await api("/decisions?limit=150");
+    if (!list.length) { el.innerHTML = '<div class="empty">暂无判断记录</div>'; return; }
+    el.innerHTML = list.map(d => {
+      let reasons = [];
+      try { reasons = JSON.parse(d.reasons); } catch (e) {}
+      return `
+      <div class="card">
+        <div class="row">
+          <span class="chip ${d.action === "silence" ? "" : "blue"}">${ACTION_ZH[d.action] || d.action}</span>
+          <span class="chip">${esc(CAT_ZH[d.category] || d.category)}</span>
+          ${d.urgent ? '<span class="chip red">紧急</span>' : ""}
+          ${d.should_speak ? '<span class="chip green">已发言</span>' : ""}
+          <span class="chip">${esc(groupName(d.group_id))}</span>
+          <span class="time">${ago(d.created_at)}</span>
+        </div>
+        <div class="meta" style="margin-top:6px">${esc(reasons.join(" · "))}</div>
+      </div>`;
+    }).join("");
+  }
+}
+async function feedback(id, val) {
+  await api(`/replies/${id}/feedback`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ feedback: val }),
+  });
+  loadLog();
+}
+function feedbackFix(id) {
+  const note = prompt("哪里需要修正？（一句话即可，会进入话术迭代库）");
+  if (note !== null) feedback(id, "needs_fix:" + note);
+}
+
+// ---------------- 看板
+async function loadBoard() {
+  const m = await api("/metrics");
+  const fb = `${m.feedback_good} / ${m.feedback_needs_fix}`;
+  document.getElementById("tiles").innerHTML = [
+    [m.decisions_total, "消息判断总数"],
+    [m.replies_total, "AI 回复条数"],
+    [m.urgent_count, "紧急消息"],
+    [m.compliance_blocked, "合规拦截"],
+    [fb, "反馈 好/需修正"],
+  ].map(([n, l]) => `<div class="tile"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+
+  const order = [["answer", "--s1"], ["handoff", "--s2"], ["silence", "--s3"]];
+  const total = order.reduce((s, [k]) => s + (m.by_action[k] || 0), 0);
+  document.getElementById("dist").innerHTML = total === 0
+    ? '<div style="flex:1;background:var(--line)"></div>'
+    : order.map(([k, c]) =>
+        `<div style="flex:${m.by_action[k] || 0};background:var(${c})"></div>`).join("");
+  document.getElementById("distLegend").innerHTML = order.map(([k, c]) =>
+    `<span><i style="background:var(${c})"></i>${ACTION_ZH[k]} ${m.by_action[k] || 0}</span>`).join("");
+}
+
+// ---------------- 群管理
+async function loadGroups() {
+  groupsCache = await api("/groups");
+  const el = document.getElementById("groupList");
+  if (!groupsCache.length) {
+    el.innerHTML = '<div class="empty">还没有群档案，点下方按钮新增</div>';
+    return;
+  }
+  el.innerHTML = groupsCache.map(g => `
+    <div class="card">
+      <div class="row">
+        <b>${esc(g.name || g.group_id)}</b>
+        <span class="chip">${STATUS_ZH[g.client_status] || esc(g.client_status)}</span>
+        ${g.case_type ? `<span class="chip">${esc(g.case_type)}</span>` : ""}
+        <label class="switch" style="margin-left:auto" title="AI 开关">
+          <input type="checkbox" ${g.ai_enabled ? "checked" : ""}
+                 onchange="toggleAi('${esc(g.group_id)}', this.checked)">
+          <span></span>
+        </label>
+      </div>
+      <div class="meta" style="margin-top:4px">
+        ${g.lawyer_name ? esc(g.lawyer_name) + "律师 · " : ""}ID: ${esc(g.group_id)}
+        ${g.robot_webhook ? " · 🤖 机器人已绑定" : ""}
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span class="meta">AI ${g.ai_enabled ? "已开启" : "已关闭"}</span>
+        <button style="margin-left:auto" onclick='editGroup(${JSON.stringify(g.group_id)})'>编辑</button>
+      </div>
+    </div>`).join("");
+}
+async function toggleAi(gid, on) {
+  await api(`/groups/${encodeURIComponent(gid)}/ai`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: on }),
+  });
+  loadGroups();
+}
+function editGroup(gid) {
+  const g = groupsCache.find(x => x.group_id === gid) || {
+    group_id: "", name: "", client_status: "prospect", case_type: "", case_stage: "",
+    lawyer_name: "", lawyer_userid: "", backup_userid: "", ai_enabled: true, robot_webhook: "",
+  };
+  const isNew = !gid;
+  document.getElementById("groupForm").innerHTML = `
+    <div class="card form" style="margin-top:10px">
+      <b>${isNew ? "新增群档案" : "编辑：" + esc(g.name || g.group_id)}</b>
+      <label>群 ID（企微 ChatId，新建必填）</label>
+      <input id="f_gid" value="${esc(g.group_id)}" ${isNew ? "" : "readonly"}>
+      <label>群名称</label><input id="f_name" value="${esc(g.name)}">
+      <label>客户状态</label>
+      <select id="f_status">
+        <option value="prospect" ${g.client_status === "prospect" ? "selected" : ""}>咨询中（未成交）</option>
+        <option value="signed" ${g.client_status === "signed" ? "selected" : ""}>已成交</option>
+      </select>
+      <label>案件类型（如：劳动仲裁）</label><input id="f_case" value="${esc(g.case_type)}">
+      <label>案件阶段（可空）</label><input id="f_stage" value="${esc(g.case_stage)}">
+      <label>承办律师姓氏（话术点名用，如：魏）</label><input id="f_lawyer" value="${esc(g.lawyer_name)}">
+      <label>律师企微账号（提醒推送用）</label><input id="f_luid" value="${esc(g.lawyer_userid)}">
+      <label>第二责任人企微账号（升级提醒）</label><input id="f_buid" value="${esc(g.backup_userid)}">
+      <label>群机器人 Webhook（key 或完整 URL）</label><input id="f_hook" value="${esc(g.robot_webhook)}">
+      <div class="row" style="margin-top:12px">
+        <button class="ghost" onclick="document.getElementById('groupForm').innerHTML=''">取消</button>
+        <button class="primary" style="margin-left:auto" onclick="saveGroup(${isNew}, ${JSON.stringify(g.ai_enabled)})">保存</button>
+      </div>
+    </div>`;
+  document.getElementById("groupForm").scrollIntoView({ behavior: "smooth" });
+}
+async function saveGroup(isNew, aiEnabled) {
+  const gid = document.getElementById("f_gid").value.trim();
+  if (!gid) { alert("群 ID 不能为空"); return; }
+  const profile = {
+    group_id: gid,
+    name: document.getElementById("f_name").value.trim(),
+    client_status: document.getElementById("f_status").value,
+    case_type: document.getElementById("f_case").value.trim(),
+    case_stage: document.getElementById("f_stage").value.trim(),
+    lawyer_name: document.getElementById("f_lawyer").value.trim(),
+    lawyer_userid: document.getElementById("f_luid").value.trim(),
+    backup_userid: document.getElementById("f_buid").value.trim(),
+    ai_enabled: aiEnabled,
+    robot_webhook: document.getElementById("f_hook").value.trim(),
+  };
+  await api(`/groups/${encodeURIComponent(gid)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  document.getElementById("groupForm").innerHTML = "";
+  loadGroups();
+}
+
+// ---------------- 框架
+function setTab(t) {
+  tab = t;
+  for (const k of ["todo", "log", "board", "groups"]) {
+    document.getElementById("tab-" + k).hidden = k !== t;
+    document.getElementById("nav-" + k).classList.toggle("on", k === t);
+  }
+  refresh();
+}
+async function loadHealth() {
+  try {
+    const h = await (await fetch("/health")).json();
+    document.getElementById("modeChip").textContent =
+      h.mode === "live" ? "正式模式" : "影子模式";
+    document.getElementById("modeChip").className =
+      "chip " + (h.mode === "live" ? "green" : "blue");
+    document.getElementById("healthSub").textContent =
+      (h.llm === "rules-only" ? "规则模式" : "AI引擎正常") + (h.queued ? ` · 队列${h.queued}` : "");
+  } catch (e) {
+    document.getElementById("modeChip").textContent = "服务离线";
+    document.getElementById("modeChip").className = "chip red";
+  }
+}
+async function refresh() {
+  loadHealth();
+  try {
+    if (!groupsCache.length) groupsCache = await api("/groups");
+    if (tab === "todo") await loadTodo();
+    if (tab === "log") await loadLog();
+    if (tab === "board") await loadBoard();
+    if (tab === "groups") await loadGroups();
+  } catch (e) { /* 401 时登录层已弹出 */ }
+}
+document.getElementById("tokenInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") doLogin();
+});
+setInterval(() => { if (document.getElementById("login").hidden) refresh(); }, 60000);
+(async () => {
+  if (!token) { showLogin(""); return; }
+  try { await api("/metrics"); refresh(); } catch (e) { /* 弹出登录 */ }
+})();
+</script>
+</body>
+</html>

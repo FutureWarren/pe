@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lawfirm-responder"
-version = "0.1.0"
+version = "0.2.0"
 description = "律所企业微信客户群 AI 第一响应助手：判断引擎 + 合规护栏 + 人工提醒 + 律师控制台 API"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -38,6 +38,9 @@ packages = [
   "responder.store",
   "responder.console",
 ]
+
+[tool.setuptools.package-data]
+"responder.console" = ["static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
