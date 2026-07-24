@@ -1,32 +1,53 @@
 """FastAPI 应用组装与启动入口。"""
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from responder.config import get_settings
 from responder.console.api import router as console_router
+from responder.engine import llm
 from responder.gateway.callback import router as callback_router
 from responder.gateway.sender import WeComSender
 from responder.service import Pipeline
 from responder.store.db import Store
+from responder.worker import Worker
 
 logging.basicConfig(level=logging.INFO)
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="律所群 AI 第一响应助手", version="0.1.0")
     store = Store(settings.db_path)
     sender = WeComSender(settings) if settings.mode == "live" else None
+    pipeline = Pipeline(store, sender, settings)
+    worker = Worker(pipeline, store, pipeline.sender,
+                    poll_seconds=settings.worker_poll_seconds)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        worker.start()
+        yield
+        worker.stop()
+
+    app = FastAPI(title="律所群 AI 第一响应助手", version="0.2.0", lifespan=lifespan)
     app.state.store = store
-    app.state.pipeline = Pipeline(store, sender, settings)
+    app.state.pipeline = pipeline
+    app.state.worker = worker
     app.include_router(callback_router)
     app.include_router(console_router)
 
     @app.get("/health")
     def health():
-        return {"ok": True, "mode": settings.mode}
+        provider = llm.resolve(settings)
+        return {
+            "ok": True,
+            "mode": settings.mode,
+            "version": app.version,
+            "llm": f"{provider.name}:{provider.model}" if provider else "rules-only",
+            "queued": worker.qsize(),
+        }
 
     return app
 

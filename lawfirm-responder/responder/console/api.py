@@ -3,6 +3,8 @@
 前端界面 [待定]（方案建议 React）；Phase 1 影子模式先以 API + 任意 HTTP 客户端复核。
 """
 
+import hmac
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
@@ -13,7 +15,7 @@ from responder.store.db import Store
 def require_admin(request: Request, x_admin_token: str | None = Header(default=None)):
     """公网部署必须配置 RESPONDER_ADMIN_TOKEN；为空时不鉴权（仅限本机开发）。"""
     token = request.app.state.pipeline.settings.admin_token
-    if token and x_admin_token != token:
+    if token and not hmac.compare_digest(x_admin_token or "", token):
         raise HTTPException(401, "missing or invalid X-Admin-Token")
 
 

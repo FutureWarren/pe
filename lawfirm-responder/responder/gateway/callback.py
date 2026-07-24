@@ -6,6 +6,7 @@
   [待定] 客户群消息的最终获取方式取决于律所侧企微配置（会话存档 or 群机器人）。
 """
 
+import logging
 import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -14,6 +15,8 @@ from responder.config import get_settings
 from responder.gateway.wecom_crypto import WeComCrypto
 from responder.models import IncomingMessage
 from responder.service import Pipeline
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -50,11 +53,19 @@ async def receive(
     pipeline: Pipeline = Depends(get_pipeline),
 ):
     body = await request.body()
-    encrypt = ET.fromstring(body).findtext("Encrypt", "")
+    try:
+        encrypt = ET.fromstring(body).findtext("Encrypt", "")
+    except ET.ParseError:
+        return Response(status_code=400)
     if not crypto.verify(msg_signature, timestamp, nonce, encrypt):
         return Response(status_code=403)
 
-    xml = ET.fromstring(crypto.decrypt(encrypt))
+    try:
+        xml = ET.fromstring(crypto.decrypt(encrypt))
+    except (ET.ParseError, ValueError):
+        # 签名已验真但内容异常：回 success 避免企微按超时重发，仅记日志排查
+        logger.warning("undecodable callback payload, ts=%s nonce=%s", timestamp, nonce)
+        return Response(content="success", media_type="text/plain")
     if xml.findtext("MsgType") == "text":
         msg = IncomingMessage(
             msg_id=xml.findtext("MsgId") or f"{timestamp}-{nonce}",
@@ -63,8 +74,14 @@ async def receive(
             content=xml.findtext("Content") or "",
             msg_type="text",
         )
-        pipeline.handle(msg)
-    # 企微要求 5 秒内响应；回复走主动发送通道，回调只回 success
+        # 企微要求 5 秒内应答，判断链路含 LLM 调用与分条发送延时，必须异步处理；
+        # 超时会触发企微重发回调 → 重复处理 → 群里重复说话（worker 以 msg_id 去重兜底）
+        worker = getattr(request.app.state, "worker", None)
+        if worker is not None and pipeline.settings.callback_async:
+            worker.submit(msg)
+        else:
+            pipeline.handle(msg)
+    # 回复走主动发送通道，回调只回 success
     return Response(content="success", media_type="text/plain")
 
 

@@ -39,7 +39,10 @@ fi
 echo "==> 安装系统依赖"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y -qq
-apt-get install -y -qq --no-install-recommends git python3-venv python3-pip curl ca-certificates
+apt-get install -y -qq --no-install-recommends git python3-venv python3-pip curl ca-certificates sqlite3
+
+echo "==> 设置时区 Asia/Shanghai（白天/夜间补位等待时长按本地时间判断）"
+timedatectl set-timezone Asia/Shanghai 2>/dev/null || true
 
 echo "==> 拉取代码（$BRANCH）"
 if [ -d "$APP_DIR/.git" ]; then
@@ -106,8 +109,40 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
+echo "==> 配置每日数据库备份（全量留痕是合规兜底，备份保留 30 天）"
+mkdir -p /opt/pe-backups
+cat > /usr/local/bin/responder-backup <<BACKUP
+#!/usr/bin/env bash
+set -e
+DB=\$(grep -oP '^RESPONDER_DB_PATH=\K.*' "$ENVFILE" 2>/dev/null || echo /opt/pe/lawfirm-responder/responder.db)
+[ -f "\$DB" ] || exit 0
+sqlite3 "\$DB" ".backup '/opt/pe-backups/responder-\$(date +%F).db'"
+find /opt/pe-backups -name 'responder-*.db' -mtime +30 -delete
+BACKUP
+chmod +x /usr/local/bin/responder-backup
+cat > /etc/systemd/system/responder-backup.service <<EOF
+[Unit]
+Description=Responder DB daily backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/responder-backup
+EOF
+cat > /etc/systemd/system/responder-backup.timer <<EOF
+[Unit]
+Description=Responder DB daily backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 systemctl enable -q responder
+systemctl enable -q --now responder-backup.timer
 systemctl restart responder
 sleep 2
 

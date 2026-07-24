@@ -36,7 +36,13 @@ class Settings(BaseSettings):
     # 免责句式开关：业务决策暂不落地，机制保留，合伙人审定句式后置 True
     disclaimer_required: bool = False
 
-    # ---- LLM 层（未配置 ANTHROPIC_API_KEY 时以下全部自动降级为纯规则/模板路径）
+    # 回调异步处理：立即回 success（企微 5 秒超时红线），实际处理交后台工作线程。
+    # 仅测试/本机联调可关。
+    callback_async: bool = True
+    # 后台线程定时事务间隔（秒）：补位等待到点复评、紧急提醒超时升级
+    worker_poll_seconds: float = 10.0
+
+    # ---- LLM 层（deepseek/anthropic 任一 key 未配置时自动降级为纯规则/模板路径）
     # 边界样本复核：规则判「沉默」但可能是漏掉的问题时，交给模型二次确认
     llm_refine_enabled: bool = True
     # 直接回答路径用模型生成一般性法律框架

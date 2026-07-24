@@ -65,6 +65,12 @@ CREATE TABLE IF NOT EXISTS reminders (
     created_at TEXT,
     escalated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS pending_checks (
+    msg_id TEXT PRIMARY KEY,
+    group_id TEXT,
+    due_at TEXT,
+    created_at TEXT
+);
 """
 
 
@@ -72,12 +78,15 @@ class Store:
     def __init__(self, path: str = "responder.db"):
         self.path = path
         with self._conn() as conn:
+            # WAL：API 线程与后台工作线程并发读写不互斥（对文件持久生效）
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
 
     @contextmanager
     def _conn(self):
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=5)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=5000")
         try:
             yield conn
             conn.commit()
@@ -122,15 +131,30 @@ class Store:
             return [dict(r) for r in conn.execute("SELECT * FROM groups").fetchall()]
 
     # ------------------------------------------------------------ messages
-    def save_message(self, m: IncomingMessage) -> None:
+    def save_message(self, m: IncomingMessage) -> bool:
+        """返回是否新消息；False = msg_id 已存在（企微超时重发的重复回调）。"""
         with self._conn() as conn:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT OR IGNORE INTO messages VALUES (?,?,?,?,?,?,?)",
                 (
                     m.msg_id, m.group_id, m.sender_id, int(m.sender_is_staff),
                     m.content, m.msg_type, m.created_at.isoformat(),
                 ),
             )
+            return cur.rowcount > 0
+
+    def get_message(self, msg_id: str) -> IncomingMessage | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM messages WHERE msg_id=?", (msg_id,)
+            ).fetchone()
+        if not row:
+            return None
+        return IncomingMessage(
+            msg_id=row["msg_id"], group_id=row["group_id"], sender_id=row["sender_id"],
+            sender_is_staff=bool(row["sender_is_staff"]), content=row["content"],
+            msg_type=row["msg_type"], created_at=datetime.fromisoformat(row["created_at"]),
+        )
 
     def recent_messages(self, group_id: str, limit: int = 10) -> list[dict]:
         """最近 N 条群消息，按时间正序（注入 LLM 上下文用）。"""
@@ -214,7 +238,39 @@ class Store:
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
 
+    # ------------------------------------------------------------ pending checks
+    def add_pending_check(self, msg_id: str, group_id: str, due_at: datetime) -> None:
+        """登记补位等待到点复评任务（重入以最新 due 为准）。"""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO pending_checks (msg_id,group_id,due_at,created_at)"
+                " VALUES (?,?,?,?)",
+                (msg_id, group_id, due_at.isoformat(), datetime.now().isoformat()),
+            )
+
+    def due_pending_checks(self, now: datetime) -> list[dict]:
+        with self._conn() as conn:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM pending_checks WHERE due_at<=? ORDER BY due_at",
+                    (now.isoformat(),),
+                ).fetchall()
+            ]
+
+    def delete_pending_check(self, msg_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM pending_checks WHERE msg_id=?", (msg_id,))
+
     # ------------------------------------------------------------ reminders
+    def has_reminder(self, msg_id: str) -> bool:
+        """该消息是否已提醒过（复评二次处理同一条消息时不再重复打扰律师）。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM reminders WHERE msg_id=? LIMIT 1", (msg_id,)
+            ).fetchone()
+        return row is not None
+
     def save_reminder(self, r: Reminder) -> int:
         with self._conn() as conn:
             cur = conn.execute(

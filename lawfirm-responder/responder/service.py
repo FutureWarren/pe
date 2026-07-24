@@ -6,11 +6,11 @@
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from responder.config import Settings, get_settings
 from responder.engine import llm, rules
-from responder.engine.decision import decide
+from responder.engine.decision import decide, wait_seconds
 from responder.gateway.sender import WeComSender
 from responder.models import Action, Decision, GroupProfile, IncomingMessage
 from responder.notify import escalation
@@ -73,13 +73,15 @@ class Pipeline:
         since_staff = (
             (datetime.now() - last_staff).total_seconds() if last_staff else None
         )
-        # 律师自己的发言只用于更新接管状态，不进判断
+        # 律师自己的发言只用于更新接管状态，不进判断（沉默同样入判断日志）
         if msg.sender_is_staff:
-            return Decision(
+            decision = Decision(
                 msg_id=msg.msg_id, group_id=msg.group_id,
                 action=Action.SILENCE, category="chitchat",
                 reasons=["staff-message"],
             )
+            self.store.save_decision(decision)
+            return decision
 
         history = self.store.recent_messages(msg.group_id, self.settings.history_window)
 
@@ -94,6 +96,17 @@ class Pipeline:
         if decision.action == Action.SILENCE:
             self.store.save_decision(decision)
             return decision
+
+        # 补位等待未到点：登记到点复评任务，由后台工作线程届时重跑本判断。
+        # 没有这一步，live 模式下非紧急消息会永远停在「等待中」不被发出。
+        if not decision.should_speak and any(
+            r.startswith("gate:waiting") for r in decision.reasons
+        ):
+            required = wait_seconds(datetime.now(), self.settings)
+            self.store.add_pending_check(
+                msg.msg_id, msg.group_id,
+                msg.created_at + timedelta(seconds=required + 1),
+            )
 
         result = generate(
             msg, decision, group, history=history, settings=self.settings,
@@ -117,9 +130,11 @@ class Pipeline:
         # 判断日志在去重/门控修饰后入库，控制台看到的即最终裁决
         self.store.save_decision(decision)
 
-        # 承接类一律触发人工提醒；直接回答类也提醒律师补充
-        reminder = escalation.build_reminder(msg, decision, group, reply_text)
-        escalation.dispatch(reminder, self.store, self.sender)
+        # 承接类一律触发人工提醒；直接回答类也提醒律师补充。
+        # 同一条消息只提醒一次（到点复评会二次经过这里，不重复打扰律师）。
+        if not self.store.has_reminder(msg.msg_id):
+            reminder = escalation.build_reminder(msg, decision, group, reply_text)
+            escalation.dispatch(reminder, self.store, self.sender)
 
         return decision
 

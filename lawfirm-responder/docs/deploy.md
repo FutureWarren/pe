@@ -48,6 +48,7 @@ work.weixin.qq.com → 应用管理 → 自建 → 进入应用：
 | 看实时日志 | `journalctl -u responder -f` |
 | 重启服务 | `systemctl restart responder` |
 | 升级到最新代码 | 重新粘贴部署命令即可（幂等，配置不会被覆盖） |
+| 手动备份数据库 | `/usr/local/bin/responder-backup`（每天 03:30 自动跑，存 `/opt/pe-backups/`，保留 30 天） |
 
 ## 安全须知
 
