@@ -66,7 +66,9 @@ interface DealsStoreContextValue {
 const DealsStoreContext = createContext<DealsStoreContextValue | null>(null);
 
 function getDefaultDeals() {
-  return buildSeedDeals(seedDeals);
+  // Seeds are demo content — mark them so every surface can label them and
+  // they are never mistaken for (or aggregated with) real imports.
+  return buildSeedDeals(seedDeals).map((deal) => ({ ...deal, isSample: true }));
 }
 
 function refreshPersistedDeal(deal: Deal) {

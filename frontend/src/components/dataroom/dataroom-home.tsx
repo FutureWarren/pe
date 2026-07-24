@@ -165,13 +165,13 @@ export function DataroomHome() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2 pt-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
-              <span className="rounded-full border border-border bg-white/75 px-3 py-1 shadow-[0_10px_20px_rgba(19,32,45,0.05)]">
+              <span className="rounded-full border border-border bg-white/75 px-3 py-1">
                 Multi-file import
               </span>
-              <span className="rounded-full border border-border bg-white/75 px-3 py-1 shadow-[0_10px_20px_rgba(19,32,45,0.05)]">
+              <span className="rounded-full border border-border bg-white/75 px-3 py-1">
                 Deterministic formulas
               </span>
-              <span className="rounded-full border border-border bg-white/75 px-3 py-1 shadow-[0_10px_20px_rgba(19,32,45,0.05)]">
+              <span className="rounded-full border border-border bg-white/75 px-3 py-1">
                 Traceable export
               </span>
             </div>

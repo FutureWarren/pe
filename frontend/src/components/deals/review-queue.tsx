@@ -203,8 +203,13 @@ export function ReviewQueueView({ deal }: ReviewQueueViewProps) {
         </CardContent>
       </Card>
 
-      <div ref={queueRef} className="space-y-3">
-        <div className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-muted-foreground">
+      <div ref={queueRef} className="scroll-mt-24 space-y-3">
+        <div
+          key={activityNote}
+          role="status"
+          aria-live="polite"
+          className="animate-note-in rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-muted-foreground"
+        >
           {activityNote}
         </div>
         <div className="rounded-2xl border border-border bg-white/80 px-4 py-3">

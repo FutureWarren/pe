@@ -164,7 +164,7 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
         </div>
       </section>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="lift-card animate-fade-up animate-delay-1 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Databook status</CardDescription>

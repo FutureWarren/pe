@@ -376,6 +376,8 @@ export interface Deal {
   id: string;
   targetCompanyName: string;
   sector: string;
+  /** Seeded demo workspace — labeled in the UI so it can't be mistaken for a real deal. */
+  isSample?: boolean;
   status: DealStatus;
   outputStatus?: string;
   sourceFilesConnected: boolean;

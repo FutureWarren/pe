@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { FileText, FolderOpenDot } from "lucide-react";
 
 import { StatusBadge } from "@/components/deals/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Deal } from "@/lib/types";
@@ -29,13 +30,14 @@ export function WorkspaceSidebar({ deal, focusedFileId }: WorkspaceSidebarProps)
 
   return (
     <div className="space-y-4">
-      <Card className="sticky top-24">
+      <Card className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto workspace-scroll">
         <CardHeader>
           <CardDescription className="uppercase tracking-[0.18em]">
             Deal workspace
           </CardDescription>
           <CardTitle className="text-2xl">{deal.targetCompanyName}</CardTitle>
           <div className="flex flex-wrap gap-2">
+            {deal.isSample ? <Badge tone="warning">Sample</Badge> : null}
             <StatusBadge value={deal.status} />
             <StatusBadge value={`${deal.exceptionCount} exceptions`} />
           </div>

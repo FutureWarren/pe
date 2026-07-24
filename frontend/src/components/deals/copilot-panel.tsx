@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState, useTransition } from "react";
+import { FormEvent, useEffect, useRef, useState, useTransition } from "react";
 
 import { BotMessageSquare, LocateFixed, MessageSquareMore, SendHorizonal } from "lucide-react";
 
@@ -37,6 +37,16 @@ function buildWelcomeMessage(): ChatMessage {
 export function CopilotPanel({ deal, onLocateFile }: CopilotPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([buildWelcomeMessage()]);
   const [draft, setDraft] = useState("");
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // Keep the newest message in view — the scroll container doesn't follow
+  // appended bubbles on its own.
+  useEffect(() => {
+    const node = chatScrollRef.current;
+    if (!node) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    node.scrollTo({ top: node.scrollHeight, behavior: reduceMotion ? "auto" : "smooth" });
+  }, [messages.length]);
   const [isPending, startTransition] = useTransition();
 
   const submitPrompt = (value: string) => {
@@ -74,7 +84,7 @@ export function CopilotPanel({ deal, onLocateFile }: CopilotPanelProps) {
   };
 
   return (
-    <Card className="sticky top-24">
+    <Card className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto workspace-scroll">
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -111,12 +121,12 @@ export function CopilotPanel({ deal, onLocateFile }: CopilotPanelProps) {
           ))}
         </div>
 
-        <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+        <div ref={chatScrollRef} className="workspace-scroll max-h-[420px] space-y-3 overflow-y-auto pr-1">
           {messages.map((message) => (
             <div
               key={message.id}
               className={cn(
-                "space-y-2",
+                "animate-note-in space-y-2",
                 message.role === "user" ? "ml-6" : "mr-4",
               )}
             >

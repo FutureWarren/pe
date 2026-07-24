@@ -93,7 +93,12 @@ export function OutputCenterView({ deal }: OutputCenterViewProps) {
         }
       />
 
-      <div className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-muted-foreground">
+      <div
+        key={activityNote}
+        role="status"
+        aria-live="polite"
+        className="animate-note-in rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-muted-foreground"
+      >
         {activityNote}
       </div>
 

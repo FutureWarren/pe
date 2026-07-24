@@ -9,6 +9,7 @@ import { DataroomStepStrip } from "@/components/dataroom/dataroom-step-strip";
 import { DealNotFoundState } from "@/components/deals/deal-not-found-state";
 import { PageIntro } from "@/components/deals/page-intro";
 import { StatusBadge } from "@/components/deals/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -156,7 +157,8 @@ export function DataroomProcessView({ dealId }: DataroomProcessViewProps) {
         <div className="space-y-6">
           <PageIntro
             eyebrow="Process"
-          title="Process imported files into a clean databook structure."
+            badge={deal.isSample ? <Badge tone="warning">Sample data</Badge> : null}
+            title="Process imported files into a clean databook structure."
             description={
               backendRunSubtitle
                 ? `The Python pipeline parsed the files, Gemini helped interpret the extracted evidence, and deterministic logic calculated the databook metrics. ${backendRunSubtitle}`
@@ -311,7 +313,7 @@ export function DataroomProcessView({ dealId }: DataroomProcessViewProps) {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="lift-card animate-fade-up animate-delay-2 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Rows understood</CardDescription>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { ArrowLeft, ArrowRight, ShieldAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
 
 import { DealNotFoundState } from "@/components/deals/deal-not-found-state";
 import { PageIntro } from "@/components/deals/page-intro";
@@ -93,19 +93,19 @@ export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-1 bg-white/[0.88]">
           <CardHeader>
             <CardDescription>Open review items</CardDescription>
-            <CardTitle className="text-3xl">{blockingItems.length + nonBlockingItems.length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{blockingItems.length + nonBlockingItems.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="lift-card animate-fade-up animate-delay-2 bg-white/[0.88]">
           <CardHeader>
             <CardDescription>Table warnings</CardDescription>
-            <CardTitle className="text-3xl">{tableWarnings.length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{tableWarnings.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="lift-card animate-fade-up animate-delay-3 bg-white/[0.88]">
           <CardHeader>
             <CardDescription>Rows ready in export</CardDescription>
-            <CardTitle className="text-3xl">{exportableRows}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{exportableRows}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -145,7 +145,7 @@ export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
       {openItems.length === 0 ? (
         <Card className="lift-card animate-fade-up animate-delay-5 bg-white/[0.88]">
           <CardContent className="mt-0 flex items-start gap-3 py-8 text-sm text-muted-foreground">
-            <ShieldAlert className="mt-0.5 h-5 w-5 text-success" />
+            <CheckCircle2 className="mt-0.5 h-5 w-5 text-success" />
             No open review items remain. The databook is ready to export.
           </CardContent>
         </Card>
@@ -193,7 +193,7 @@ export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
               : null;
 
             return (
-              <Card key={item.id} className="lift-card animate-fade-up animate-delay-5 bg-white/[0.88]">
+              <Card key={item.id} className="lift-card animate-scale-in bg-white/[0.88]">
                 <CardHeader>
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="space-y-2">

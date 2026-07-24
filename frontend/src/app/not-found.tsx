@@ -16,7 +16,7 @@ export default function NotFound() {
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
           <Link className={cn(buttonVariants({ variant: "default" }))} href="/">
-            Return to deals dashboard
+            Return to import home
           </Link>
           <Link className={cn(buttonVariants({ variant: "secondary" }))} href="/deals/new">
             Open new deal intake
