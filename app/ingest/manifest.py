@@ -39,6 +39,22 @@ def build_source_manifest(data_room_dir: Path) -> SourceManifest:
     skipped_files: list[SkippedFile] = []
 
     for path in sorted(p for p in data_room_dir.rglob("*") if p.is_file()):
+        # rglob follows symlinks; a link pointing outside the data room (e.g. to
+        # /etc/passwd or another deal's folder) would otherwise be ingested as
+        # in-scope evidence. Reject anything whose real path escapes the room.
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(data_room_dir)
+        except (ValueError, OSError):
+            skipped_files.append(
+                SkippedFile(
+                    rel_path=path.name,
+                    extension=path.suffix.lower(),
+                    reason="path_escapes_data_room",
+                )
+            )
+            continue
+
         file_type = SUPPORTED_FILE_TYPES.get(path.suffix.lower())
         if not file_type:
             skipped_files.append(

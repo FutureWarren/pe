@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -12,17 +13,38 @@ from openpyxl.utils import get_column_letter
 
 from app.models.source import SourceDocument, SourceManifest, SourceSegment
 
+# A bare year is 19xx / 20xx — NOT any 4-digit run (which would match data values
+# like 1000 or 3500 and cause real data rows to be mistaken for period headers).
 PERIOD_HEADER_RE = re.compile(
-    r"(?i)(fy\s*\d{4}|\bq[1-4]\s*\d{4}\b|\b\d{4}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*[\s\-_/]+\d{4}\b|\b\d{4}[-_/]\d{2}\b)"
+    r"(?i)(fy\s*\d{4}|\bq[1-4]\s*\d{4}\b|\b(?:19|20)\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*[\s\-_/]+\d{4}\b|\b\d{4}[-_/]\d{2}\b)"
 )
+
+# Bounded resource caps so a single malformed / adversarial file cannot exhaust
+# memory or spin forever. When a cap is hit we still return what we parsed plus
+# an explicit truncation note — never a silent drop.
+MAX_PDF_PAGES = 1_000
+MAX_TABLE_ROWS = 50_000
 
 
 def parse_documents(manifest: SourceManifest) -> list[SourceSegment]:
-    """Parse source documents into trackable segments."""
+    """Parse source documents into trackable segments.
+
+    Each document is parsed in isolation: a crash on one file (encrypted PDF,
+    truncated workbook, mislabeled extension, zip bomb) is converted into a
+    flagged note segment so the remaining files in the data room still process.
+    """
 
     segments: list[SourceSegment] = []
     for document in manifest.documents:
-        segments.extend(_parse_document(document))
+        try:
+            segments.extend(_parse_document(document))
+        except Exception as exc:  # noqa: BLE001 - isolate per-file parser failures
+            segments.append(
+                _build_note_segment(
+                    document,
+                    reason=f"Parser failed for {document.file_name}: {type(exc).__name__}: {exc}",
+                )
+            )
     return segments
 
 
@@ -52,7 +74,9 @@ def _parse_document(document: SourceDocument) -> list[SourceSegment]:
 def _parse_text_document(document: SourceDocument) -> list[SourceSegment]:
     """Parse a plain text file into text sections."""
 
-    text = document.absolute_path.read_text(encoding="utf-8", errors="ignore")
+    # utf-8-sig strips a BOM if present; errors="replace" makes any undecodable
+    # byte visible (U+FFFD) instead of silently deleting characters.
+    text = document.absolute_path.read_text(encoding="utf-8-sig", errors="replace")
     chunks = [chunk.strip() for chunk in re.split(r"\n\s*\n", text) if chunk.strip()]
     if not chunks:
         return [_build_note_segment(document, reason="Text file was empty.")]
@@ -88,7 +112,11 @@ def _parse_pdf_document(document: SourceDocument) -> list[SourceSegment]:
 
     reader = PdfReader(str(document.absolute_path))
     segments: list[SourceSegment] = []
+    truncated = False
     for page_number, page in enumerate(reader.pages, start=1):
+        if page_number > MAX_PDF_PAGES:
+            truncated = True
+            break
         text = (page.extract_text() or "").strip()
         if not text:
             continue
@@ -109,6 +137,13 @@ def _parse_pdf_document(document: SourceDocument) -> list[SourceSegment]:
             )
         )
 
+    if truncated:
+        segments.append(
+            _build_note_segment(
+                document,
+                reason=f"PDF truncated at {MAX_PDF_PAGES} pages; remaining pages were not parsed.",
+            )
+        )
     if not segments:
         return [_build_note_segment(document, reason="No extractable PDF text found.")]
     return segments
@@ -117,9 +152,20 @@ def _parse_pdf_document(document: SourceDocument) -> list[SourceSegment]:
 def _parse_csv_document(document: SourceDocument) -> list[SourceSegment]:
     """Parse CSV rows with header tracking for period-aware extraction."""
 
-    with document.absolute_path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
-        rows = list(csv.reader(handle))
-    return _table_rows_to_segments(document, rows, sheet_name="CSV", segment_type="csv_row")
+    # utf-8-sig strips a BOM (otherwise the first header cell becomes "﻿X"
+    # and header detection breaks); errors="replace" keeps undecodable bytes
+    # visible instead of silently deleting them.
+    with document.absolute_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+        sample = handle.read(65536)
+        handle.seek(0)
+        delimiter = _sniff_csv_delimiter(sample)
+        # Widen the field-size limit (bounded) so a single oversized pasted cell
+        # does not raise "_csv.Error: field larger than field limit".
+        _widen_csv_field_limit()
+        rows = list(csv.reader(handle, delimiter=delimiter))
+    return _table_rows_to_segments(document, rows, sheet_name="CSV", segment_type="csv_row") or [
+        _build_note_segment(document, reason="CSV contained no data rows.")
+    ]
 
 
 def _parse_xlsx_document(document: SourceDocument) -> list[SourceSegment]:
@@ -140,7 +186,24 @@ def _parse_xlsx_document(document: SourceDocument) -> list[SourceSegment]:
                 segment_type="sheet_row",
             )
         )
-    return segments or [_build_note_segment(document, reason="Workbook contained no populated rows.")]
+    if segments:
+        return segments
+    # No values came back. Distinguish a genuinely empty workbook from one whose
+    # cells are formulas with no cached result (files written by openpyxl or some
+    # LibreOffice/script exports) — the latter would otherwise drop every computed
+    # number silently and look like a clean-but-empty parse.
+    if _xlsx_has_formulas(document.absolute_path):
+        return [
+            _build_note_segment(
+                document,
+                reason=(
+                    "Workbook cells are formulas with no cached values, so no numbers "
+                    "could be read. Re-save it in Excel (which stores results) or supply "
+                    "a values-only export."
+                ),
+            )
+        ]
+    return [_build_note_segment(document, reason="Workbook contained no populated rows.")]
 
 
 def _parse_xls_document(document: SourceDocument) -> list[SourceSegment]:
@@ -234,8 +297,12 @@ def _table_rows_to_segments(
 
     segments: list[SourceSegment] = []
     current_header: Optional[list[str]] = None
+    truncated = False
 
     for row_index, row in enumerate(rows, start=1):
+        if row_index > MAX_TABLE_ROWS:
+            truncated = True
+            break
         cells = [cell.strip() for cell in row]
         if not any(cells):
             continue
@@ -268,16 +335,43 @@ def _table_rows_to_segments(
             )
         )
 
+    if truncated:
+        segments.append(
+            _build_note_segment(
+                document,
+                reason=(
+                    f"{sheet_name} truncated at {MAX_TABLE_ROWS} rows; "
+                    "remaining rows were not parsed."
+                ),
+            )
+        )
     return segments
 
 
 def _looks_like_header_row(cells: list[str]) -> bool:
-    """Return True when a row appears to be a period header row."""
+    """Return True when a row appears to be a period header row.
 
-    if len(cells) < 2:
+    A header's period cells should be period *labels* (``FY2024``, ``Q1-24``,
+    ``Jan-25``) rather than plain numbers. When every period-matching cell is a
+    bare number — indistinguishable from a data value like ``2024`` used as an
+    amount — only treat the row as a header if the first (label) cell is blank,
+    the classic "empty corner" header layout. Otherwise it is a data row and
+    must not be silently dropped.
+    """
+
+    if len(cells) < 2 or _is_numeric_like(cells[0]):
         return False
-    period_hits = sum(1 for cell in cells[1:] if PERIOD_HEADER_RE.search(cell.strip()))
-    return period_hits >= 1 and not _is_numeric_like(cells[0])
+    trailing = [cell.strip() for cell in cells[1:] if cell.strip()]
+    if not trailing:
+        return False
+    labelled = [cell for cell in trailing if PERIOD_HEADER_RE.search(cell)]
+    if not labelled:
+        return False
+    non_bare = [cell for cell in labelled if not _is_numeric_like(cell)]
+    if non_bare:
+        return len(labelled) >= max(1, (len(trailing) + 1) // 2)
+    # All period matches are bare numbers → header only if the corner cell is empty.
+    return not cells[0].strip()
 
 
 def _build_row_range(row_number: int, cell_count: int) -> str:
@@ -304,6 +398,53 @@ def _build_note_segment(document: SourceDocument, reason: str) -> SourceSegment:
         parsed_artifact_path=None,
         metadata={"file_name": document.file_name, "parse_error": reason},
     )
+
+
+def _xlsx_has_formulas(path: Path, scan_limit: int = 5000) -> bool:
+    """Return True if the workbook contains any formula cell (bounded scan)."""
+
+    try:
+        formula_wb = load_workbook(path, data_only=False, read_only=True)
+    except Exception:  # noqa: BLE001 - detection is best-effort
+        return False
+    scanned = 0
+    for sheet in formula_wb.worksheets:
+        for row in sheet.iter_rows(values_only=True):
+            for value in row:
+                if isinstance(value, str) and value.startswith("="):
+                    return True
+                scanned += 1
+                if scanned >= scan_limit:
+                    return False
+    return False
+
+
+def _sniff_csv_delimiter(sample: str) -> str:
+    """Detect the CSV delimiter, defaulting to comma.
+
+    European exports use ``;`` (comma is their decimal separator); bank/ERP
+    exports often use tab or ``|``. Without this a semicolon/tab file collapses
+    into a single column and every value becomes unusable with no flag.
+    """
+
+    if not sample.strip():
+        return ","
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+        return dialect.delimiter
+    except csv.Error:
+        return ","
+
+
+def _widen_csv_field_limit() -> None:
+    """Raise the csv field-size limit to a bounded ceiling (not unbounded)."""
+
+    ceiling = min(sys.maxsize, 16 * 1024 * 1024)
+    try:
+        if csv.field_size_limit() < ceiling:
+            csv.field_size_limit(ceiling)
+    except OverflowError:  # pragma: no cover - platform dependent
+        csv.field_size_limit(16 * 1024 * 1024)
 
 
 def _is_numeric_like(value: str) -> bool:
