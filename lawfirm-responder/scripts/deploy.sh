@@ -12,9 +12,29 @@ set -euo pipefail
 
 BRANCH="${DEPLOY_BRANCH:-claude/law-firm-wechat-ai-responder-q3nttv}"
 REPO="${DEPLOY_REPO:-https://github.com/FutureWarren/pe.git}"
+# 国内服务器访问 GitHub 不稳时，可传 GH_MIRROR=https://ghfast.top 走加速镜像
+GH_MIRROR="${GH_MIRROR:-}"
 APP_DIR=/opt/pe
 VENV=/opt/pe-venv
 ENVFILE="$APP_DIR/lawfirm-responder/.env"
+
+echo "==> 检查系统版本"
+PYV=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null || echo 0)
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+  echo "❌ 本机 Python 为 $PYV，需要 ≥3.10。请把系统重装为 Ubuntu 22.04/24.04 后重试。" >&2
+  echo "   路径：轻量云控制台 → 该实例 → 更多操作 → 重装系统 → 系统镜像 → Ubuntu 22.04" >&2
+  exit 1
+fi
+echo "    Python $PYV ✅"
+
+# GitHub 连通性探测：不通且未指定镜像时自动启用加速
+if [ -z "$GH_MIRROR" ] && ! curl -fsS -m 8 -o /dev/null https://github.com; then
+  GH_MIRROR="https://ghfast.top"
+  echo "==> GitHub 直连不通，启用加速镜像 $GH_MIRROR"
+fi
+if [ -n "$GH_MIRROR" ]; then
+  REPO="${GH_MIRROR}/${REPO}"
+fi
 
 echo "==> 安装系统依赖"
 export DEBIAN_FRONTEND=noninteractive
