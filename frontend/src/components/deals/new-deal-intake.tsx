@@ -98,7 +98,7 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
     getInitialScanSummary(deal),
   );
   const [activityNote, setActivityNote] = useState(
-    "CSV and XLSX files are now parsed locally in the browser. PDF and other unsupported types still stay as placeholders in this sprint.",
+    "Supported files are sent to the local Python pipeline (and Gemini for document extraction) for parsing. Unsupported types stay as placeholders in this sprint.",
   );
   const [createdDealId, setCreatedDealId] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -207,6 +207,14 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
       }
 
       setStagedUploads([]);
+    } catch (error) {
+      // Without this, a backend/Gemini failure just stops the spinner with no
+      // message — the screen looks broken.
+      setActivityNote(
+        error instanceof Error
+          ? `Scan failed: ${error.message}`
+          : "Scan failed. Check that the backend is running and try again.",
+      );
     } finally {
       setIsScanning(false);
     }
@@ -220,7 +228,7 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
           label={intakeStage.label}
           status={intakeStage.status}
           message="Intake stays accessible here whenever more source files arrive and need to be folded into the live workflow."
-          helperText="CSV and XLSX files are parsed locally in the browser, then pushed directly into extraction, mapping, review, and output state."
+          helperText="Files are sent to the local Python pipeline (and Gemini) for parsing, then flow into extraction, mapping, review, and output state."
           metrics={[
             { label: "Files in room", value: `${manifest.length} connected` },
             { label: "Pending scan", value: `${stagedUploads.length} new files` },
@@ -349,7 +357,7 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
                     : "Upload local CSV or XLSX files"}
                 </h2>
                 <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                  Supported files are parsed locally in the browser during the intake scan. Sample
+                  Supported files are sent to the local Python pipeline for parsing during the intake scan. Sample
                   templates and unsupported files still remain demo placeholders.
                 </p>
               </div>

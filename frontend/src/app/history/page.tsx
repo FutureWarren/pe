@@ -45,7 +45,7 @@ export default function HistoryPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "无法加载历史记录。请确认本机已运行 angelic-api。",
+          : "Could not load history. Make sure the angelic-api backend is running.",
       );
       setRuns([]);
     } finally {
@@ -65,7 +65,7 @@ export default function HistoryPage() {
       router.push(`/process/${deal.id}`);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "打开该项目失败，请稍后重试。",
+        err instanceof Error ? err.message : "Could not open this run. Please try again.",
       );
     } finally {
       setOpeningId(null);

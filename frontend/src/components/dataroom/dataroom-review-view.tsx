@@ -19,9 +19,12 @@ interface DataroomReviewViewProps {
 
 export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
   const deal = useDealById(dealId);
-  const { updateReviewItemStatus } = useDealsStore();
+  const { updateReviewItemStatus, hydrated } = useDealsStore();
 
   if (!deal) {
+    if (!hydrated) {
+      return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
+    }
     return <DealNotFoundState />;
   }
 

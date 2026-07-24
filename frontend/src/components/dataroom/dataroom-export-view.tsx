@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useDealById } from "@/lib/deals-store";
+import { useDealById, useDealsStore } from "@/lib/deals-store";
 import { buildBackendRunSubtitle, isBackendDealReadyForExport } from "@/lib/backend-pipeline";
 import { downloadDatabookCsv, downloadDatabookXlsx } from "@/lib/export";
 import { getDatabookReadiness } from "@/lib/formula-engine";
@@ -26,12 +26,16 @@ interface DataroomExportViewProps {
 
 export function DataroomExportView({ dealId }: DataroomExportViewProps) {
   const deal = useDealById(dealId);
+  const { hydrated } = useDealsStore();
   const backendRunSubtitle = deal ? buildBackendRunSubtitle(deal) : null;
   const [activityNote, setActivityNote] = useState(
     "The export output is a workbook with source rows, understood rows, databook inputs, final metrics, traceability, and any open review items.",
   );
 
   if (!deal) {
+    if (!hydrated) {
+      return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
+    }
     return <DealNotFoundState />;
   }
 
@@ -81,13 +85,21 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
                 </Button>
                 <Button
                   type="button"
-                  onClick={() => {
-                    downloadDatabookXlsx(deal);
-                    setActivityNote(
-                      deal.processingEngine === "backend_python"
-                        ? "Downloaded the Python-generated databook workbook (.xlsx)."
-                        : "Downloaded the current databook workbook (.xlsx).",
-                    );
+                  onClick={async () => {
+                    try {
+                      await downloadDatabookXlsx(deal);
+                      setActivityNote(
+                        deal.processingEngine === "backend_python"
+                          ? "Downloaded the Python-generated databook workbook (.xlsx)."
+                          : "Downloaded the current databook workbook (.xlsx).",
+                      );
+                    } catch (err) {
+                      setActivityNote(
+                        err instanceof Error
+                          ? `Download failed: ${err.message}`
+                          : "Download failed. Please try again.",
+                      );
+                    }
                   }}
                   disabled={!ready}
                   className="shadow-[0_18px_38px_rgba(31,57,80,0.18)]"

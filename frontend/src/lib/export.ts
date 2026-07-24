@@ -140,16 +140,35 @@ export function downloadDatabookCsv(deal: Deal) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadDatabookXlsx(deal: Deal) {
+export async function downloadDatabookXlsx(deal: Deal) {
   const backendWorkbookPath = getBackendWorkbookDownloadPath(deal);
 
   if (backendWorkbookPath) {
+    // Fetch and verify before saving — otherwise a 404/502 error payload gets
+    // downloaded as a file named like a workbook, which opens as garbage.
+    const response = await fetch(backendWorkbookPath);
+    if (!response.ok) {
+      let detail = "";
+      try {
+        detail = ((await response.json()) as { error?: string }).error ?? "";
+      } catch {
+        detail = "";
+      }
+      throw new Error(detail || `Could not download the databook (status ${response.status}).`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = backendWorkbookPath;
-    link.download = "";
+    const fileStub = `${deal.targetCompanyName}-databook`
+      .toLowerCase()
+      .replaceAll(/[^a-z0-9]+/g, "-")
+      .replaceAll(/^-|-$/g, "");
+    link.href = url;
+    link.download = `${fileStub || "databook"}.xlsx`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     return;
   }
 

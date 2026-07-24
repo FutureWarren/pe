@@ -12,7 +12,7 @@ import { StatusBadge } from "@/components/deals/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { useDealById } from "@/lib/deals-store";
+import { useDealById, useDealsStore } from "@/lib/deals-store";
 import { buildBackendRunSubtitle, isBackendDealReadyForExport } from "@/lib/backend-pipeline";
 import { getDatabookReadiness } from "@/lib/formula-engine";
 import { buildDatabookExportRows, getDatabookMetrics, unmappedCategory } from "@/lib/local-pipeline";
@@ -24,8 +24,14 @@ interface DataroomProcessViewProps {
 
 export function DataroomProcessView({ dealId }: DataroomProcessViewProps) {
   const deal = useDealById(dealId);
+  const { hydrated } = useDealsStore();
 
   if (!deal) {
+    // Deals live in localStorage; before hydration the store only has seeds, so a
+    // real deal would briefly render "Deal not found" on a hard refresh. Wait.
+    if (!hydrated) {
+      return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
+    }
     return <DealNotFoundState />;
   }
 
