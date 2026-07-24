@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { ArrowRight, Building2 } from "lucide-react";
 
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -29,6 +30,7 @@ export function TopBar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <Button asChild variant="outline" size="sm">
             <Link href="/history">History</Link>
           </Button>

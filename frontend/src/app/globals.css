@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Manual theme switching: `dark:` utilities follow the .dark class (set by the
+   TopBar toggle / no-FOUC script), not the OS media query alone. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   --font-sans: var(--font-public-sans);
   --font-mono: var(--font-ibm-plex-mono);
@@ -18,21 +22,27 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  /* `white` is used exclusively as a SURFACE color in this codebase (audited:
+     zero text-white/border-white call sites), so it is theme-mapped — in dark
+     mode every bg-white/x becomes a raised dark surface automatically. */
+  --color-white: var(--surface-white);
   /* Motion primitives — calm, decisive easings for an institutional product. */
   --ease-swift: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
-  /* Elevation scale — replaces the per-callsite arbitrary shadows. */
-  --shadow-raised: 0 18px 38px rgba(31, 57, 80, 0.18);
-  --shadow-panel: 0 20px 44px rgba(19, 32, 45, 0.05);
-  --shadow-card: 0 18px 45px rgba(20, 31, 45, 0.06);
+  /* Elevation scale — theme-dependent (dark surfaces need deeper shadows). */
+  --shadow-raised: var(--shadow-raised-v);
+  --shadow-panel: var(--shadow-panel-v);
+  --shadow-card: var(--shadow-card-v);
 }
 
 :root {
+  color-scheme: light;
   --background: #f3f5f7;
   --foreground: #13202d;
   --surface: rgba(255, 255, 255, 0.84);
   --surface-strong: rgba(255, 255, 255, 0.95);
   --surface-muted: rgba(246, 248, 250, 0.94);
+  --surface-white: #ffffff;
   --border: rgba(19, 32, 45, 0.1);
   --border-strong: rgba(19, 32, 45, 0.18);
   --accent: #1f3950;
@@ -41,9 +51,74 @@
   --muted: #d8e0e8;
   --muted-foreground: #5e6c79;
   --success: #326b4a;
-  /* #8a5a10 keeps the gold hue but passes WCAG AA on its /10 tint (was #a26917 ≈ 4.0:1). */
+  /* #8a5a10 keeps the gold hue but passes WCAG AA on its /10 tint. */
   --warning: #8a5a10;
   --danger: #a1423d;
+  /* "Ink" — the neutral used for hairlines, grid textures, and scrollbars.
+     Stored as an RGB triple so alpha can vary per use. */
+  --ink-rgb: 19, 32, 45;
+  /* Accent-tinted decorative glows (orb, hero washes). */
+  --glow-rgb: 31, 57, 80;
+  --selection-bg: rgba(31, 57, 80, 0.16);
+  --body-bg:
+    radial-gradient(circle at top left, rgba(31, 57, 80, 0.12), transparent 34%),
+    radial-gradient(circle at top right, rgba(17, 88, 118, 0.08), transparent 28%),
+    linear-gradient(180deg, #f7f9fb 0%, #eef2f5 100%);
+  --panel-hero-bg:
+    linear-gradient(140deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 250, 0.84)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.62));
+  --panel-surface-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 249, 251, 0.82));
+  --panel-metric-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.76));
+  --panel-inset: rgba(255, 255, 255, 0.72);
+  --panel-ring: rgba(255, 255, 255, 0.46);
+  --shadow-raised-v: 0 18px 38px rgba(31, 57, 80, 0.18);
+  --shadow-panel-v: 0 20px 44px rgba(19, 32, 45, 0.05);
+  --shadow-card-v: 0 18px 45px rgba(20, 31, 45, 0.06);
+  --shadow-hero: 0 30px 80px rgba(19, 32, 45, 0.07);
+  --shadow-metric: 0 16px 38px rgba(19, 32, 45, 0.045);
+  --shadow-lift: 0 26px 56px rgba(19, 32, 45, 0.08);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #0d141c;
+  --foreground: #e4ecf3;
+  --surface: rgba(22, 32, 43, 0.84);
+  --surface-strong: rgba(27, 38, 51, 0.95);
+  --surface-muted: rgba(18, 27, 37, 0.94);
+  --surface-white: #16202b;
+  --border: rgba(214, 230, 244, 0.1);
+  --border-strong: rgba(214, 230, 244, 0.2);
+  /* The accent flips to a light steel blue so text-accent stays readable on
+     dark surfaces; accent-foreground flips dark for solid accent buttons. */
+  --accent: #7fa8cd;
+  --accent-strong: #93b7d8;
+  --accent-foreground: #0b131c;
+  --muted: #223140;
+  --muted-foreground: #97a9bb;
+  --success: #6dbb8e;
+  --warning: #d6a552;
+  --danger: #e2938c;
+  --ink-rgb: 214, 230, 244;
+  --glow-rgb: 127, 168, 205;
+  --selection-bg: rgba(127, 168, 205, 0.3);
+  --body-bg:
+    radial-gradient(circle at top left, rgba(64, 100, 132, 0.2), transparent 34%),
+    radial-gradient(circle at top right, rgba(35, 92, 116, 0.14), transparent 28%),
+    linear-gradient(180deg, #101823 0%, #0b1118 100%);
+  --panel-hero-bg:
+    linear-gradient(140deg, rgba(30, 42, 56, 0.95), rgba(21, 31, 42, 0.86)),
+    linear-gradient(180deg, rgba(28, 40, 53, 0.75), rgba(24, 35, 47, 0.62));
+  --panel-surface-bg: linear-gradient(180deg, rgba(28, 40, 53, 0.92), rgba(22, 32, 43, 0.84));
+  --panel-metric-bg: linear-gradient(180deg, rgba(30, 42, 56, 0.88), rgba(23, 33, 45, 0.78));
+  --panel-inset: rgba(255, 255, 255, 0.05);
+  --panel-ring: rgba(255, 255, 255, 0.06);
+  --shadow-raised-v: 0 18px 38px rgba(0, 0, 0, 0.45);
+  --shadow-panel-v: 0 20px 44px rgba(0, 0, 0, 0.3);
+  --shadow-card-v: 0 18px 45px rgba(0, 0, 0, 0.32);
+  --shadow-hero: 0 30px 80px rgba(0, 0, 0, 0.4);
+  --shadow-metric: 0 16px 38px rgba(0, 0, 0, 0.28);
+  --shadow-lift: 0 26px 56px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -56,12 +131,10 @@ html {
 
 body {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(31, 57, 80, 0.12), transparent 34%),
-    radial-gradient(circle at top right, rgba(17, 88, 118, 0.08), transparent 28%),
-    linear-gradient(180deg, #f7f9fb 0%, #eef2f5 100%);
+  background: var(--body-bg);
   color: var(--foreground);
   font-family: var(--font-public-sans), sans-serif;
+  transition: background-color 300ms ease, color 300ms ease;
 }
 
 body::before {
@@ -69,8 +142,8 @@ body::before {
   inset: 0;
   z-index: -1;
   background-image:
-    linear-gradient(rgba(19, 32, 45, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(19, 32, 45, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(var(--ink-rgb), 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ink-rgb), 0.03) 1px, transparent 1px);
   background-size: 88px 88px;
   content: "";
   opacity: 0.25;
@@ -85,7 +158,7 @@ body::after {
   height: 28rem;
   width: 28rem;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(31, 57, 80, 0.14) 0%, rgba(31, 57, 80, 0) 68%);
+  background: radial-gradient(circle, rgba(var(--glow-rgb), 0.14) 0%, rgba(var(--glow-rgb), 0) 68%);
   content: "";
   filter: blur(10px);
   opacity: 0.7;
@@ -93,42 +166,47 @@ body::after {
   animation: orb-drift 18s ease-in-out infinite alternate;
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
+/* Element resets live in the base layer so Tailwind utilities (layer
+   utilities) can override them — unlayered rules would beat every utility
+   regardless of specificity (this silently ate text-* colors on links). */
+@layer base {
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 
-/* Baseline keyboard-focus treatment: every focusable element gets a visible
-   accent outline unless a component supplies its own focus-visible ring. */
-a:focus-visible,
-button:focus-visible,
-[tabindex]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 6px;
-}
+  /* Baseline keyboard-focus treatment: every focusable element gets a visible
+     accent outline unless a component supplies its own focus-visible ring. */
+  a:focus-visible,
+  button:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
 
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: none; /* components carry their own visible ring */
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none; /* components carry their own visible ring */
+  }
 }
 
 ::selection {
-  background: rgba(31, 57, 80, 0.16);
+  background: var(--selection-bg);
 }
 
 .workspace-scroll,
 .table-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(31, 57, 80, 0.18) transparent;
+  scrollbar-color: rgba(var(--ink-rgb), 0.22) transparent;
 }
 
 .workspace-scroll::-webkit-scrollbar,
@@ -139,7 +217,7 @@ textarea:focus-visible {
 
 .workspace-scroll::-webkit-scrollbar-thumb,
 .table-scroll::-webkit-scrollbar-thumb {
-  background: rgba(31, 57, 80, 0.18);
+  background: rgba(var(--ink-rgb), 0.22);
   border-radius: 999px;
 }
 
@@ -148,9 +226,7 @@ textarea:focus-visible {
   background: transparent;
 }
 
-/* Panels live in the components layer so Tailwind utilities on the same element
-   (border/background/radius/shadow overrides at call sites) win over them —
-   previously these were unlayered and silently defeated utility classes. */
+/* Panels live in the components layer so Tailwind utilities at call sites win. */
 @layer components {
   .page-shell {
     position: relative;
@@ -165,14 +241,12 @@ textarea:focus-visible {
   }
 
   .hero-panel {
-    border: 1px solid rgba(19, 32, 45, 0.12);
+    border: 1px solid rgba(var(--ink-rgb), 0.12);
     border-radius: 28px;
-    background:
-      linear-gradient(140deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 250, 0.84)),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.62));
+    background: var(--panel-hero-bg);
     box-shadow:
-      0 30px 80px rgba(19, 32, 45, 0.07),
-      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+      var(--shadow-hero),
+      inset 0 1px 0 var(--panel-inset);
     backdrop-filter: blur(18px);
   }
 
@@ -188,34 +262,33 @@ textarea:focus-visible {
 
   .hero-panel::before {
     background:
-      radial-gradient(circle at top left, rgba(31, 57, 80, 0.16), transparent 32%),
-      radial-gradient(circle at bottom right, rgba(84, 114, 136, 0.12), transparent 28%);
+      radial-gradient(circle at top left, rgba(var(--glow-rgb), 0.16), transparent 32%),
+      radial-gradient(circle at bottom right, rgba(var(--glow-rgb), 0.1), transparent 28%);
     opacity: 0.95;
   }
 
   .surface-panel {
-    border: 1px solid rgba(19, 32, 45, 0.1);
+    border: 1px solid rgba(var(--ink-rgb), 0.1);
     border-radius: 20px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 249, 251, 0.82));
+    background: var(--panel-surface-bg);
     box-shadow:
       var(--shadow-panel),
-      inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      inset 0 1px 0 var(--panel-inset);
   }
 
   .surface-panel::before,
   .metric-panel::before {
-    border: 1px solid rgba(255, 255, 255, 0.46);
+    border: 1px solid var(--panel-ring);
   }
 
-  /* 14px keeps nested panels' radius below the 16px Cards that host them —
-     an inner radius larger than its container reads as sloppy. */
+  /* 14px keeps nested panels' radius below the 16px Cards that host them. */
   .metric-panel {
-    border: 1px solid rgba(19, 32, 45, 0.08);
+    border: 1px solid rgba(var(--ink-rgb), 0.08);
     border-radius: 14px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.76));
+    background: var(--panel-metric-bg);
     box-shadow:
-      0 16px 38px rgba(19, 32, 45, 0.045),
-      inset 0 1px 0 rgba(255, 255, 255, 0.82);
+      var(--shadow-metric),
+      inset 0 1px 0 var(--panel-inset);
   }
 
   .metric-panel::after,
@@ -226,13 +299,12 @@ textarea:focus-visible {
     right: 22px;
     top: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(19, 32, 45, 0.12), transparent);
+    background: linear-gradient(90deg, transparent, rgba(var(--ink-rgb), 0.12), transparent);
     content: "";
     pointer-events: none;
   }
 
-  /* Hover elevation is painted on a pseudo-element and only its opacity is
-     animated — transitioning large box-shadows on dozens of cards is expensive. */
+  /* Hover elevation on a pseudo-element; only its opacity animates. */
   .lift-card {
     position: relative;
     transition:
@@ -245,7 +317,7 @@ textarea:focus-visible {
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    box-shadow: 0 26px 56px rgba(19, 32, 45, 0.08);
+    box-shadow: var(--shadow-lift);
     content: "";
     opacity: 0;
     pointer-events: none;
@@ -269,16 +341,14 @@ textarea:focus-visible {
     inset: 0;
     border-radius: inherit;
     background-image:
-      linear-gradient(rgba(19, 32, 45, 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(19, 32, 45, 0.035) 1px, transparent 1px);
+      linear-gradient(rgba(var(--ink-rgb), 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--ink-rgb), 0.035) 1px, transparent 1px);
     background-size: 28px 28px;
     content: "";
     opacity: 0.55;
     pointer-events: none;
   }
 
-  /* Kept inside the host's bounds — panels clip overflow, so a mostly-negative
-     offset used to cut the glow to a sliver. */
   .glow-accent {
     position: relative;
   }
@@ -289,7 +359,7 @@ textarea:focus-visible {
     height: 11rem;
     width: 11rem;
     border-radius: 999px;
-    background: radial-gradient(circle, rgba(31, 57, 80, 0.14), rgba(31, 57, 80, 0));
+    background: radial-gradient(circle, rgba(var(--glow-rgb), 0.14), rgba(var(--glow-rgb), 0));
     content: "";
     filter: blur(8px);
     opacity: 0.9;
@@ -327,9 +397,9 @@ textarea:focus-visible {
     border-radius: 12px;
     background: linear-gradient(
       100deg,
-      rgba(19, 32, 45, 0.05) 40%,
-      rgba(19, 32, 45, 0.1) 50%,
-      rgba(19, 32, 45, 0.05) 60%
+      rgba(var(--ink-rgb), 0.05) 40%,
+      rgba(var(--ink-rgb), 0.1) 50%,
+      rgba(var(--ink-rgb), 0.05) 60%
     );
     background-size: 200% 100%;
     animation: shimmer 1.8s var(--ease-out-quart) infinite;
@@ -408,6 +478,10 @@ textarea:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+
+  body {
+    transition: none;
   }
 
   body::after,

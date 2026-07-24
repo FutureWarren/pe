@@ -32,7 +32,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    // suppressHydrationWarning: the no-FOUC script mutates the html class
+    // before React hydrates, which is expected to differ from the server HTML.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Apply the stored (or OS-preferred) theme before first paint so dark
+            mode never flashes light. Kept inline and tiny on purpose. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{var t=localStorage.getItem("angelic-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}',
+          }}
+        />
+      </head>
       <body className={`${publicSans.variable} ${ibmPlexMono.variable} antialiased`}>
         <DealsStoreProvider>
           <TopBar />
