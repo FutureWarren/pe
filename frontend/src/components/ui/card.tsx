@@ -6,7 +6,8 @@ function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border bg-surface p-5 shadow-[0_18px_45px_rgba(20,31,45,0.06)] backdrop-blur-sm transition-[transform,box-shadow,border-color,background-color] duration-300",
+        // relative anchors the .lift-card hover-shadow pseudo-element.
+        "relative rounded-2xl border border-border bg-surface p-5 shadow-card backdrop-blur-sm transition-[transform,border-color,background-color] duration-300",
         className,
       )}
       {...props}
@@ -18,8 +19,14 @@ function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement
   return <div className={cn("flex flex-col gap-1.5", className)} {...props} />;
 }
 
-function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h3 className={cn("text-lg font-semibold tracking-tight", className)} {...props} />;
+interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
+  /** Render element. Use "p" for KPI values so bare numbers don't pollute the
+   *  document's heading outline for screen readers. */
+  as?: "h2" | "h3" | "h4" | "p" | "div";
+}
+
+function CardTitle({ className, as: Tag = "h3", ...props }: CardTitleProps) {
+  return <Tag className={cn("text-lg font-semibold tracking-tight", className)} {...props} />;
 }
 
 function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {

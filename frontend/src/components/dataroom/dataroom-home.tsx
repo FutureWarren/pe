@@ -231,7 +231,7 @@ export function DataroomHome() {
               <Button onClick={() => fileInputRef.current?.click()} variant="secondary">
                 Select files
               </Button>
-              <Button onClick={startProcessing} disabled={files.length === 0 || isProcessing} className="shadow-[0_18px_38px_rgba(31,57,80,0.18)]">
+              <Button onClick={startProcessing} disabled={files.length === 0 || isProcessing} className="shadow-raised">
                 {isProcessing ? "Processing files..." : "Process Files"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
@@ -250,7 +250,11 @@ export function DataroomHome() {
               <span className="rounded-full border border-border bg-white/80 px-3 py-1">Secondary review available if needed</span>
             </div>
             {errorMessage ? (
-              <div className="surface-panel w-full max-w-2xl border border-[rgba(163,94,76,0.24)] bg-[rgba(170,112,93,0.08)] px-4 py-3 text-sm leading-6 text-foreground">
+              <div
+                role="alert"
+                className="animate-scale-in w-full max-w-2xl rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm leading-6 text-foreground"
+              >
+                <span className="font-semibold text-danger">Import failed. </span>
                 {errorMessage}
               </div>
             ) : null}

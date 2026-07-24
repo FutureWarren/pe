@@ -81,7 +81,7 @@ export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
                   Back to Processing
                 </Link>
               </Button>
-              <Button asChild className="shadow-[0_18px_38px_rgba(31,57,80,0.18)]">
+              <Button asChild className="shadow-raised">
                 <Link href={`/process/${deal.id}/export`}>
                   Go to Export
                   <ArrowRight className="h-4 w-4" />

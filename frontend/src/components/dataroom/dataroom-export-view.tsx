@@ -102,7 +102,7 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
                     }
                   }}
                   disabled={!ready}
-                  className="shadow-[0_18px_38px_rgba(31,57,80,0.18)]"
+                  className="shadow-raised"
                 >
                   <Download className="h-4 w-4" />
                   Download XLSX
@@ -253,7 +253,7 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.95fr_1.35fr]">
-        <div className="hero-panel animate-fade-up animate-delay-4 rounded-2xl border border-border p-5 shadow-[0_18px_45px_rgba(20,31,45,0.06)] backdrop-blur-sm">
+        <div className="hero-panel animate-fade-up animate-delay-4 rounded-2xl border border-border p-5 shadow-card backdrop-blur-sm">
           <div className="space-y-4">
             <div className="space-y-1">
               <CardTitle>Export result</CardTitle>

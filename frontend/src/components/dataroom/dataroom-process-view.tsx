@@ -169,7 +169,7 @@ export function DataroomProcessView({ dealId }: DataroomProcessViewProps) {
             }
             actions={
               <div className="flex flex-wrap gap-3">
-                <Button asChild className="shadow-[0_18px_38px_rgba(31,57,80,0.18)]">
+                <Button asChild className="shadow-raised">
                   <Link href={primaryAction.href}>
                     {primaryAction.label}
                     <ArrowRight className="h-4 w-4" />

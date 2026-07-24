@@ -11,12 +11,20 @@
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
   --color-accent-foreground: var(--accent-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  /* Motion primitives — calm, decisive easings for an institutional product. */
+  --ease-swift: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  /* Elevation scale — replaces the per-callsite arbitrary shadows. */
+  --shadow-raised: 0 18px 38px rgba(31, 57, 80, 0.18);
+  --shadow-panel: 0 20px 44px rgba(19, 32, 45, 0.05);
+  --shadow-card: 0 18px 45px rgba(20, 31, 45, 0.06);
 }
 
 :root {
@@ -28,11 +36,13 @@
   --border: rgba(19, 32, 45, 0.1);
   --border-strong: rgba(19, 32, 45, 0.18);
   --accent: #1f3950;
+  --accent-strong: #173147;
   --accent-foreground: #f6f8fa;
   --muted: #d8e0e8;
   --muted-foreground: #5e6c79;
   --success: #326b4a;
-  --warning: #a26917;
+  /* #8a5a10 keeps the gold hue but passes WCAG AA on its /10 tint (was #a26917 ≈ 4.0:1). */
+  --warning: #8a5a10;
   --danger: #a1423d;
 }
 
@@ -95,8 +105,30 @@ textarea {
   font: inherit;
 }
 
+/* Baseline keyboard-focus treatment: every focusable element gets a visible
+   accent outline unless a component supplies its own focus-visible ring. */
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none; /* components carry their own visible ring */
+}
+
 ::selection {
   background: rgba(31, 57, 80, 0.16);
+}
+
+.workspace-scroll,
+.table-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 57, 80, 0.18) transparent;
 }
 
 .workspace-scroll::-webkit-scrollbar,
@@ -116,159 +148,205 @@ textarea {
   background: transparent;
 }
 
-.page-shell {
-  position: relative;
-  isolation: isolate;
-}
+/* Panels live in the components layer so Tailwind utilities on the same element
+   (border/background/radius/shadow overrides at call sites) win over them —
+   previously these were unlayered and silently defeated utility classes. */
+@layer components {
+  .page-shell {
+    position: relative;
+    isolation: isolate;
+  }
 
-.hero-panel,
-.surface-panel,
-.metric-panel {
-  position: relative;
-  overflow: hidden;
-}
+  .hero-panel,
+  .surface-panel,
+  .metric-panel {
+    position: relative;
+    overflow: hidden;
+  }
 
-.hero-panel {
-  border: 1px solid rgba(19, 32, 45, 0.12);
-  border-radius: 28px;
-  background:
-    linear-gradient(140deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 250, 0.84)),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.62));
-  box-shadow:
-    0 30px 80px rgba(19, 32, 45, 0.07),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(18px);
-}
+  .hero-panel {
+    border: 1px solid rgba(19, 32, 45, 0.12);
+    border-radius: 28px;
+    background:
+      linear-gradient(140deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 250, 0.84)),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.62));
+    box-shadow:
+      0 30px 80px rgba(19, 32, 45, 0.07),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(18px);
+  }
 
-.hero-panel::before,
-.surface-panel::before,
-.metric-panel::before {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  content: "";
-  pointer-events: none;
-}
+  .hero-panel::before,
+  .surface-panel::before,
+  .metric-panel::before {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    content: "";
+    pointer-events: none;
+  }
 
-.hero-panel::before {
-  background:
-    radial-gradient(circle at top left, rgba(31, 57, 80, 0.16), transparent 32%),
-    radial-gradient(circle at bottom right, rgba(84, 114, 136, 0.12), transparent 28%);
-  opacity: 0.95;
-}
+  .hero-panel::before {
+    background:
+      radial-gradient(circle at top left, rgba(31, 57, 80, 0.16), transparent 32%),
+      radial-gradient(circle at bottom right, rgba(84, 114, 136, 0.12), transparent 28%);
+    opacity: 0.95;
+  }
 
-.surface-panel {
-  border: 1px solid rgba(19, 32, 45, 0.1);
-  border-radius: 24px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 249, 251, 0.82));
-  box-shadow:
-    0 20px 44px rgba(19, 32, 45, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.72);
-}
+  .surface-panel {
+    border: 1px solid rgba(19, 32, 45, 0.1);
+    border-radius: 20px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 249, 251, 0.82));
+    box-shadow:
+      var(--shadow-panel),
+      inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  }
 
-.surface-panel::before,
-.metric-panel::before {
-  border: 1px solid rgba(255, 255, 255, 0.46);
-}
+  .surface-panel::before,
+  .metric-panel::before {
+    border: 1px solid rgba(255, 255, 255, 0.46);
+  }
 
-.metric-panel {
-  border: 1px solid rgba(19, 32, 45, 0.08);
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.76));
-  box-shadow:
-    0 16px 38px rgba(19, 32, 45, 0.045),
-    inset 0 1px 0 rgba(255, 255, 255, 0.82);
-}
+  /* 14px keeps nested panels' radius below the 16px Cards that host them —
+     an inner radius larger than its container reads as sloppy. */
+  .metric-panel {
+    border: 1px solid rgba(19, 32, 45, 0.08);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.76));
+    box-shadow:
+      0 16px 38px rgba(19, 32, 45, 0.045),
+      inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  }
 
-.metric-panel::after,
-.surface-panel::after,
-.hero-panel::after {
-  position: absolute;
-  left: 22px;
-  right: 22px;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(19, 32, 45, 0.12), transparent);
-  content: "";
-  pointer-events: none;
-}
+  .metric-panel::after,
+  .surface-panel::after,
+  .hero-panel::after {
+    position: absolute;
+    left: 22px;
+    right: 22px;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(19, 32, 45, 0.12), transparent);
+    content: "";
+    pointer-events: none;
+  }
 
-.lift-card {
-  transition:
-    transform 240ms ease,
-    box-shadow 240ms ease,
-    border-color 240ms ease,
-    background-color 240ms ease;
-}
+  /* Hover elevation is painted on a pseudo-element and only its opacity is
+     animated — transitioning large box-shadows on dozens of cards is expensive. */
+  .lift-card {
+    position: relative;
+    transition:
+      transform 240ms var(--ease-out-quart),
+      border-color 240ms ease,
+      background-color 240ms ease;
+  }
 
-.lift-card:hover {
-  transform: translateY(-2px);
-  box-shadow:
-    0 26px 56px rgba(19, 32, 45, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.76);
-}
+  .lift-card::after {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 26px 56px rgba(19, 32, 45, 0.08);
+    content: "";
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 240ms var(--ease-out-quart);
+  }
 
-.data-grid {
-  position: relative;
-}
+  .lift-card:hover {
+    transform: translateY(-2px);
+  }
 
-.data-grid::before {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background-image:
-    linear-gradient(rgba(19, 32, 45, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(19, 32, 45, 0.035) 1px, transparent 1px);
-  background-size: 28px 28px;
-  content: "";
-  opacity: 0.55;
-  pointer-events: none;
-}
+  .lift-card:hover::after {
+    opacity: 1;
+  }
 
-.glow-accent {
-  position: relative;
-}
+  .data-grid {
+    position: relative;
+  }
 
-.glow-accent::before {
-  position: absolute;
-  inset: auto auto -2rem -1.5rem;
-  height: 8rem;
-  width: 8rem;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(31, 57, 80, 0.16), rgba(31, 57, 80, 0));
-  content: "";
-  filter: blur(8px);
-  opacity: 0.9;
-  pointer-events: none;
-}
+  .data-grid::before {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-image:
+      linear-gradient(rgba(19, 32, 45, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(19, 32, 45, 0.035) 1px, transparent 1px);
+    background-size: 28px 28px;
+    content: "";
+    opacity: 0.55;
+    pointer-events: none;
+  }
 
-.animate-fade-up {
-  opacity: 0;
-  animation: fade-up 620ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-}
+  /* Kept inside the host's bounds — panels clip overflow, so a mostly-negative
+     offset used to cut the glow to a sliver. */
+  .glow-accent {
+    position: relative;
+  }
 
-.animate-delay-1 {
-  animation-delay: 70ms;
-}
+  .glow-accent::before {
+    position: absolute;
+    inset: auto auto -2.5rem -2rem;
+    height: 11rem;
+    width: 11rem;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(31, 57, 80, 0.14), rgba(31, 57, 80, 0));
+    content: "";
+    filter: blur(8px);
+    opacity: 0.9;
+    pointer-events: none;
+  }
 
-.animate-delay-2 {
-  animation-delay: 140ms;
-}
+  /* ── Motion primitives ─────────────────────────────────────────────────── */
 
-.animate-delay-3 {
-  animation-delay: 210ms;
-}
+  /* Page-load entrance for static shells. Never put this (or delays) on
+     content that appears from a user action — use .animate-scale-in there. */
+  .animate-fade-up {
+    opacity: 0;
+    animation: fade-up 620ms var(--ease-swift) forwards;
+  }
 
-.animate-delay-4 {
-  animation-delay: 280ms;
-}
+  .animate-delay-1 { animation-delay: 70ms; }
+  .animate-delay-2 { animation-delay: 140ms; }
+  .animate-delay-3 { animation-delay: 210ms; }
+  .animate-delay-4 { animation-delay: 280ms; }
+  .animate-delay-5 { animation-delay: 350ms; }
+  .animate-delay-6 { animation-delay: 420ms; }
 
-.animate-delay-5 {
-  animation-delay: 350ms;
-}
+  /* State-driven appearance (user just did something): quick, un-delayed. */
+  .animate-scale-in {
+    animation: scale-in 200ms var(--ease-out-quart) both;
+  }
 
-.animate-delay-6 {
-  animation-delay: 420ms;
+  /* Confirmation pulse for activity/status notes (pair with key={note}). */
+  .animate-note-in {
+    animation: note-in 260ms var(--ease-out-quart) both;
+  }
+
+  /* Loading placeholder shimmer. */
+  .skeleton {
+    border-radius: 12px;
+    background: linear-gradient(
+      100deg,
+      rgba(19, 32, 45, 0.05) 40%,
+      rgba(19, 32, 45, 0.1) 50%,
+      rgba(19, 32, 45, 0.05) 60%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s var(--ease-out-quart) infinite;
+  }
+
+  /* Smooth progress fill: width transitions between values, and
+     @starting-style animates the initial fill from zero on mount. */
+  .progress-fill {
+    width: var(--progress-w, 0%);
+    transition: width 600ms var(--ease-out-quart);
+  }
+
+  @starting-style {
+    .progress-fill {
+      width: 0%;
+    }
+  }
 }
 
 @keyframes fade-up {
@@ -280,6 +358,40 @@ textarea {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
   }
 }
 
@@ -299,17 +411,27 @@ textarea {
   }
 
   body::after,
-  .animate-fade-up {
+  .animate-fade-up,
+  .animate-scale-in,
+  .animate-note-in,
+  .skeleton {
     animation: none !important;
   }
 
-  .animate-fade-up {
+  .animate-fade-up,
+  .animate-scale-in,
+  .animate-note-in {
     opacity: 1;
     transform: none;
   }
 
+  .progress-fill {
+    transition: none;
+  }
+
   .lift-card,
-  .lift-card:hover {
+  .lift-card:hover,
+  .lift-card::after {
     transition: none;
     transform: none;
   }
