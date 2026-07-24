@@ -50,6 +50,13 @@ def resolve_todo(reminder_id: int, store: Store = Depends(get_store)):
     return {"ok": True}
 
 
+@router.post("/todo/{reminder_id}/reopen")
+def reopen_todo(reminder_id: int, store: Store = Depends(get_store)):
+    """撤销「已处理」（控制台 5 秒撤销机制的回滚接口）。"""
+    store.set_reminder_status(reminder_id, "pending")
+    return {"ok": True}
+
+
 @router.get("/decisions")
 def decisions(group_id: str | None = None, limit: int = 200, store: Store = Depends(get_store)):
     """全量判断日志，含「AI 判断为无需响应」的沉默日志，便于复盘误判。"""
