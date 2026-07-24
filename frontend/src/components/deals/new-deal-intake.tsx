@@ -222,7 +222,7 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="animate-fade-up space-y-8">
       {isWorkspaceMode && intakeStage ? (
         <WorkflowBanner
           step={intakeStage.step}
@@ -405,7 +405,7 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
                   manifest.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div className="table-scroll overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -493,25 +493,25 @@ export function NewDealIntake({ deal }: NewDealIntakeProps = {}) {
             <Card className="border-border bg-white/80">
               <CardHeader>
                 <CardDescription>Files detected</CardDescription>
-                <CardTitle className="text-3xl">{scanSummary.fileCount}</CardTitle>
+                <CardTitle as="p" className="text-3xl tabular-nums">{scanSummary.fileCount}</CardTitle>
               </CardHeader>
             </Card>
             <Card className="border-border bg-white/80">
               <CardHeader>
                 <CardDescription>Financial tables found</CardDescription>
-                <CardTitle className="text-3xl">{scanSummary.financialTables}</CardTitle>
+                <CardTitle as="p" className="text-3xl tabular-nums">{scanSummary.financialTables}</CardTitle>
               </CardHeader>
             </Card>
             <Card className="border-border bg-white/80">
               <CardHeader>
                 <CardDescription>Possible issues</CardDescription>
-                <CardTitle className="text-3xl">{scanSummary.possibleIssues}</CardTitle>
+                <CardTitle as="p" className="text-3xl tabular-nums">{scanSummary.possibleIssues}</CardTitle>
               </CardHeader>
             </Card>
             <Card className="border-border bg-white/80">
               <CardHeader>
                 <CardDescription>Readiness score</CardDescription>
-                <CardTitle className="text-3xl">{scanSummary.readinessScore}</CardTitle>
+                <CardTitle as="p" className="text-3xl tabular-nums">{scanSummary.readinessScore}</CardTitle>
               </CardHeader>
             </Card>
           </CardContent>

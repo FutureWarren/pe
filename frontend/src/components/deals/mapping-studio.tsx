@@ -46,7 +46,7 @@ export function MappingStudioView({ deal }: MappingStudioViewProps) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-up space-y-6">
       <PageIntro
         eyebrow="Mapping studio"
         title="Standardize raw line items without losing source traceability."
@@ -82,25 +82,25 @@ export function MappingStudioView({ deal }: MappingStudioViewProps) {
         <Card>
           <CardHeader>
             <CardDescription>Rows staged</CardDescription>
-            <CardTitle className="text-3xl">{rows.length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{rows.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Approved / rule-applied</CardDescription>
-            <CardTitle className="text-3xl">{approvedCount}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{approvedCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Flagged for review</CardDescription>
-            <CardTitle className="text-3xl">{flaggedCount}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{flaggedCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Source linked</CardDescription>
-            <CardTitle className="text-3xl">
+            <CardTitle as="p" className="text-3xl tabular-nums">
               {rows.filter((row) => row.sourceLinked).length}/{rows.length}
             </CardTitle>
           </CardHeader>

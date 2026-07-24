@@ -9,7 +9,7 @@ export default function NotFound() {
     <div className="mx-auto max-w-2xl py-16">
       <Card>
         <CardHeader>
-          <CardTitle className="text-3xl">Page not found</CardTitle>
+          <CardTitle as="p" className="text-3xl tabular-nums">Page not found</CardTitle>
           <CardDescription>
             The requested deal workspace or output preview could not be found.
           </CardDescription>

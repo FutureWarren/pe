@@ -168,7 +168,8 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-1 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Databook status</CardDescription>
-            <CardTitle className="text-xl">
+            {/* min-h matches the sibling text-3xl number tiles so the 4-up row aligns. */}
+            <CardTitle as="p" className="flex min-h-9 items-center text-xl">
               <StatusBadge value={ready ? "Ready" : "Blocked"} />
             </CardTitle>
             <Progress value={ready ? 100 : metrics.length > 0 ? 68 : 18} />
@@ -177,7 +178,7 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-2 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Calculated metrics</CardDescription>
-            <CardTitle className="text-3xl">{formulaBackedCount}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{formulaBackedCount}</CardTitle>
             <Progress
               value={metrics.length ? Math.round((formulaBackedCount / metrics.length) * 100) : 0}
             />
@@ -186,7 +187,7 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-3 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Source-backed metrics</CardDescription>
-            <CardTitle className="text-3xl">{directSourceBackedCount}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{directSourceBackedCount}</CardTitle>
             <Progress
               value={metrics.length ? Math.round((directSourceBackedCount / metrics.length) * 100) : 0}
             />
@@ -195,7 +196,7 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-4 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Open review items</CardDescription>
-            <CardTitle className="text-3xl">{flaggedCount}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{flaggedCount}</CardTitle>
             <Progress value={ready ? 100 : Math.max(12, 100 - flaggedCount * 18)} />
           </CardHeader>
         </Card>
@@ -238,13 +239,13 @@ export function DataroomExportView({ dealId }: DataroomExportViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-3 bg-white/[0.88]">
           <CardHeader>
             <CardDescription>Traceable metrics</CardDescription>
-            <CardTitle className="text-3xl">{tracedMetricCount}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{tracedMetricCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="lift-card animate-fade-up animate-delay-4 bg-white/[0.88]">
           <CardHeader>
             <CardDescription>Files used</CardDescription>
-            <CardTitle className="text-3xl">{deal.sourceFiles.length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{deal.sourceFiles.length}</CardTitle>
           </CardHeader>
         </Card>
       </div>

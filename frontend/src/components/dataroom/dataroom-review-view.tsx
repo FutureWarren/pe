@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDealById, useDealsStore } from "@/lib/deals-store";
 import { getFileName } from "@/lib/mock-data";
+import { useCountUp } from "@/lib/use-count-up";
 import { isBlockingCoreIssue, isNonBlockingRowIssue, isTableWarning } from "@/lib/review-utils";
 
 interface DataroomReviewViewProps {
@@ -21,14 +22,18 @@ export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
   const deal = useDealById(dealId);
   const { updateReviewItemStatus } = useDealsStore();
 
-  if (!deal) {
-    return <DealNotFoundState />;
-  }
-
-  const openItems = deal.exceptions.filter((item) => item.status === "Open");
+  const exceptions = deal?.exceptions ?? [];
+  const openItems = exceptions.filter((item) => item.status === "Open");
   const blockingItems = openItems.filter((item) => isBlockingCoreIssue(item));
   const nonBlockingItems = openItems.filter((item) => isNonBlockingRowIssue(item));
   const tableWarnings = openItems.filter((item) => isTableWarning(item));
+  // Hooks must run unconditionally — computed before the not-found early return.
+  const openDisplay = useCountUp(blockingItems.length + nonBlockingItems.length);
+  const warningsDisplay = useCountUp(tableWarnings.length);
+
+  if (!deal) {
+    return <DealNotFoundState />;
+  }
   const definedItems = deal.definedItems ?? [];
   const exportableRows = deal.mappingRows.filter(
     (row) =>
@@ -93,13 +98,13 @@ export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-1 bg-white/[0.88]">
           <CardHeader>
             <CardDescription>Open review items</CardDescription>
-            <CardTitle as="p" className="text-3xl tabular-nums">{blockingItems.length + nonBlockingItems.length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{openDisplay}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="lift-card animate-fade-up animate-delay-2 bg-white/[0.88]">
           <CardHeader>
             <CardDescription>Table warnings</CardDescription>
-            <CardTitle as="p" className="text-3xl tabular-nums">{tableWarnings.length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{warningsDisplay}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="lift-card animate-fade-up animate-delay-3 bg-white/[0.88]">
@@ -214,55 +219,41 @@ export function DataroomReviewView({ dealId }: DataroomReviewViewProps) {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="metric-panel p-4">
-                      <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                        Source file
-                      </div>
-                      <div className="mt-2 font-semibold">
+                  {/* Compact meta line — the former three metric-panel blocks made
+                      each triage card ~380px tall; a 20-item queue was ~7,500px of
+                      scrolling for what is a scan-and-act list. */}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-border bg-surface-muted px-3 py-2 text-sm text-muted-foreground">
+                    <span>
+                      <span className="text-xs uppercase tracking-[0.16em]">Source</span>{" "}
+                      <span className="font-medium text-foreground">
                         {linkedRow
                           ? getFileName(deal, linkedRow.sourceFileId)
                           : linkedExtractedItem
                             ? getFileName(deal, linkedExtractedItem.sourceFileId)
                             : "Calculated metric"}
-                      </div>
-                    </div>
-                    <div className="metric-panel p-4">
-                      <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                        {item.issueLevel === "table" ? "Table warning" : "Definition / trace"}
-                      </div>
-                      <div className="mt-2 space-y-1">
-                        <div className="font-semibold">
-                          {item.issueLevel === "table"
-                            ? linkedExtractedItem?.summary ?? linkedExtractedItem?.title ?? "Imported table"
-                            : linkedDefinedItem?.definition ?? linkedRow?.sourceLocator ?? "Derived formula"}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {item.issueLevel === "table"
-                            ? `${linkedExtractedItem?.tableName ?? linkedExtractedItem?.title ?? "Imported table"} · ${linkedExtractedItem?.issueFlags.join(", ") ?? "Warning"}`
-                            : linkedDefinedItem
-                            ? `${linkedDefinedItem.traceabilityStatus} · ${linkedDefinedItem.sourceLocation}`
-                            : "Trace not available"}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="metric-panel p-4">
-                      <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                        {item.issueLevel === "metric" ? "Current metric" : item.issueLevel === "table" ? "Table type" : "Current category"}
-                      </div>
-                      <div className="mt-2 font-semibold">
-                        {item.issueLevel === "metric"
-                          ? item.affectedLineItem
-                          : item.issueLevel === "table"
-                            ? linkedExtractedItem?.detectedTableType ?? "Imported table"
-                            : linkedRow?.mappedCategory ?? "Needs review"}
-                      </div>
-                      {linkedDefinedItem && item.issueLevel === "row" ? (
-                        <div className="mt-2 text-sm text-muted-foreground">
-                          {linkedDefinedItem.directOrDerived} · {linkedDefinedItem.calculationType}
-                        </div>
-                      ) : null}
-                    </div>
+                      </span>
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      <span className="font-medium text-foreground">
+                        {item.issueLevel === "table"
+                          ? linkedExtractedItem?.summary ?? linkedExtractedItem?.title ?? "Imported table"
+                          : linkedDefinedItem?.definition ?? linkedRow?.sourceLocator ?? "Derived formula"}
+                      </span>{" "}
+                      {item.issueLevel === "table"
+                        ? linkedExtractedItem?.issueFlags.join(", ") ?? "Warning"
+                        : linkedDefinedItem
+                          ? `${linkedDefinedItem.traceabilityStatus} · ${linkedDefinedItem.sourceLocation}`
+                          : "Trace not available"}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-medium text-foreground">
+                      {item.issueLevel === "metric"
+                        ? item.affectedLineItem
+                        : item.issueLevel === "table"
+                          ? linkedExtractedItem?.detectedTableType ?? "Imported table"
+                          : linkedRow?.mappedCategory ?? "Needs review"}
+                    </span>
                   </div>
 
                   <div className="flex flex-wrap gap-3">

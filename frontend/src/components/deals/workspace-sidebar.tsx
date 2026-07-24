@@ -93,7 +93,7 @@ export function WorkspaceSidebar({ deal, focusedFileId }: WorkspaceSidebarProps)
                     ) : null}
                     <div
                       className={cn(
-                        "relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
+                        "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
                         active
                           ? "border-accent-foreground/30 bg-accent-foreground/10 text-accent-foreground"
                           : "border-border-strong bg-white text-foreground",

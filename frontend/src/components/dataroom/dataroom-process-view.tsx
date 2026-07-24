@@ -317,21 +317,21 @@ export function DataroomProcessView({ dealId }: DataroomProcessViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-2 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Rows understood</CardDescription>
-            <CardTitle className="text-3xl">{definitionCoverage}%</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{definitionCoverage}%</CardTitle>
             <Progress value={definitionCoverage} />
           </CardHeader>
         </Card>
         <Card className="lift-card animate-fade-up animate-delay-3 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Source-linked rows</CardDescription>
-            <CardTitle className="text-3xl">{traceabilityCoverage}%</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{traceabilityCoverage}%</CardTitle>
             <Progress value={traceabilityCoverage} />
           </CardHeader>
         </Card>
         <Card className="lift-card animate-fade-up animate-delay-4 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Calculated metrics</CardDescription>
-            <CardTitle className="text-3xl">{formulaSuccessCount}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{formulaSuccessCount}</CardTitle>
             <Progress
               value={formulaMetrics.length ? Math.round((formulaSuccessCount / formulaMetrics.length) * 100) : 0}
             />
@@ -340,7 +340,7 @@ export function DataroomProcessView({ dealId }: DataroomProcessViewProps) {
         <Card className="lift-card animate-fade-up animate-delay-5 bg-white/[0.88]">
           <CardHeader className="space-y-4">
             <CardDescription>Source-backed metrics</CardDescription>
-            <CardTitle className="text-3xl">{directMetricsCount}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{directMetricsCount}</CardTitle>
             <Progress value={metrics.length ? Math.round((directMetricsCount / metrics.length) * 100) : 0} />
           </CardHeader>
         </Card>

@@ -17,7 +17,7 @@ interface OutputPreviewViewProps {
 
 export function OutputPreviewView({ deal, output }: OutputPreviewViewProps) {
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-up space-y-6">
       <PageIntro
         eyebrow="Output preview"
         title={output.name}
@@ -37,7 +37,7 @@ export function OutputPreviewView({ deal, output }: OutputPreviewViewProps) {
         <Card>
           <CardHeader>
             <CardDescription>Status</CardDescription>
-            <CardTitle className="text-xl">
+            <CardTitle as="p" className="flex min-h-9 items-center text-xl">
               <StatusBadge value={output.status} />
             </CardTitle>
           </CardHeader>
@@ -45,13 +45,13 @@ export function OutputPreviewView({ deal, output }: OutputPreviewViewProps) {
         <Card>
           <CardHeader>
             <CardDescription>Completeness</CardDescription>
-            <CardTitle className="text-3xl">{output.completeness}%</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{output.completeness}%</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Source linked</CardDescription>
-            <CardTitle className="text-3xl">{output.sourceLinked ? "Yes" : "No"}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{output.sourceLinked ? "Yes" : "No"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>

@@ -54,7 +54,7 @@ export function OverviewView({ deal }: OverviewViewProps) {
             };
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-up space-y-6">
       <PageIntro
         eyebrow={deal.sector}
         title={deal.targetCompanyName}
@@ -93,25 +93,25 @@ export function OverviewView({ deal }: OverviewViewProps) {
         <Card>
           <CardHeader>
             <CardDescription>Enterprise value</CardDescription>
-            <CardTitle className="text-3xl">{formatCompactCurrency(deal.enterpriseValue)}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{formatCompactCurrency(deal.enterpriseValue)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>TTM revenue</CardDescription>
-            <CardTitle className="text-3xl">{formatCompactCurrency(deal.ttmRevenue)}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{formatCompactCurrency(deal.ttmRevenue)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>TTM EBITDA</CardDescription>
-            <CardTitle className="text-3xl">{formatCompactCurrency(deal.ttmEbitda)}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{formatCompactCurrency(deal.ttmEbitda)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Readiness score</CardDescription>
-            <CardTitle className="text-3xl">{deal.readinessScore}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{deal.readinessScore}</CardTitle>
           </CardHeader>
         </Card>
       </div>

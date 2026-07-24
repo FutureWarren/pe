@@ -100,7 +100,7 @@ export function ReviewQueueView({ deal }: ReviewQueueViewProps) {
     );
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-up space-y-6">
       <PageIntro
         eyebrow="Review queue"
         title="Resolve what the system should not silently decide for you."
@@ -131,13 +131,13 @@ export function ReviewQueueView({ deal }: ReviewQueueViewProps) {
         <Card>
           <CardHeader>
             <CardDescription>Exceptions in queue</CardDescription>
-            <CardTitle className="text-3xl">{items.length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{items.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Critical / high</CardDescription>
-            <CardTitle className="text-3xl">
+            <CardTitle as="p" className="text-3xl tabular-nums">
               {items.filter((item) => item.severity === "Critical" || item.severity === "High").length}
             </CardTitle>
           </CardHeader>
@@ -145,13 +145,13 @@ export function ReviewQueueView({ deal }: ReviewQueueViewProps) {
         <Card>
           <CardHeader>
             <CardDescription>Open items</CardDescription>
-            <CardTitle className="text-3xl">{items.filter((item) => item.status === "Open").length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{items.filter((item) => item.status === "Open").length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Resolved or deferred</CardDescription>
-            <CardTitle className="text-3xl">{items.filter((item) => item.status !== "Open").length}</CardTitle>
+            <CardTitle as="p" className="text-3xl tabular-nums">{items.filter((item) => item.status !== "Open").length}</CardTitle>
           </CardHeader>
         </Card>
       </div>

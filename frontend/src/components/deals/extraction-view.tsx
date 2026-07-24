@@ -27,7 +27,7 @@ export function ExtractionView({ deal }: ExtractionViewProps) {
   const workflow = getWorkflowSnapshot(deal);
   const extractionStage = workflow.stages.find((stage) => stage.key === "extraction")!;
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-up space-y-6">
       <PageIntro
         eyebrow="Extraction staging"
         title="Review what the system found before it enters mapping."

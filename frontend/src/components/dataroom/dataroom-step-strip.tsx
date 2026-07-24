@@ -54,7 +54,7 @@ export function DataroomStepStrip({ currentStep }: DataroomStepStripProps) {
             <div className="flex items-center gap-3">
               <div
                 className={cn(
-                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]",
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]",
                   active
                     ? "border-accent-foreground/[0.28] bg-accent-foreground/10 text-accent-foreground"
                     : completed

@@ -233,7 +233,6 @@ export function DataroomHome() {
           onDrop={handleDrop}
         >
           <CardContent className="relative mt-0 flex flex-col items-center justify-center gap-5 py-14 text-center">
-            <div className="absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(31,57,80,0.2),transparent)]" />
             <div
               className={`flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-3xl border border-border bg-white/[0.92] shadow-[0_20px_36px_rgba(19,32,45,0.08)] transition-transform duration-200 motion-reduce:transform-none ${dragActive ? "-translate-y-1" : ""}`}
             >

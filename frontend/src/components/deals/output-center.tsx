@@ -50,7 +50,7 @@ export function OutputCenterView({ deal }: OutputCenterViewProps) {
   const previewTarget = outputs.find((output) => output.id === "databook-preview") ?? outputs[0];
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-up space-y-6">
       <PageIntro
         eyebrow="Output center"
         title="See what is ready to ship and what still needs review."
