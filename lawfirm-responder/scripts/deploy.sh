@@ -55,7 +55,9 @@ echo "==> 安装 Python 依赖"
 "$VENV/bin/pip" install -q --upgrade pip
 "$VENV/bin/pip" install -q -e "$APP_DIR/lawfirm-responder"
 
-_rand() { tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"; }
+# 注意：不能写 `tr </dev/urandom | head`——head 关管道会让 tr 收到 SIGPIPE，
+# 在 set -o pipefail 下整条命令失败并静默退出脚本。先限量读取再过滤即可。
+_rand() { head -c 4096 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c "$1"; }
 
 if [ ! -f "$ENVFILE" ]; then
   echo "==> 生成 .env"
@@ -65,6 +67,10 @@ if [ ! -f "$ENVFILE" ]; then
   WECOM_TOKEN="${WECOM_TOKEN:-$(_rand 24)}"
   WECOM_AES_KEY="${WECOM_AES_KEY:-$(_rand 43)}"
   ADMIN_TOKEN="${ADMIN_TOKEN:-$(_rand 32)}"
+  if [ "${#WECOM_TOKEN}" -lt 24 ] || [ "${#WECOM_AES_KEY}" -ne 43 ] || [ "${#ADMIN_TOKEN}" -lt 32 ]; then
+    echo "❌ 随机密钥生成异常，请重跑一次部署命令。" >&2
+    exit 1
+  fi
   cat > "$ENVFILE" <<EOF
 RESPONDER_MODE=shadow
 RESPONDER_LLM_PROVIDER=auto
