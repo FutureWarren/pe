@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+from uuid import uuid4
 
 from app.models.run import PilotRunSummary
 
@@ -13,12 +14,24 @@ RUN_SUMMARY_FILE_NAME = "run_summary.json"
 
 
 def create_run_directory(output_root: Path) -> tuple[str, Path]:
-    """Create and return a timestamped run directory."""
+    """Create and return a unique run directory.
 
-    run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    run_dir = output_root / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return run_id, run_dir
+    A second-granularity timestamp alone collides when two runs start in the same
+    second: both would share a directory, interleave artifacts, and one summary
+    would overwrite the other. A short uuid suffix + exist_ok=False makes the id
+    unique and fails loudly on the astronomically-unlikely collision.
+    """
+
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    for _ in range(5):
+        run_id = f"{stamp}_{uuid4().hex[:8]}"
+        run_dir = output_root / run_id
+        try:
+            run_dir.mkdir(parents=True, exist_ok=False)
+            return run_id, run_dir
+        except FileExistsError:  # pragma: no cover - vanishingly rare
+            continue
+    raise RuntimeError("Could not allocate a unique run directory.")
 
 
 def write_json(path: Path, payload: Any) -> Path:

@@ -15,6 +15,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.export.safe_cell import sanitize_cell_text
 from app.models.canonical import (
     DERIVED_METRIC_FORMULAS,
     EXCEL_NUMBER_FORMAT,
@@ -149,7 +150,7 @@ def _write_model_input(sheet: Worksheet, bundle: ModelInputBundle) -> None:
             (last_period_column + 5, note or "", _LEFT, None),
         ]
         for column_index, value, alignment, fill in metadata_columns:
-            cell = sheet.cell(row=row_index, column=column_index, value=value)
+            cell = sheet.cell(row=row_index, column=column_index, value=sanitize_cell_text(value))
             cell.font = _BODY_FONT
             cell.alignment = alignment
             cell.border = _CELL_BORDER
@@ -284,7 +285,7 @@ def _write_exceptions(sheet: Worksheet, exceptions: list[ExceptionRow]) -> None:
             exception.severity,
         ]
         for column_index, value in enumerate(row_values, start=1):
-            cell = sheet.cell(row=row_offset, column=column_index, value=value)
+            cell = sheet.cell(row=row_offset, column=column_index, value=sanitize_cell_text(value))
             cell.font = _BODY_FONT
             cell.alignment = _LEFT
             cell.border = _CELL_BORDER
@@ -353,7 +354,7 @@ def _write_source_map(sheet: Worksheet, metrics: list[FinalMetricRecord]) -> Non
             metric.source_priority_reason or "",
         ]
         for column_index, value in enumerate(values, start=1):
-            cell = sheet.cell(row=row_offset, column=column_index, value=value)
+            cell = sheet.cell(row=row_offset, column=column_index, value=sanitize_cell_text(value))
             cell.font = _BODY_FONT
             cell.alignment = _LEFT
             cell.border = _CELL_BORDER

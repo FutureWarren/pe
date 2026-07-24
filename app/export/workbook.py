@@ -10,6 +10,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Font
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.export.safe_cell import sanitize_cell_text
 from app.map.cell_rules import (
     P_AND_L_SHEET_NAME,
     SOURCE_MAP_SHEET_NAME,
@@ -75,7 +76,7 @@ def _apply_bindings(workbook: Workbook, bindings: list[WorkbookCellBinding]) -> 
         if binding.formula is not None:
             cell.value = binding.formula
         else:
-            cell.value = binding.value
+            cell.value = sanitize_cell_text(binding.value)
         cell.number_format = binding.number_format
         if binding.comment:
             cell.comment = Comment(binding.comment, "Angelic Pilot")
@@ -101,8 +102,8 @@ def _write_source_registry(sheet: Worksheet, manifest: SourceManifest) -> None:
 
     for row_index, document in enumerate(manifest.documents, start=2):
         sheet.cell(row=row_index, column=1, value=document.source_id)
-        sheet.cell(row=row_index, column=2, value=document.file_name)
-        sheet.cell(row=row_index, column=3, value=document.rel_path)
+        sheet.cell(row=row_index, column=2, value=sanitize_cell_text(document.file_name))
+        sheet.cell(row=row_index, column=3, value=sanitize_cell_text(document.rel_path))
         sheet.cell(row=row_index, column=4, value=document.file_type)
         sheet.cell(row=row_index, column=5, value=document.modified_timestamp)
         sheet.cell(row=row_index, column=6, value=document.content_fingerprint)
@@ -120,12 +121,12 @@ def _write_source_map(sheet: Worksheet, entries: list[SourceMapEntry]) -> None:
     for row_index, entry in enumerate(entries, start=2):
         sheet.cell(row=row_index, column=1, value=entry.sheet_name)
         sheet.cell(row=row_index, column=2, value=entry.cell)
-        sheet.cell(row=row_index, column=3, value=entry.line_item_code)
+        sheet.cell(row=row_index, column=3, value=sanitize_cell_text(entry.line_item_code))
         sheet.cell(row=row_index, column=4, value=entry.period_key)
-        sheet.cell(row=row_index, column=5, value=entry.value_display)
+        sheet.cell(row=row_index, column=5, value=sanitize_cell_text(entry.value_display))
         sheet.cell(row=row_index, column=6, value=", ".join(entry.source_ids))
-        sheet.cell(row=row_index, column=7, value=" | ".join(entry.locators))
-        sheet.cell(row=row_index, column=8, value=" | ".join(entry.quotes))
+        sheet.cell(row=row_index, column=7, value=sanitize_cell_text(" | ".join(entry.locators)))
+        sheet.cell(row=row_index, column=8, value=sanitize_cell_text(" | ".join(entry.quotes)))
 
 
 def _write_validation_sheet(sheet: Worksheet, report: ValidationReport) -> None:

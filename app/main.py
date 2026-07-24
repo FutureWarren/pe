@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from mimetypes import guess_type
 from pathlib import Path
 import re
@@ -19,6 +20,15 @@ from app.models.run import ExtractionBackend, PilotRunPayload, PilotRunSummary, 
 from app.services.console import render_console_html
 from app.services.pipeline import build_run_payload, run_pilot
 from app.services.run_store import list_run_summaries, load_run_summary
+
+logger = logging.getLogger("angelic.api")
+
+# Upload guardrails. The endpoint accepts confidential financial files but must
+# not let a caller exhaust memory/disk with an unbounded number or size of files.
+MAX_UPLOAD_FILES = 200
+MAX_UPLOAD_BYTES_PER_FILE = 100 * 1024 * 1024  # 100 MB
+MAX_UPLOAD_BYTES_TOTAL = 500 * 1024 * 1024  # 500 MB
+ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xlsm", ".xls", ".pdf", ".docx", ".txt"}
 
 
 class ExplainRequest(BaseModel):
@@ -103,7 +113,7 @@ def get_run_payload(run_id: str) -> PilotRunPayload:
     summary = load_run_summary(settings.output_dir.resolve() / run_id)
     if summary is None:
         raise HTTPException(status_code=404, detail="Run not found.")
-    return build_run_payload(summary)
+    return _build_run_payload_or_http_error(summary)
 
 
 @app.post("/runs", response_model=PilotRunSummary)
@@ -114,6 +124,7 @@ def create_run(request: RunRequest) -> PilotRunSummary:
     narrow pilot proves valuable and run times become noticeable.
     """
 
+    _validate_run_request_paths(request)
     return _run_request_or_http_error(request)
 
 
@@ -127,11 +138,24 @@ async def create_run_from_uploads(
 
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required.")
+    if len(files) > MAX_UPLOAD_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many files ({len(files)}). The limit is {MAX_UPLOAD_FILES} per import.",
+        )
 
     settings = get_settings()
     staging_dir = _create_upload_staging_dir(settings.output_dir.resolve(), import_label)
+    total_bytes = 0
     for upload in files:
-        await _persist_upload(upload, staging_dir)
+        ext = Path(upload.filename or "").suffix.lower()
+        if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported file type '{ext or upload.filename}'. Allowed: "
+                + ", ".join(sorted(ALLOWED_UPLOAD_EXTENSIONS)),
+            )
+        total_bytes += await _persist_upload(upload, staging_dir, total_so_far=total_bytes)
 
     summary = _run_request_or_http_error(
         RunRequest(
@@ -162,7 +186,7 @@ def explain_metric(run_id: str, payload: ExplainRequest) -> ExplainResponse:
     summary = load_run_summary(settings.output_dir.resolve() / run_id)
     if summary is None:
         raise HTTPException(status_code=404, detail="Run not found.")
-    run_payload = build_run_payload(summary)
+    run_payload = _build_run_payload_or_http_error(summary)
     bundle = run_payload.analyst_bundle
     if bundle is None:
         raise HTTPException(status_code=404, detail="This run has no analyst bundle — rerun with the current pipeline.")
@@ -241,14 +265,40 @@ def _create_upload_staging_dir(output_root: Path, import_label: str) -> Path:
     return staging_dir
 
 
-async def _persist_upload(upload: UploadFile, staging_dir: Path) -> Path:
-    """Write one uploaded file into the staging directory."""
+async def _persist_upload(upload: UploadFile, staging_dir: Path, total_so_far: int = 0) -> int:
+    """Stream one uploaded file into the staging directory; return its byte size.
+
+    Reads in bounded chunks (never the whole file into memory at once) and
+    enforces both a per-file and a cumulative size cap, deleting the partial
+    file and raising 413 if either is exceeded.
+    """
 
     safe_name = Path(upload.filename or f"upload-{uuid4().hex[:6]}").name
     target_path = _dedupe_path(staging_dir / safe_name)
-    target_path.write_bytes(await upload.read())
-    await upload.close()
-    return target_path
+    written = 0
+    try:
+        with target_path.open("wb") as handle:
+            while chunk := await upload.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES_PER_FILE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"'{safe_name}' exceeds the per-file limit of "
+                        f"{MAX_UPLOAD_BYTES_PER_FILE // (1024 * 1024)} MB.",
+                    )
+                if total_so_far + written > MAX_UPLOAD_BYTES_TOTAL:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Total upload exceeds the limit of "
+                        f"{MAX_UPLOAD_BYTES_TOTAL // (1024 * 1024)} MB.",
+                    )
+                handle.write(chunk)
+    except HTTPException:
+        target_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await upload.close()
+    return written
 
 
 def _dedupe_path(path: Path) -> Path:
@@ -267,6 +317,73 @@ def _dedupe_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def _validate_run_request_paths(request: RunRequest) -> None:
+    """Reject filesystem paths that escape the permitted local directories.
+
+    The raw POST /runs endpoint takes filesystem paths. Unconstrained, a caller
+    could point data_room_dir at /home or output_root at /etc — arbitrary file
+    read (exfiltrated via /runs/{id}/payload) and arbitrary write. Confine every
+    supplied path to the app working tree or the configured output directory.
+    (The CLI calls run_pilot directly and is unaffected.)
+    """
+
+    settings = get_settings()
+    # Permitted roots: the app working tree, the output directory (where uploads
+    # are staged), and the configured data-room root. Anything else — /etc,
+    # another user's home, an unrelated deal folder — is rejected.
+    allowed_roots = [
+        Path.cwd().resolve(),
+        settings.output_dir.resolve(),
+        settings.default_data_room.resolve(),
+    ]
+
+    def _check(value: Optional[Path], label: str) -> None:
+        if value is None:
+            return
+        resolved = Path(value).resolve()
+        if not any(_is_within(resolved, root) for root in allowed_roots):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label} is outside the permitted directories.",
+            )
+
+    _check(request.data_room_dir, "data_room_dir")
+    _check(request.output_root, "output_root")
+    _check(request.template_workbook_path, "template_workbook_path")
+    _check(request.ai_workbook_path, "ai_workbook_path")
+    _check(request.gold_workbook_path, "gold_workbook_path")
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """Return True if ``path`` is ``root`` or a descendant of it."""
+
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _build_run_payload_or_http_error(summary: PilotRunSummary) -> PilotRunPayload:
+    """Assemble a run payload, converting missing/corrupt artifacts into a 4xx.
+
+    Older or partially-deleted runs may lack an expected artifact key or file;
+    without this guard those surface as an opaque 500 on a run the /runs list
+    still links to.
+    """
+
+    try:
+        return build_run_payload(summary)
+    except HTTPException:
+        raise
+    except (KeyError, FileNotFoundError, ValueError) as exc:
+        logger.warning("Run %s artifacts unavailable: %s", summary.run_id, exc)
+        raise HTTPException(
+            status_code=410,
+            detail="This run's artifacts are unavailable or incomplete — rerun the import.",
+        ) from exc
 
 
 def _run_request_or_http_error(request: RunRequest) -> PilotRunSummary:
@@ -288,7 +405,8 @@ def _classify_pipeline_error(message: str) -> tuple[str, int]:
 
     if "gemini_api_key is not configured" in normalized:
         return (
-            "The Python backend does not have a Gemini API key loaded. Update /Users/futurewarren/Desktop/Angelic/.env and restart `angelic-api`.",
+            "The backend does not have a Gemini API key configured. Set ANGELIC_GEMINI_API_KEY "
+            "in the environment and restart the API.",
             500,
         )
 
@@ -304,4 +422,8 @@ def _classify_pipeline_error(message: str) -> tuple[str, int]:
             429,
         )
 
-    return (message or "The backend pipeline failed unexpectedly.", 500)
+    # Do not echo the raw exception text to the client — it can leak filesystem
+    # paths, library internals, or fragments of the confidential input. Log the
+    # detail server-side; return a generic message.
+    logger.warning("Pipeline failure: %s", message)
+    return ("The backend pipeline failed while processing this data room.", 500)
