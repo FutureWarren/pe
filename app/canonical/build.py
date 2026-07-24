@@ -96,6 +96,12 @@ def build_model_input_bundle(
             if record is None:
                 continue
             metrics.append(record)
+            # Derived gross_profit / ebitda must feed the margin rows built later
+            # in this same loop (gross_margin_pct needs gross_profit; ebitda_margin_pct
+            # needs ebitda). Without this, a computable margin is silently dropped
+            # whenever its base metric was derived rather than directly reported.
+            if metric_key in {"gross_profit", "ebitda"}:
+                direct_lookup[(metric_key, period.period_key)] = record
 
     # Final deterministic ordering: by metric_order, then period_index.
     metric_rank = {key: index for index, key in enumerate(METRIC_ORDER)}

@@ -60,11 +60,34 @@ def resolve_statement_facts(
                     _resolve_metric(metric_name, candidates, rank_by_source),
                 )
 
+        _normalize_cost_family_sign(resolved)
         _derive_missing_metrics(resolved)
         _attach_formula_notes(resolved)
         resolved_periods.append(resolved)
 
     return resolved_periods
+
+
+# Cost-family metrics are subtracted from revenue / gross profit downstream, so
+# they must be stored as positive magnitudes. Statements frequently present costs
+# in parentheses (e.g. ``(400)``), which the extractor negates to ``-400``; left
+# as-is that flips ``revenue - direct_costs`` into ``revenue + direct_costs`` and
+# silently inflates Gross Profit and EBITDA.
+COST_FAMILY_FIELDS = ("direct_costs", "operating_expenses")
+
+
+def _normalize_cost_family_sign(period: ResolvedPnlPeriod) -> None:
+    """Store cost-family metrics as positive magnitudes for correct subtraction."""
+
+    for metric_name in COST_FAMILY_FIELDS:
+        metric = getattr(period, metric_name)
+        if metric is None or metric.value is None or metric.value >= 0:
+            continue
+        metric.value = abs(metric.value)
+        metric.notes.append(
+            f"{metric_name.replace('_', ' ').title()} was presented as a negative "
+            "(e.g. in parentheses); stored as a positive cost magnitude for subtraction."
+        )
 
 
 def _resolve_metric(

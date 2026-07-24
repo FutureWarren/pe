@@ -161,13 +161,16 @@ class ModelInputBundle(BaseModel):
 # Display formatting rules (shared by workbook + UI)
 # ---------------------------------------------------------------------------
 
+# Zero uses the accounting dash ("-") rather than a blank third section: a genuine
+# zero (e.g. zero EBITDA) must be visually distinct from a missing/omitted value.
+# Rendering both as an empty cell is a material misread in an analyst workbook.
 EXCEL_NUMBER_FORMAT: dict[MetricUnit, str] = {
-    "USD": "#,##0;(#,##0);\"\"",
-    "USD_thousands": "#,##0;(#,##0);\"\"",
-    "%": "0.0%;(0.0%);\"\"",
-    "count": "#,##0;(#,##0);\"\"",
-    "months": "0.0;(0.0);\"\"",
-    "ratio": "0.00x;(0.00x);\"\"",
+    "USD": "#,##0;(#,##0);\"-\"",
+    "USD_thousands": "#,##0;(#,##0);\"-\"",
+    "%": "0.0%;(0.0%);\"-\"",
+    "count": "#,##0;(#,##0);0",
+    "months": "0.0;(0.0);\"-\"",
+    "ratio": "0.00x;(0.00x);\"-\"",
 }
 
 EXCEPTION_SEVERITY_ORDER = {"Critical": 0, "Review": 1, "Info": 2}

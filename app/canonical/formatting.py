@@ -37,7 +37,8 @@ def period_display_label(period: ResolvedPnlPeriod) -> str:
         if month_match:
             year = int(month_match.group(1))
             month = int(month_match.group(2))
-            return f"{MONTH_ABBREVS[month - 1]}-{year % 100:02d}"
+            if 1 <= month <= 12:
+                return f"{MONTH_ABBREVS[month - 1]}-{year % 100:02d}"
     if period.period_granularity == "quarter":
         quarter_match = _PERIOD_KEY_QUARTER.match(period.period_key)
         if quarter_match:
@@ -66,19 +67,22 @@ def period_sort_key(period: ResolvedPnlPeriod) -> tuple[int, str]:
 
 
 def to_canonical_value(metric: ResolvedMetricValue) -> Optional[float]:
-    """Normalise unit scale to a plain number the analyst can copy/paste.
+    """Return the analyst-facing number for a resolved metric.
 
-    Thousands / millions are upscaled to ones.  Percent values are returned
-    as a ratio (``0.37`` for 37%) so Excel's ``0.0%`` format renders correctly.
+    IMPORTANT unit convention: extractors already normalise ``value`` to *ones*
+    (``extract/pnl.py`` expands ``"5m"`` to ``5_000_000`` and the Gemini adapter
+    stores fully-expanded ``normalized_value``). ``unit_scale`` is therefore only
+    a provenance label of the source's reporting scale — it must NOT be applied
+    again here, or every non-"ones" USD figure would be inflated by 1,000× /
+    1,000,000× (a "$5M" revenue would render as $5 trillion).
+
+    Percent values are returned as a ratio (``0.37`` for 37%) so Excel's ``0.0%``
+    format renders correctly.
     """
 
     if metric.value is None:
         return None
     value = metric.value
-    if metric.unit_scale == "thousands":
-        return value * 1_000
-    if metric.unit_scale == "millions":
-        return value * 1_000_000
     if metric.unit_scale == "percent":
         # Values that already look like 0.37 are kept; values like 37 are
         # converted on the assumption they represent a display-style percentage.
