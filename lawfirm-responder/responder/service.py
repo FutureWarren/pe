@@ -29,9 +29,19 @@ class Pipeline:
                  settings: Settings | None = None, kf_client=None):
         self.store = store
         self.settings = settings or get_settings()
-        # 影子模式不需要发送通道（客服 client 的「收」不受此限，见 worker）
-        self.sender = sender if self.settings.mode == "live" else None
-        self.kf_client = kf_client if self.settings.mode == "live" else None
+        self._sender = sender
+        self._kf_client = kf_client
+
+    # 发送通道按模式实时门控：影子模式一律不出声。
+    # 用属性而非构造期固化，是为了支持控制台运行时切换模式（无需重启服务）。
+    @property
+    def sender(self) -> WeComSender | None:
+        return self._sender if self.settings.mode == "live" else None
+
+    @property
+    def kf_client(self):
+        """「发」受模式门控；「收」用 worker 持有的原始 client，不受此限。"""
+        return self._kf_client if self.settings.mode == "live" else None
 
     # ------------------------------------------------------------ 分类
     def _classify(self, msg: IncomingMessage, group: GroupProfile, history: list[dict]) -> tuple:

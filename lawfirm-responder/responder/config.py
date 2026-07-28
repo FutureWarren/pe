@@ -1,6 +1,7 @@
 """运行配置。所有阈值可通过环境变量按部署调整，敏感信息不入库。"""
 
 from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -91,3 +92,25 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def persist_setting(key: str, value: str, env_path: str = ".env") -> bool:
+    """把一项配置写回 .env，使运行时改动（如切换运行模式）在重启后仍生效。
+
+    .env 不存在（测试/临时环境）时静默跳过，返回 False。
+    """
+    p = Path(env_path)
+    if not p.exists():
+        return False
+    lines = p.read_text(encoding="utf-8").splitlines()
+    prefix = f"{key}="
+    replaced = False
+    for i, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[i] = prefix + value
+            replaced = True
+            break
+    if not replaced:
+        lines.append(prefix + value)
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True

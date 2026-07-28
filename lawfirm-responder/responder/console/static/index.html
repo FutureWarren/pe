@@ -763,7 +763,13 @@ function openStatusPanel() {
   openSheet(`
     <h2><span class="gold-tag"></span>系统状态</h2>
     <div class="status-rows">
-      <div class="srow"><div class="k">运行模式</div><div class="v">${esc(modeTxt)}</div></div>
+      <div class="srow">
+        <div class="k">运行模式</div>
+        <div class="v">${esc(modeTxt)}</div>
+        <button class="btn-outline" style="margin-top:8px" onclick="askSwitchMode()">
+          ${h.mode === "live" ? "切回影子模式（停止对外发言）" : "切换到正式模式"}
+        </button>
+      </div>
       <div class="srow"><div class="k">AI 引擎</div><div class="v">${esc(llmTxt)}</div></div>
       <div class="srow"><div class="k">接入通道</div><div class="v">${esc(kfTxt)}</div></div>
       <div class="srow"><div class="k">待处理队列</div><div class="v">${esc(qTxt)}</div></div>
@@ -777,6 +783,35 @@ function openStatusPanel() {
     </div>
     <button class="btn-text muted" onclick="logout()" style="margin-top:8px">${ico("logout")}退出登录</button>
   `);
+}
+/* 切正式模式 = AI 开始真的对客户说话，不可撤回，必须二次确认 */
+function askSwitchMode() {
+  const toLive = !healthCache || healthCache.mode !== "live";
+  openSheet(toLive ? `
+    <h2>切换到正式模式？</h2>
+    <p style="font-size:15px;margin:12px 0 8px">切换后，AI 生成的回复将<b>直接发送给客户</b>，客户会立即看到。</p>
+    <p style="font-size:13px;color:var(--ink-2);margin-bottom:20px">建议先在「记录」里看过几条草稿，确认话术合适后再切换。随时可以切回。</p>
+    <button class="btn-primary xl" onclick="doSwitchMode('live')">确认切换到正式模式</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">暂不切换</button>
+  ` : `
+    <h2>切回影子模式？</h2>
+    <p style="font-size:15px;margin:12px 0 20px">切换后 AI 不再对客户发言，只在后台起草供内部查看。</p>
+    <button class="btn-primary xl" onclick="doSwitchMode('shadow')">确认切回影子模式</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">保持正式模式</button>
+  `);
+}
+async function doSwitchMode(mode) {
+  try {
+    await api("/mode", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    forceCloseSheet();
+    toast(mode === "live" ? "已切换到正式模式，AI 开始对客户发言" : "已切回影子模式，AI 不再对外发言");
+    lastSig.log = null;
+    await loadHealth();
+    refresh();
+  } catch (e) { toast("操作失败，请重试", false); }
 }
 function setOffline(off) {
   if (off === offline) { if (off) updateBanner(); return; }

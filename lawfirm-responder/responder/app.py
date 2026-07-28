@@ -22,11 +22,13 @@ logging.basicConfig(level=logging.INFO)
 def create_app() -> FastAPI:
     settings = get_settings()
     store = Store(settings.db_path)
-    sender = WeComSender(settings) if settings.mode == "live" else None
-    # 客服 client 在任何模式下都要能「收」（拉消息），「发」由 Pipeline 按模式门控
+    # 通道对象始终构建（token 惰性获取），由 Pipeline 按模式实时门控是否真的发出，
+    # 这样控制台切换影子/正式模式无需重启服务
+    sender = WeComSender(settings)
+    # 客服 client 在任何模式下都要能「收」（拉消息），「发」同样由 Pipeline 门控
     kf_client = KfClient(settings) if settings.wecom_kf_secret else None
     pipeline = Pipeline(store, sender, settings, kf_client=kf_client)
-    worker = Worker(pipeline, store, pipeline.sender,
+    worker = Worker(pipeline, store, sender,
                     poll_seconds=settings.worker_poll_seconds, kf_client=kf_client)
 
     @asynccontextmanager

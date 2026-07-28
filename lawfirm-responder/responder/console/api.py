@@ -110,6 +110,26 @@ def toggle_ai(group_id: str, body: AiSwitch, store: Store = Depends(get_store)):
     return {"ok": True}
 
 
+class ModeSwitch(BaseModel):
+    mode: str  # shadow | live
+
+
+@router.post("/mode")
+def set_mode(body: ModeSwitch, request: Request):
+    """切换运行模式（影子/正式），即时生效并写回 .env（重启后保持）。
+
+    正式模式下 AI 会真的向客户发言，属重大操作——前端须二次确认。
+    """
+    from responder.config import persist_setting
+
+    if body.mode not in ("shadow", "live"):
+        raise HTTPException(400, "mode 只能是 shadow 或 live")
+    settings = request.app.state.pipeline.settings
+    settings.mode = body.mode
+    persisted = persist_setting("RESPONDER_MODE", body.mode)
+    return {"ok": True, "mode": body.mode, "persisted": persisted}
+
+
 @router.get("/diagnostics")
 def diagnostics(request: Request):
     """远程自检：模型连通性、微信客服通道与客服账号列表。

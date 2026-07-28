@@ -98,8 +98,9 @@ class Worker:
             except Exception:
                 logger.exception("recheck failed: %s", row["msg_id"])
         try:
+            # 取实时的 sender（模式可在运行时切换）
             escalation.escalate_overdue(
-                self.store, self.sender, settings=self.pipeline.settings
+                self.store, self.pipeline.sender, settings=self.pipeline.settings
             )
         except Exception:
             logger.exception("escalate_overdue failed")
