@@ -46,6 +46,11 @@ timedatectl set-timezone Asia/Shanghai 2>/dev/null || true
 
 echo "==> 拉取代码（$BRANCH）"
 if [ -d "$APP_DIR/.git" ]; then
+  # 已有仓库的 origin 可能是 GitHub 直连地址；直连不通时改指向镜像，否则 fetch 会长时间挂死
+  if [ -n "$GH_MIRROR" ] && ! git -C "$APP_DIR" remote get-url origin | grep -q "$GH_MIRROR"; then
+    git -C "$APP_DIR" remote set-url origin "$REPO"
+    echo "    origin 已切换为加速镜像"
+  fi
   git -C "$APP_DIR" fetch origin "$BRANCH"
   git -C "$APP_DIR" checkout -q "$BRANCH"
   git -C "$APP_DIR" pull -q --ff-only origin "$BRANCH"
