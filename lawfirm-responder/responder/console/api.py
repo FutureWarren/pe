@@ -148,6 +148,25 @@ def set_mode(body: ModeSwitch, request: Request):
     return {"ok": True, "mode": body.mode, "persisted": persisted}
 
 
+@router.post("/update")
+def self_update(request: Request):
+    """拉取配置分支的最新代码并重启服务（命令写死，不接受请求参数）。"""
+    from responder import ops
+
+    return ops.start_update(request.app.state.pipeline.settings)
+
+
+@router.get("/update/log")
+def update_log(request: Request, lines: int = 40):
+    from responder import ops
+
+    settings = request.app.state.pipeline.settings
+    return {
+        "commit": ops.current_commit(settings.update_repo_dir),
+        "log": ops.update_log_tail(settings, lines),
+    }
+
+
 @router.get("/diagnostics")
 def diagnostics(request: Request):
     """远程自检：模型连通性、微信客服通道与客服账号列表。

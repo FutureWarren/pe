@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from responder import ops
 from responder.config import get_settings
 from responder.console.api import router as console_router
 from responder.console.api import ui_router
@@ -52,6 +53,8 @@ def create_app() -> FastAPI:
             "ok": True,
             "mode": settings.mode,
             "version": app.version,
+            # 已部署的提交号：远程升级后据此确认新版是否真的生效
+            "commit": ops.current_commit(settings.update_repo_dir),
             "llm": f"{provider.name}:{provider.model}" if provider else "rules-only",
             "kf": bool(kf_client and kf_client.available()),
             "queued": worker.qsize(),

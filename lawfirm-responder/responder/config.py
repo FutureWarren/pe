@@ -95,6 +95,15 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8020
 
+    # ---- 远程升级：让运维/Claude 无需登录服务器即可拉取新版并重启。
+    # 只允许拉取下方写死的仓库目录与分支，不接受任何外部输入，
+    # 因此权限边界等同于「持有 admin_token 者可部署本仓库的新提交」。
+    self_update_enabled: bool = True
+    update_repo_dir: str = "/opt/pe"
+    update_branch: str = "claude/law-firm-wechat-ai-responder-q3nttv"
+    update_pip: str = "/opt/pe-venv/bin/pip"
+    update_log: str = "/tmp/responder-update.log"
+
     # 控制台/ingest 访问令牌：公网部署必填（deploy.sh 自动生成）。
     # 为空时不鉴权（仅限本机开发）；企微回调路由不受此限（有签名校验）。
     admin_token: str = ""
