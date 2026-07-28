@@ -243,7 +243,12 @@ def diagnostics(request: Request):
     if kf_client is not None and kf_client.available():
         accounts = kf_client.account_list()
         kf["accounts"] = [
-            {"open_kfid": a.get("open_kfid", ""), "name": a.get("name", "")}
+            {
+                "open_kfid": a.get("open_kfid", ""),
+                "name": a.get("name", ""),
+                # 接待人＝提醒接收人；取不到时要能看清原始返回，否则是静默失败
+                "servicers": kf_client.servicer_raw(a.get("open_kfid", "")),
+            }
             for a in accounts
         ]
         kf["ok"] = bool(accounts)

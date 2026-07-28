@@ -90,18 +90,22 @@ class KfClient:
             "has_more": data.get("has_more", 0),
         }
 
-    def servicer_list(self, open_kfid: str) -> list[str]:
-        """该客服账号的接待人 userid 列表——即「谁该收到这个会话的提醒」。"""
+    def servicer_raw(self, open_kfid: str) -> dict:
+        """接待人接口的原始返回（诊断用：接待人取不到时要能看清是为什么）。"""
         try:
-            data = self._post("kf/servicer/list", {"open_kfid": open_kfid})
-        except Exception:
+            return self._post("kf/servicer/list", {"open_kfid": open_kfid})
+        except Exception as e:
             logger.exception("kf servicer/list error (open_kfid=%s)", open_kfid)
-            return []
-        return [
-            s["userid"]
-            for s in (data.get("servicer_list") or [])
-            if s.get("userid") and s.get("status", 0) == 0  # 0 = 接待中
-        ]
+            return {"error": str(e)[:200]}
+
+    def servicer_list(self, open_kfid: str) -> list[str]:
+        """该客服账号的接待人 userid 列表——即「谁该收到这个会话的提醒」。
+
+        status 字段各版本语义不一（0/1 都出现过表示可接待），因此只要有 userid
+        就收下——宁可多一个候选人，也不要因为字段语义变化导致提醒无人可收。
+        """
+        data = self.servicer_raw(open_kfid)
+        return [s["userid"] for s in (data.get("servicer_list") or []) if s.get("userid")]
 
     def account_list(self) -> list[dict]:
         """客服账号列表（部署自检用）。"""
