@@ -52,6 +52,17 @@ def kf_msg(msgid, content, origin=ORIGIN_CUSTOMER, servicer=""):
     return m
 
 
+class DirectSender:
+    """企微单聊记录桩（线索交接单/律师提醒走这条通道）。"""
+
+    def __init__(self):
+        self.direct: list[tuple[str, str]] = []
+
+    def send_direct_text(self, userid, text):
+        self.direct.append((userid, text))
+        return True
+
+
 def make_env(tmp_path, batches, mode="live", servicers=("wei",)):
     db = str(tmp_path / "kf.db")
     store = Store(db)
@@ -61,8 +72,10 @@ def make_env(tmp_path, batches, mode="live", servicers=("wei",)):
         kf_default_case_type="劳动仲裁",
     )
     kf = FakeKf(batches, servicers=servicers)
-    pipeline = Pipeline(store, sender=None, settings=settings, kf_client=kf)
-    worker = Worker(pipeline, store, None, kf_client=kf)
+    sender = DirectSender()
+    pipeline = Pipeline(store, sender=sender, settings=settings, kf_client=kf)
+    worker = Worker(pipeline, store, sender, kf_client=kf)
+    kf.direct = sender.direct  # 测试里统一从 kf 桩上读
     return store, kf, worker
 
 
@@ -208,8 +221,8 @@ def test_courtesy_still_silent_in_kf(tmp_path):
     assert store.list_decisions(GID)[0]["action"] == "silence"
 
 
-def test_reminder_targets_kf_servicer(tmp_path):
-    """提醒接收人自动取客服账号的接待人——「已通知律师」不能是空头承诺。"""
+def test_urgent_kf_pushes_one_brief_to_servicer(tmp_path):
+    """紧急进线：接收人自动取客服账号接待人，且只推一条交接单（不再逐条提醒）。"""
     store, kf, worker = make_env(
         tmp_path,
         [{"msg_list": [kf_msg("u1", "我老公被拘留了怎么办")],
@@ -217,11 +230,14 @@ def test_reminder_targets_kf_servicer(tmp_path):
         servicers=("weilai", "libackup"),
     )
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
+
     g = store.get_group(GID)
     assert g.lawyer_userid == "weilai" and g.backup_userid == "libackup"
-    todo = store.pending_reminders()
-    assert todo and todo[0]["to_userid"] == "weilai" and todo[0]["urgent"] == 1
-    assert "微信客服会话" in todo[0]["summary"]  # 措辞不再说「群」
+    # 客服会话统一走线索简报：一次咨询 = 一条交接单
+    assert store.pending_reminders() == []
+    lead = store.get_lead(GID)
+    assert lead and lead["notified_at"] and lead["urgency"] == "high"
+    assert kf.sent, "群里仍应立即安抚客户"
 
 
 def test_servicer_lookup_cached(tmp_path):

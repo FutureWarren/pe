@@ -38,40 +38,32 @@ def build_and_store(
     history: list[dict],
     *,
     settings: Settings | None = None,
+    summarize: bool = True,
+    previous: dict | None = None,
+    urgent: bool = False,
 ) -> dict | None:
-    """生成/更新线索并入库，返回线索记录。历史为空则不生成。"""
+    """生成/更新线索并入库，返回线索记录。历史为空则不生成。
+
+    summarize=False 时只用规则更新意向/联系方式（零模型成本）——用于
+    「本轮不会通知任何人」的情况：没人看的摘要不值得花一次模型调用。
+    """
     settings = settings or get_settings()
     if not history:
         return None
 
-    # 联系方式与意向：扫全量客户发言（客户可能在任意一轮留电话）
-    contact, hits, levels = "", set(), []
-    for m in history:
-        if m.get("sender_is_staff"):
-            continue
-        level, names = signals.detect(m["content"])
-        levels.append(level)
-        hits.update(names)
-        contact = contact or signals.extract_contact(m["content"])
-    intent = signals.rank(*levels)
-
-    brief = llm.extract_lead(
-        prompts.format_history(history, max_chars_each=200),
-        contact=contact,
-        signals=sorted(hits),
-        timeout=settings.llm_timeout_seconds + 5,
-        settings=settings,
+    intent, contact, hits = signals.scan(history)
+    brief = (
+        llm.extract_lead(
+            prompts.format_history(history, max_chars_each=200),
+            contact=contact,
+            signals=hits,
+            timeout=settings.llm_timeout_seconds + 5,
+            settings=settings,
+        )
+        if summarize
+        else None
     )
-    if brief is None:
-        fields = {
-            "summary": _fallback_summary(history),
-            "case_type": group.case_type,
-            "key_facts": json.dumps([], ensure_ascii=False),
-            "urgency": "high" if intent == signals.HOT else "low",
-            "suggested_action": "请查看完整对话后跟进（AI 摘要不可用）",
-            "opening_line": "",
-        }
-    else:
+    if brief is not None:
         fields = {
             "summary": brief.summary,
             "case_type": brief.case_type or group.case_type,
@@ -80,9 +72,25 @@ def build_and_store(
             "suggested_action": brief.suggested_action,
             "opening_line": brief.opening_line,
         }
+    elif previous:  # 不重新归纳时沿用上一版摘要，只刷新规则字段
+        fields = {k: previous.get(k, "") for k in
+                  ("summary", "case_type", "key_facts", "urgency",
+                   "suggested_action", "opening_line")}
+    else:
+        fields = {
+            "summary": _fallback_summary(history),
+            "case_type": group.case_type,
+            "key_facts": json.dumps([], ensure_ascii=False),
+            "urgency": "high" if intent == signals.HOT else "low",
+            "suggested_action": "请查看完整对话后跟进（AI 摘要不可用）",
+            "opening_line": "",
+        }
     fields.update(
-        intent=intent, contact=contact, signals=json.dumps(sorted(hits), ensure_ascii=False)
+        intent=intent, contact=contact, signals=json.dumps(hits, ensure_ascii=False)
     )
+    # 规则引擎判定的紧急（拘留/传唤/开庭临近…）是确定性信号，优先于模型的估计
+    if urgent:
+        fields["urgency"] = "high"
     store.upsert_lead(group.group_id, fields)
     return store.get_lead(group.group_id)
 
@@ -113,27 +121,38 @@ def format_notification(lead: dict, group: GroupProfile) -> str:
     return "\n".join(lines)
 
 
-def should_notify(previous: dict | None, current: dict) -> bool:
+_ORDER = {signals.COLD: 0, signals.WARM: 1, signals.HOT: 2}
+
+
+def should_notify(previous: dict | None, intent: str) -> bool:
     """仅在「首次达到可跟进意向」或「意向升级」时通知，避免同一客户反复打扰。"""
-    if current["intent"] == signals.COLD:
+    if intent == signals.COLD:
         return False
     if previous is None or not previous.get("notified_at"):
         return True
-    order = {signals.COLD: 0, signals.WARM: 1, signals.HOT: 2}
-    return order[current["intent"]] > order.get(previous.get("intent"), 0)
+    return _ORDER[intent] > _ORDER.get(previous.get("intent"), 0)
 
 
 def dispatch(
     store: Store, group: GroupProfile, history: list[dict], sender, *,
-    settings: Settings | None = None,
+    settings: Settings | None = None, force: bool = False, urgent: bool = False,
 ) -> dict | None:
-    """生成线索 →（按需）推送接待人。sender 为 None（影子模式）时只入库。"""
+    """生成线索 →（按需）推送接待人。sender 为 None（影子模式）时只入库。
+
+    先用零成本的规则判定「这次要不要通知」，只有要通知时才让模型归纳——
+    一次咨询里客户可能说十句话，但律师只需要收到一条交接单。
+    """
     settings = settings or get_settings()
-    previous = store.get_lead(group.group_id)
-    lead = build_and_store(store, group, history, settings=settings)
-    if lead is None:
+    if not history:
         return None
-    if not should_notify(previous, lead):
+    previous = store.get_lead(group.group_id)
+    intent, _, _ = signals.scan(history)
+    notify = force or should_notify(previous, intent)
+    lead = build_and_store(
+        store, group, history, settings=settings, summarize=notify,
+        previous=previous, urgent=urgent,
+    )
+    if lead is None or not notify:
         return lead
     to = group.lawyer_userid or settings.default_notify_userid
     if sender and to:

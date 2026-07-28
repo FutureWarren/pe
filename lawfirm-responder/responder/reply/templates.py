@@ -89,11 +89,20 @@ def handoff_generic(group: GroupProfile, seed: str = "") -> str:
     return _pick(variants, seed)
 
 
-def greeting_opener(group: GroupProfile, seed: str = "") -> str:
+def greeting_opener(group: GroupProfile, seed: str = "", contact_left: bool = False) -> str:
     """一对一客服的开场引导：接住客户，并请他说明情况（首轮筛查的第一步）。
 
+    客户刚留下联系方式时必须换一套话术——此时再问「您是什么情况」既冒犯又像机器人。
     不含任何法律实质内容，因此走确定性模板即可，无需模型。
     """
+    if contact_left:
+        L = _lawyer(group)
+        variants = [
+            f"好的，电话我记下了，稍后让{L}直接跟您联系。",
+            f"收到，您的电话我记下来了，我这就转给{L}，他会尽快跟您联系。",
+            f"好的，联系方式收到了。我先把您的情况整理给{L}，他会主动联系您。",
+        ]
+        return _pick(variants, seed)
     variants = [
         "您好，这边是松沪律所。您方便说下具体是什么情况吗，我先帮您了解一下。",
         "您好，我在的。您把遇到的情况大致说一下，我先帮您看看该怎么处理。",

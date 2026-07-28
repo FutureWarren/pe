@@ -55,6 +55,8 @@ class Pipeline:
             action == Action.SILENCE
             and "default-silence" in reasons
             and len(msg.content.strip()) >= 6  # 过短消息不值得进模型
+            # 已留联系方式/要约见的消息意图已经明确，不必再问模型「这是不是法律问题」
+            and signals.detect(msg.content)[0] != signals.HOT
             and self.settings.llm_refine_enabled
             and llm.llm_available()
         ):
@@ -95,7 +97,10 @@ class Pipeline:
             self.store.save_decision(decision)
             return decision
 
-        history = self.store.recent_messages(msg.group_id, self.settings.history_window)
+        # 上下文一次查到底：分类、生成、线索简报共用同一份，按各自窗口切片
+        window = max(self.settings.history_window, self.settings.lead_history_window)
+        convo = self.store.recent_messages(msg.group_id, window)
+        history = convo[-self.settings.history_window :]
 
         decision = decide(
             msg, group,
@@ -144,12 +149,17 @@ class Pipeline:
 
         # 转化信号：客户留了联系方式/表达面谈意愿 → 立刻整理交接单推给接待人。
         # 首响只是止损，真正的业务价值在这一步。
-        self._maybe_dispatch_lead(msg, group, history)
+        self._maybe_dispatch_lead(msg, decision, group, convo)
 
         # 承接类一律触发人工提醒；直接回答类也提醒律师补充。
         # 同一条消息只提醒一次（到点复评会二次经过这里，不重复打扰律师）。
         # 开场问候不惊动律师——客户只是说了句「你好」。
-        if decision.category != Category.GREETING and not self.store.has_reminder(msg.msg_id):
+        # 客服会话已由线索简报统一承载（一次咨询 = 一条交接单），不再逐条推提醒。
+        if (
+            decision.category != Category.GREETING
+            and not (group.is_kf and self.settings.lead_brief_enabled)
+            and not self.store.has_reminder(msg.msg_id)
+        ):
             reminder = escalation.build_reminder(
                 msg, decision, group, reply_text, self.settings
             )
@@ -158,20 +168,29 @@ class Pipeline:
         return decision
 
     def _maybe_dispatch_lead(
-        self, msg: IncomingMessage, group: GroupProfile, history: list[dict]
-    ) -> None:
+        self, msg: IncomingMessage, decision: Decision, group: GroupProfile,
+        convo: list[dict],
+    ) -> bool:
+        """转化信号或紧急情形 → 生成/更新线索简报。返回是否走了简报通道。
+
+        紧急消息在客服会话里也走这条路（force 推送）：律师收到的是一张
+        含背景与联系方式的交接单，而不是一句孤零零的「客户说了什么」。
+        """
         if not self.settings.lead_brief_enabled:
-            return
-        level, _ = signals.detect(msg.content)
-        if level == signals.COLD:
-            return
-        # 用「含本条」的完整上下文生成，history 取自本条入库之后的最近窗口
-        convo = self.store.recent_messages(msg.group_id, self.settings.lead_history_window)
+            return False
+        urgent_kf = group.is_kf and decision.urgent
+        if not urgent_kf and signals.detect(msg.content)[0] == signals.COLD:
+            return False
         try:
             # 用门控后的 sender：影子模式只入库不外发（与律师提醒口径一致）
-            lead.dispatch(self.store, group, convo, self.sender, settings=self.settings)
+            lead.dispatch(
+                self.store, group, convo, self.sender,
+                settings=self.settings, force=urgent_kf, urgent=decision.urgent,
+            )
+            return True
         except Exception:
             logger.exception("lead dispatch failed: %s", msg.group_id)
+            return False
 
     def _recent_cta(self, group_id: str) -> bool:
         """接管时间窗内该群是否已发过带面谈引导/收尾语的回复——有则本次不再带（防套路感）。"""

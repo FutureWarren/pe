@@ -8,7 +8,7 @@
 from datetime import datetime
 
 from responder.config import Settings, get_settings
-from responder.engine import rules
+from responder.engine import rules, signals
 from responder.models import Action, Category, Decision, GroupProfile, IncomingMessage
 
 
@@ -66,7 +66,10 @@ def decide(
         and msg.content.strip()
     ):
         action, category = Action.ANSWER, Category.GREETING
-        reasons = reasons + ["kf:greeting-opener"]
+        # 刚留下联系方式的客户不能再被问「您是什么情况」——换收下并转交的话术
+        reasons = reasons + [
+            "kf:contact-ack" if signals.extract_contact(msg.content) else "kf:greeting-opener"
+        ]
 
     decision = Decision(
         msg_id=msg.msg_id,

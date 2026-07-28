@@ -71,3 +71,19 @@ def rank(*levels: str) -> str:
         if level in levels:
             return level
     return COLD
+
+
+def scan(history: list[dict]) -> tuple[str, str, list[str]]:
+    """扫一段对话的全部客户发言，返回 (意向, 联系方式, 信号)。
+
+    纯规则、零成本——先用它决定「要不要花钱调模型」，而不是反过来。
+    """
+    contact, hits, levels = "", set(), []
+    for m in history:
+        if m.get("sender_is_staff"):
+            continue
+        level, names = detect(m.get("content", ""))
+        levels.append(level)
+        hits.update(names)
+        contact = contact or extract_contact(m.get("content", ""))
+    return rank(*levels), contact, sorted(hits)

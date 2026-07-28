@@ -80,9 +80,10 @@ def generate(
 
     # 客服开场引导：确定性话术，不含法律实质内容，不进模型
     if decision.category == Category.GREETING:
-        return guard(
-            templates.greeting_opener(group, seed=msg.msg_id), Action.ANSWER, fallback
+        text = templates.greeting_opener(
+            group, seed=msg.msg_id, contact_left="kf:contact-ack" in decision.reasons
         )
+        return guard(text, Action.ANSWER, fallback)
 
     if decision.action == Action.HANDOFF:
         text = templates.build_handoff(decision.category, group, seed=msg.msg_id)
