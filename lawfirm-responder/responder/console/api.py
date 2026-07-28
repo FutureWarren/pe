@@ -110,6 +110,61 @@ def toggle_ai(group_id: str, body: AiSwitch, store: Store = Depends(get_store)):
     return {"ok": True}
 
 
+@router.get("/diagnostics")
+def diagnostics(request: Request):
+    """远程自检：模型连通性、微信客服通道与客服账号列表。
+
+    企微 API 受可信 IP 限制，只有服务器本身能调；此端点让运维/Claude 无需登录
+    服务器即可确认三条外部依赖是否健康。
+    """
+    from responder.engine import llm
+
+    pipeline = request.app.state.pipeline
+    s = pipeline.settings
+    provider = llm.resolve(s)
+    llm_ok, llm_err = llm.ping(s)
+
+    kf_client = getattr(pipeline, "kf_client", None) or getattr(
+        request.app.state.worker, "kf_client", None
+    )
+    kf: dict = {"configured": bool(s.wecom_kf_secret), "accounts": [], "ok": False}
+    if kf_client is not None and kf_client.available():
+        accounts = kf_client.account_list()
+        kf["accounts"] = [
+            {"open_kfid": a.get("open_kfid", ""), "name": a.get("name", "")}
+            for a in accounts
+        ]
+        kf["ok"] = bool(accounts)
+    return {
+        "mode": s.mode,
+        "llm": {
+            "provider": f"{provider.name}:{provider.model}" if provider else "",
+            "ok": llm_ok,
+            "error": llm_err,
+        },
+        "kf": kf,
+    }
+
+
+@router.get("/kf/contact-link")
+def kf_contact_link(request: Request, open_kfid: str, scene: str = ""):
+    """生成客服会话入口链接（贴官网/名片/朋友圈，客户点开即进线）。"""
+    pipeline = request.app.state.pipeline
+    kf_client = getattr(pipeline, "kf_client", None) or getattr(
+        request.app.state.worker, "kf_client", None
+    )
+    if kf_client is None or not kf_client.available():
+        raise HTTPException(400, "微信客服通道未配置")
+    payload = {"open_kfid": open_kfid}
+    if scene:
+        payload["scene"] = scene
+    try:
+        data = kf_client.post_raw("kf/add_contact_way", payload)
+    except Exception as e:
+        raise HTTPException(502, f"生成失败：{e}") from e
+    return {"url": data.get("url", "")}
+
+
 @router.get("/metrics")
 def metrics(store: Store = Depends(get_store)):
     """看板雏形：三分类分布、承接量、合规拦截数。首响时长依赖上线后真实时间戳。"""

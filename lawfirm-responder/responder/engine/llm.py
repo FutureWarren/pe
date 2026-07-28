@@ -108,6 +108,28 @@ def _chat_anthropic(
     return next((b.text for b in response.content if b.type == "text"), None)
 
 
+def ping(settings: Settings | None = None) -> tuple[bool, str]:
+    """最小成本的连通性自检（部署后远程确认 key 有效）。返回 (是否可用, 错误摘要)。"""
+    settings = settings or get_settings()
+    provider = resolve(settings)
+    if provider is None:
+        return False, "未配置任何模型 key"
+    try:
+        if provider.name == "deepseek":
+            out = _chat_deepseek(
+                "回复 ok", "ok", provider.model,
+                max_tokens=5, timeout=15, json_mode=False, temperature=0,
+            )
+        else:
+            out = _chat_anthropic(
+                "回复 ok", "ok", provider.model,
+                max_tokens=5, timeout=15, json_schema=None,
+            )
+        return (out is not None), ("" if out is not None else "模型返回空")
+    except Exception as e:  # 网络/鉴权/额度
+        return False, f"{type(e).__name__}: {e}"[:200]
+
+
 # ================================================================ 分类复核
 @dataclass
 class Refined:

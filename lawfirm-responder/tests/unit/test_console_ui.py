@@ -25,6 +25,22 @@ def test_ui_served_in_chinese():
         assert banned not in r.text
 
 
+def test_diagnostics_reports_channels(tmp_path, monkeypatch):
+    """自检端点：无 key 时如实报告不可用，不抛异常（远程排障入口）。"""
+    settings = Settings(mode="shadow", db_path=str(tmp_path / "d.db"), admin_token="")
+    store = Store(settings.db_path)
+    app = FastAPI()
+    app.state.store = store
+    app.state.pipeline = Pipeline(store, None, settings)
+    app.state.worker = type("W", (), {"kf_client": None})()
+    app.include_router(console_router)
+
+    data = TestClient(app).get("/console/diagnostics").json()
+    assert data["mode"] == "shadow"
+    assert data["llm"]["ok"] is False and data["llm"]["error"]
+    assert data["kf"]["configured"] is False and data["kf"]["accounts"] == []
+
+
 def test_group_delete(tmp_path):
     """群 ID 填错的出口：删除档案（留痕数据不动）。"""
     from responder.models import GroupProfile

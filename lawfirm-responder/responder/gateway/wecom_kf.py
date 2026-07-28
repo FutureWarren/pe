@@ -67,6 +67,10 @@ class KfClient:
             raise RuntimeError(f"kf {path} failed: {resp}")
         return resp
 
+    def post_raw(self, path: str, payload: dict) -> dict:
+        """直调客服接口（控制台自检/生成入口链接等用途），异常向上抛。"""
+        return self._post(path, payload)
+
     # ------------------------------------------------------------ 收
     def sync_msg(self, token: str, open_kfid: str, cursor: str = "", limit: int = 1000) -> dict:
         """拉取一批消息。返回 {msg_list, next_cursor, has_more}；失败返回空批次。"""
