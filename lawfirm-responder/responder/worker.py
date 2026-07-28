@@ -45,6 +45,7 @@ class Worker:
         self.q: queue.Queue = queue.Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._servicer_cache: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------ 生命周期
     def start(self) -> None:
@@ -180,10 +181,15 @@ class Worker:
         self.pipeline.handle(msg)
 
     def _ensure_kf_profile(self, group_id: str, open_kfid: str, external_userid: str) -> None:
-        """客服会话首次出现时自动建档——员工零操作即可让 AI 上岗。"""
+        """客服会话首次出现时自动建档——员工零操作即可让 AI 上岗。
+
+        提醒接收人取该客服账号在企微后台配置的接待人（首位），保证
+        「已通知律师」这句承诺真的兑现；取不到时回落全局兜底配置。
+        """
         if self.store.get_group(group_id) is not None:
             return
         s = self.pipeline.settings
+        servicers = self._kf_servicers(open_kfid)
         self.store.upsert_group(
             GroupProfile(
                 group_id=group_id,
@@ -191,8 +197,18 @@ class Worker:
                 client_status=ClientStatus.PROSPECT,  # 客服进线默认为新咨询
                 case_type=s.kf_default_case_type,
                 lawyer_name=s.kf_default_lawyer_name,
+                lawyer_userid=servicers[0] if servicers else s.default_notify_userid,
+                backup_userid=servicers[1] if len(servicers) > 1 else "",
                 ai_enabled=s.kf_enabled,
                 kf_open_kfid=open_kfid,
                 kf_external_userid=external_userid,
             )
         )
+
+    def _kf_servicers(self, open_kfid: str) -> list[str]:
+        """接待人列表按客服账号缓存：每个新客户会话都查一次太浪费。"""
+        if open_kfid in self._servicer_cache:
+            return self._servicer_cache[open_kfid]
+        got = self.kf_client.servicer_list(open_kfid) if self.kf_client else []
+        self._servicer_cache[open_kfid] = got
+        return got

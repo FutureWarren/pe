@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     # AI 补位等待时长（秒）。[待定] 默认白天 2.5 分钟、夜间 1 分钟，可按群配置覆盖。
     wait_seconds_day: int = 150
     wait_seconds_night: int = 60
+    # 一对一客服会话：AI 即第一响应人，等待无意义，默认即时响应
+    kf_wait_seconds: int = 0
     night_start_hour: int = 21
     night_end_hour: int = 8
 
@@ -79,6 +81,9 @@ class Settings(BaseSettings):
 
     # 紧急提醒升级时长（秒）
     escalation_seconds: int = 600
+    # 群档案未配律师企微号时的兜底提醒接收人（话术已向客户承诺「已通知律师」，
+    # 提醒必须真的送达；客服会话会自动取该客服账号的接待人，此项为最后兜底）
+    default_notify_userid: str = ""
 
     db_path: str = "responder.db"
     api_host: str = "127.0.0.1"

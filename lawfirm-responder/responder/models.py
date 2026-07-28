@@ -28,6 +28,7 @@ class Category(str, Enum):
     URGENT = "urgent"  # 紧急情形：拘留/传唤/开庭临近/情绪/投诉
     CONTACT = "contact"  # 找人 / 催回复
     CHITCHAT = "chitchat"  # 闲聊、表情、客户互聊、非问题
+    GREETING = "greeting"  # 一对一客服场景的开场/意图不明 → 引导客户说明情况
     OTHER = "other"
 
 
@@ -47,6 +48,12 @@ class GroupProfile(BaseModel):
     # 微信客服会话（一对一）：两者齐备时回复走客服通道，优先于机器人/群聊
     kf_open_kfid: str = ""  # 客服账号 ID
     kf_external_userid: str = ""  # 客户的外部联系人 ID
+
+    @property
+    def is_kf(self) -> bool:
+        """一对一客服会话。与群聊的关键差异：AI 是第一响应人而非补位者，
+        故不等待、不对开场白沉默（见 engine/decision.py）。"""
+        return bool(self.kf_open_kfid and self.kf_external_userid)
 
 
 class IncomingMessage(BaseModel):

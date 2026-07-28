@@ -21,20 +21,30 @@ _HINTS = {
 
 
 def build_reminder(
-    msg: IncomingMessage, decision: Decision, group: GroupProfile, ai_reply: str | None
+    msg: IncomingMessage,
+    decision: Decision,
+    group: GroupProfile,
+    ai_reply: str | None,
+    settings: Settings | None = None,
 ) -> Reminder:
+    settings = settings or get_settings()
     prefix = "【加急】" if decision.urgent else ""
+    where = "微信客服会话" if group.is_kf else "客户群"
+    channel_hint = "客服会话中" if group.is_kf else "群内"
     lines = [
-        f"{prefix}客户群「{group.name or group.group_id}」有待跟进消息",
+        f"{prefix}{where}「{group.name or group.group_id}」有待跟进消息",
         f"客户问题：{msg.content}",
     ]
     if ai_reply:
         lines.append(f"AI 已回复：{ai_reply}")
-    lines.append(_HINTS.get(decision.category, "建议回复要点：请尽快在群内跟进。"))
+    hint = _HINTS.get(decision.category, f"建议回复要点：请尽快在{channel_hint}跟进。")
+    lines.append(hint.replace("群内", channel_hint))
     return Reminder(
         msg_id=msg.msg_id,
         group_id=msg.group_id,
-        to_userid=group.lawyer_userid,
+        # 群档案未配律师企微号时回落到全局兜底接收人——话术已经向客户承诺
+        # 「已通知律师」，提醒必须真的送得出去。
+        to_userid=group.lawyer_userid or settings.default_notify_userid,
         urgent=decision.urgent,
         summary="\n".join(lines),
     )

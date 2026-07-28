@@ -9,7 +9,7 @@ from datetime import datetime
 
 from responder.config import Settings, get_settings
 from responder.engine import rules
-from responder.models import Action, Decision, GroupProfile, IncomingMessage
+from responder.models import Action, Category, Decision, GroupProfile, IncomingMessage
 
 
 def _is_night(now: datetime, settings: Settings) -> bool:
@@ -18,9 +18,17 @@ def _is_night(now: datetime, settings: Settings) -> bool:
     return h >= start or h < end if start > end else start <= h < end
 
 
-def wait_seconds(now: datetime, settings: Settings | None = None) -> int:
-    """当前时段的 AI 补位等待时长。"""
+def wait_seconds(
+    now: datetime, settings: Settings | None = None, group: GroupProfile | None = None
+) -> int:
+    """当前时段的 AI 补位等待时长。
+
+    群聊里 AI 是补位者，要留时间给律师先答；一对一客服会话里 AI 就是第一响应人
+    （客户主动点进来咨询，无人值守），等待没有意义，默认 0 秒即时响应。
+    """
     settings = settings or get_settings()
+    if group is not None and group.is_kf:
+        return settings.kf_wait_seconds
     return settings.wait_seconds_night if _is_night(now, settings) else settings.wait_seconds_day
 
 
@@ -47,6 +55,19 @@ def decide(
     action, category, urgent, reasons = classification or rules.classify(
         msg.content, msg.msg_type
     )
+    # 一对一客服：意图不明的开场（「你好」「我想咨询一下」）在群里该沉默，
+    # 在客服窗口沉默 = 把客户晾着。转为引导型开场白，同时服务于首轮筛查。
+    # 「谢谢/好的」这类收尾应答（chitchat-fastpath）仍保持沉默，不刷屏。
+    if (
+        action == Action.SILENCE
+        and "default-silence" in reasons
+        and group.is_kf
+        and msg.msg_type == "text"
+        and msg.content.strip()
+    ):
+        action, category = Action.ANSWER, Category.GREETING
+        reasons = reasons + ["kf:greeting-opener"]
+
     decision = Decision(
         msg_id=msg.msg_id,
         group_id=msg.group_id,
@@ -79,7 +100,7 @@ def decide(
         decision.reasons.append("gate:urgent-bypass-wait")
         return decision
 
-    required = wait_seconds(now, settings)
+    required = wait_seconds(now, settings, group)
     if seconds_unanswered < required:
         decision.reasons.append(f"gate:waiting({int(seconds_unanswered)}s/{required}s)")
         return decision

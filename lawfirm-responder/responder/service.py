@@ -12,7 +12,7 @@ from responder.config import Settings, get_settings
 from responder.engine import llm, rules
 from responder.engine.decision import decide, wait_seconds
 from responder.gateway.sender import WeComSender
-from responder.models import Action, Decision, GroupProfile, IncomingMessage
+from responder.models import Action, Category, Decision, GroupProfile, IncomingMessage
 from responder.notify import escalation
 from responder.reply import sanitize, templates
 from responder.reply.generator import generate
@@ -113,7 +113,7 @@ class Pipeline:
         if not decision.should_speak and any(
             r.startswith("gate:waiting") for r in decision.reasons
         ):
-            required = wait_seconds(datetime.now(), self.settings)
+            required = wait_seconds(datetime.now(), self.settings, group)
             self.store.add_pending_check(
                 msg.msg_id, msg.group_id,
                 msg.created_at + timedelta(seconds=required + 1),
@@ -143,8 +143,11 @@ class Pipeline:
 
         # 承接类一律触发人工提醒；直接回答类也提醒律师补充。
         # 同一条消息只提醒一次（到点复评会二次经过这里，不重复打扰律师）。
-        if not self.store.has_reminder(msg.msg_id):
-            reminder = escalation.build_reminder(msg, decision, group, reply_text)
+        # 开场问候不惊动律师——客户只是说了句「你好」。
+        if decision.category != Category.GREETING and not self.store.has_reminder(msg.msg_id):
+            reminder = escalation.build_reminder(
+                msg, decision, group, reply_text, self.settings
+            )
             escalation.dispatch(reminder, self.store, self.sender)
 
         return decision

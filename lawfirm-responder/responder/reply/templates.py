@@ -89,6 +89,19 @@ def handoff_generic(group: GroupProfile, seed: str = "") -> str:
     return _pick(variants, seed)
 
 
+def greeting_opener(group: GroupProfile, seed: str = "") -> str:
+    """一对一客服的开场引导：接住客户，并请他说明情况（首轮筛查的第一步）。
+
+    不含任何法律实质内容，因此走确定性模板即可，无需模型。
+    """
+    variants = [
+        "您好，这边是松沪律所。您方便说下具体是什么情况吗，我先帮您了解一下。",
+        "您好，我在的。您把遇到的情况大致说一下，我先帮您看看该怎么处理。",
+        "您好，这边是松沪律所。您先说说具体遇到什么事了，我帮您理一理。",
+    ]
+    return _pick(variants, seed)
+
+
 def safe_fallback(group: GroupProfile) -> str:
     """合规拦截后的兜底回复：只承接，不含任何实质内容。固定文本，不走变体。"""
     L = _lawyer(group)

@@ -90,6 +90,19 @@ class KfClient:
             "has_more": data.get("has_more", 0),
         }
 
+    def servicer_list(self, open_kfid: str) -> list[str]:
+        """该客服账号的接待人 userid 列表——即「谁该收到这个会话的提醒」。"""
+        try:
+            data = self._post("kf/servicer/list", {"open_kfid": open_kfid})
+        except Exception:
+            logger.exception("kf servicer/list error (open_kfid=%s)", open_kfid)
+            return []
+        return [
+            s["userid"]
+            for s in (data.get("servicer_list") or [])
+            if s.get("userid") and s.get("status", 0) == 0  # 0 = 接待中
+        ]
+
     def account_list(self) -> list[dict]:
         """客服账号列表（部署自检用）。"""
         try:

@@ -9,7 +9,14 @@ from datetime import datetime
 from responder.compliance.guard import GuardResult, guard
 from responder.config import Settings, get_settings
 from responder.engine import llm
-from responder.models import Action, ClientStatus, Decision, GroupProfile, IncomingMessage
+from responder.models import (
+    Action,
+    Category,
+    ClientStatus,
+    Decision,
+    GroupProfile,
+    IncomingMessage,
+)
 from responder.reply import prompts, sanitize, templates
 
 _STATUS_LABEL = {
@@ -70,6 +77,12 @@ def generate(
         require_disclaimer = settings.disclaimer_required
 
     fallback = templates.safe_fallback(group)
+
+    # 客服开场引导：确定性话术，不含法律实质内容，不进模型
+    if decision.category == Category.GREETING:
+        return guard(
+            templates.greeting_opener(group, seed=msg.msg_id), Action.ANSWER, fallback
+        )
 
     if decision.action == Action.HANDOFF:
         text = templates.build_handoff(decision.category, group, seed=msg.msg_id)

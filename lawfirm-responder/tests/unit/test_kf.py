@@ -17,13 +17,19 @@ GID = f"kf:{OPEN_KFID}:{EXT_USER}"
 class FakeKf:
     """KfClient 记录桩：按批次吐消息，记录发出的回复。"""
 
-    def __init__(self, batches):
+    def __init__(self, batches, servicers=("wei",)):
         self.batches = list(batches)
         self.sent: list[tuple[str, str, str]] = []
         self.sync_calls: list[tuple[str, str, str]] = []
+        self.servicers = list(servicers)
+        self.servicer_calls = 0
 
     def available(self):
         return True
+
+    def servicer_list(self, open_kfid):
+        self.servicer_calls += 1
+        return list(self.servicers)
 
     def sync_msg(self, token, open_kfid, cursor="", limit=1000):
         self.sync_calls.append((token, open_kfid, cursor))
@@ -46,7 +52,7 @@ def kf_msg(msgid, content, origin=ORIGIN_CUSTOMER, servicer=""):
     return m
 
 
-def make_env(tmp_path, batches, mode="live"):
+def make_env(tmp_path, batches, mode="live", servicers=("wei",)):
     db = str(tmp_path / "kf.db")
     store = Store(db)
     settings = Settings(
@@ -54,7 +60,7 @@ def make_env(tmp_path, batches, mode="live"):
         wecom_kf_secret="kf-secret", kf_default_lawyer_name="魏",
         kf_default_case_type="劳动仲裁",
     )
-    kf = FakeKf(batches)
+    kf = FakeKf(batches, servicers=servicers)
     pipeline = Pipeline(store, sender=None, settings=settings, kf_client=kf)
     worker = Worker(pipeline, store, None, kf_client=kf)
     return store, kf, worker
@@ -166,6 +172,67 @@ def test_ai_disabled_profile_stays_silent(tmp_path):
     store.set_group_ai(GID, False)
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
     assert len(kf.sent) == 1  # 未新增
+
+
+def test_no_wait_gate_in_kf(tmp_path):
+    """客服会话 AI 是第一响应人：非紧急问题也立即回复，不等 2.5 分钟。"""
+    store, kf, worker = make_env(tmp_path, [{
+        "msg_list": [kf_msg("w1", "试用期被辞退有补偿吗？")],
+        "next_cursor": "c1", "has_more": 0,
+    }])
+    worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
+    assert kf.sent, "客服会话不应被补位等待门拦下"
+    reasons = [d["reasons"] for d in store.list_decisions(GID)]
+    assert not any("gate:waiting" in r for r in reasons)
+
+
+def test_greeting_gets_opener_not_silence(tmp_path):
+    """一对一窗口里「你好」必须有回应并引导说明情况，不能把客户晾着。"""
+    store, kf, worker = make_env(tmp_path, [{
+        "msg_list": [kf_msg("g1", "你好")], "next_cursor": "c1", "has_more": 0,
+    }])
+    worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
+    assert kf.sent and "松沪律所" in kf.sent[0][2] or "我在的" in kf.sent[0][2]
+    d = store.list_decisions(GID)[0]
+    assert d["action"] == "answer" and d["category"] == "greeting"
+    assert store.pending_reminders() == []  # 一句「你好」不惊动律师
+
+
+def test_courtesy_still_silent_in_kf(tmp_path):
+    """「谢谢」这类收尾应答仍保持沉默，避免无谓刷屏。"""
+    store, kf, worker = make_env(tmp_path, [{
+        "msg_list": [kf_msg("c1", "谢谢")], "next_cursor": "c1", "has_more": 0,
+    }])
+    worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
+    assert kf.sent == []
+    assert store.list_decisions(GID)[0]["action"] == "silence"
+
+
+def test_reminder_targets_kf_servicer(tmp_path):
+    """提醒接收人自动取客服账号的接待人——「已通知律师」不能是空头承诺。"""
+    store, kf, worker = make_env(
+        tmp_path,
+        [{"msg_list": [kf_msg("u1", "我老公被拘留了怎么办")],
+          "next_cursor": "c1", "has_more": 0}],
+        servicers=("weilai", "libackup"),
+    )
+    worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
+    g = store.get_group(GID)
+    assert g.lawyer_userid == "weilai" and g.backup_userid == "libackup"
+    todo = store.pending_reminders()
+    assert todo and todo[0]["to_userid"] == "weilai" and todo[0]["urgent"] == 1
+    assert "微信客服会话" in todo[0]["summary"]  # 措辞不再说「群」
+
+
+def test_servicer_lookup_cached(tmp_path):
+    """接待人列表按客服账号缓存，不为每个新客户重复查询。"""
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("s1", "我要投诉你们的服务态度")],
+         "next_cursor": "c1", "has_more": 0},
+    ])
+    worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
+    worker._ensure_kf_profile(f"kf:{OPEN_KFID}:other", OPEN_KFID, "other")
+    assert kf.servicer_calls == 1
 
 
 def test_unavailable_client_is_noop(tmp_path):
