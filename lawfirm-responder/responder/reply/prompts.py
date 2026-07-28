@@ -140,6 +140,59 @@ CLASSIFY_JSON_INSTRUCTION = (
 )
 
 
+# ================================================================ 线索简报
+# 给「接下来要打电话的那个人」看的交接单：他没时间读完整段对话。
+# 铁律：只允许复述对话中出现过的信息。律师会照着这张单子打电话，
+# 编造的事实会直接变成对客户说错话。
+LEAD_SYSTEM = """你是律所的客户接待助理，负责把一次线上咨询整理成交接单，\
+交给接下来要打电话跟进的律师。
+
+硬性要求：
+1. 只写对话里**明确出现过**的信息。没提到的一律写「未提及」，绝对不要推测、补全或美化。
+2. 不做法律判断，不预测结果，不提任何费用金额——那是律师的事。
+3. 语气是同事之间的工作交接，简洁、具体、可执行。不写客套话。
+4. key_facts 每条一个事实，控制在 20 字内，按重要性排序，最多 5 条。
+5. opening_line 是律师打过去的第一句话，要自然、体现「已经了解过情况」，不超过 40 字。
+6. summary 一句话说清「谁、遇到什么事、想要什么」，不超过 40 字。"""
+
+LEAD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "case_type": {"type": "string"},
+        "key_facts": {"type": "array", "items": {"type": "string"}},
+        "urgency": {"type": "string", "enum": ["high", "medium", "low"]},
+        "suggested_action": {"type": "string"},
+        "opening_line": {"type": "string"},
+    },
+    "required": [
+        "summary", "case_type", "key_facts", "urgency",
+        "suggested_action", "opening_line",
+    ],
+    "additionalProperties": False,
+}
+
+LEAD_JSON_INSTRUCTION = (
+    "输出必须是一个 JSON 对象，且只包含这六个字段："
+    '{"summary": "一句话诉求概括", '
+    '"case_type": "劳动仲裁|婚姻家事|刑事辩护|合同纠纷|债权债务|房产纠纷|交通事故|其他", '
+    '"key_facts": ["事实1", "事实2"], '
+    '"urgency": "high|medium|low", '
+    '"suggested_action": "建议的跟进动作", '
+    '"opening_line": "律师打电话的第一句话"}'
+)
+
+
+def lead_user_prompt(history_text: str, contact: str, signals: list[str]) -> str:
+    lines = ["以下是客户与线上客服的完整对话（旧→新）：", history_text, ""]
+    lines.append(f"客户留下的联系方式：{contact or '未提供'}")
+    if signals:
+        lines.append(f"识别到的意向信号：{'、'.join(signals)}")
+    lines.append("")
+    lines.append("请据此整理交接单。")
+    return "\n".join(lines)
+
+
 def classify_user_prompt(content: str, history_text: str, case_type: str) -> str:
     lines = [f"群的案件类型：{case_type or '未标注'}"]
     if history_text:

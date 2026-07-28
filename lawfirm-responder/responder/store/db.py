@@ -73,6 +73,23 @@ CREATE TABLE IF NOT EXISTS pending_checks (
     due_at TEXT,
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id TEXT UNIQUE,
+    intent TEXT DEFAULT 'cold',
+    contact TEXT DEFAULT '',
+    summary TEXT DEFAULT '',
+    case_type TEXT DEFAULT '',
+    key_facts TEXT DEFAULT '[]',
+    urgency TEXT DEFAULT 'low',
+    suggested_action TEXT DEFAULT '',
+    opening_line TEXT DEFAULT '',
+    signals TEXT DEFAULT '[]',
+    status TEXT DEFAULT 'new',
+    notified_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS kf_cursors (
     open_kfid TEXT PRIMARY KEY,
     cursor TEXT DEFAULT '',
@@ -203,6 +220,19 @@ class Store:
             ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
+    def idle_conversations(self, since: datetime, until: datetime) -> list[str]:
+        """最后一条消息落在 [since, until] 内的会话——即刚安静下来的对话。
+
+        用于「聊完了但没留电话」的咨询补一份线索简报归档（冷线索也有跟进价值）。
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT group_id, MAX(created_at) AS last_at FROM messages"
+                " GROUP BY group_id HAVING last_at BETWEEN ? AND ?",
+                (since.isoformat(), until.isoformat()),
+            ).fetchall()
+        return [r["group_id"] for r in rows]
+
     def last_staff_reply_at(self, group_id: str) -> datetime | None:
         with self._conn() as conn:
             row = conn.execute(
@@ -274,6 +304,58 @@ class Store:
         q += " ORDER BY id DESC LIMIT ?"
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
+
+    # ------------------------------------------------------------ 线索
+    def upsert_lead(self, group_id: str, fields: dict) -> None:
+        """一个会话一条线索：反复更新而非追加，避免同一客户刷屏。"""
+        now = datetime.now().isoformat()
+        cols = ["intent", "contact", "summary", "case_type", "key_facts", "urgency",
+                "suggested_action", "opening_line", "signals"]
+        vals = [fields.get(c, "") for c in cols]
+        with self._conn() as conn:
+            conn.execute(
+                f"""INSERT INTO leads (group_id,{','.join(cols)},created_at,updated_at)
+                    VALUES ({','.join('?' * (len(cols) + 3))})
+                    ON CONFLICT(group_id) DO UPDATE SET
+                    {','.join(f'{c}=excluded.{c}' for c in cols)},
+                    updated_at=excluded.updated_at""",
+                (group_id, *vals, now, now),
+            )
+
+    def get_lead(self, group_id: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM leads WHERE group_id=?", (group_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_leads(self, status: str | None = None, limit: int = 200) -> list[dict]:
+        """按意向热度、时间倒序——律师先看最该打电话的那个。"""
+        q = "SELECT * FROM leads"
+        args: tuple = ()
+        if status:
+            q += " WHERE status=?"
+            args = (status,)
+        q += (
+            " ORDER BY CASE intent WHEN 'hot' THEN 0 WHEN 'warm' THEN 1 ELSE 2 END,"
+            " updated_at DESC LIMIT ?"
+        )
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
+
+    def set_lead_status(self, lead_id: int, status: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE leads SET status=?, updated_at=? WHERE id=?",
+                (status, datetime.now().isoformat(), lead_id),
+            )
+
+    def mark_lead_notified(self, group_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE leads SET notified_at=? WHERE group_id=?",
+                (datetime.now().isoformat(), group_id),
+            )
 
     # ------------------------------------------------------------ 微信客服游标
     def get_kf_cursor(self, open_kfid: str) -> str:

@@ -178,6 +178,59 @@ def refine(
         return None
 
 
+# ================================================================ 线索简报
+@dataclass
+class LeadBrief:
+    summary: str
+    case_type: str
+    key_facts: list[str]
+    urgency: str
+    suggested_action: str
+    opening_line: str
+
+
+def extract_lead(
+    history_text: str,
+    *,
+    contact: str = "",
+    signals: list[str] | None = None,
+    timeout: float = 20.0,
+    settings: Settings | None = None,
+) -> LeadBrief | None:
+    """把一次咨询对话整理成交接单。不可用/失败返回 None，由调用方降级为规则摘要。"""
+    provider = resolve(settings)
+    if provider is None:
+        return None
+    user = prompts.lead_user_prompt(history_text, contact, signals or [])
+    try:
+        if provider.name == "deepseek":
+            text = _chat_deepseek(
+                prompts.LEAD_SYSTEM + "\n" + prompts.LEAD_JSON_INSTRUCTION,
+                user, provider.model,
+                max_tokens=600, timeout=timeout, json_mode=True, temperature=0.2,
+            )
+        else:
+            text = _chat_anthropic(
+                prompts.LEAD_SYSTEM, user, provider.model,
+                max_tokens=600, timeout=timeout, json_schema=prompts.LEAD_SCHEMA,
+            )
+        if not text:
+            return None
+        d = json.loads(text)
+        facts = [str(f)[:60] for f in (d.get("key_facts") or [])][:5]
+        return LeadBrief(
+            summary=str(d["summary"])[:120],
+            case_type=str(d.get("case_type", ""))[:20],
+            key_facts=facts,
+            urgency=str(d.get("urgency", "low")),
+            suggested_action=str(d.get("suggested_action", ""))[:120],
+            opening_line=str(d.get("opening_line", ""))[:120],
+        )
+    except Exception:
+        logger.exception("llm extract_lead failed (%s)", provider.name)
+        return None
+
+
 # ================================================================ 回答生成
 def generate_answer_body(
     question: str,

@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     llm_max_tokens_answer: int = 500
     # 注入模型的群聊上下文条数
     history_window: int = 10
+
+    # ---- 线索简报：筛查完成后把咨询整理成交接单推给接待人
+    lead_brief_enabled: bool = True
+    lead_history_window: int = 30  # 整理简报时回看的对话条数
+    # 会话静默多久后为「有意向但未触发即时通知」的咨询补一份简报（秒）
+    lead_idle_seconds: int = 900
     # 群聊单条回复长度上限（字符），超出按句号截断
     answer_max_chars: int = 240
 

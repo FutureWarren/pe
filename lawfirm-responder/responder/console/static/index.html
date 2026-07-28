@@ -406,6 +406,8 @@ nav#nav .navbtn .nbadge {
   <symbol id="i-silence" viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-6 4V6z"/><path d="M5 4l15 15"/></symbol>
   <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M9 13h.01M15 13h.01"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3v4h-4"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 3c.5 3-1.5 4-3 5.5S6.5 12 6.5 14a5.5 5.5 0 0 0 11 0c0-2.5-1.5-4-3-6-1 1.5-2 2-2.5 1.5C11.4 8.8 12 5.5 12 3z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6 3h3l2 5-2.5 1.5a12 12 0 0 0 5 5L15 12l5 2v3a2 2 0 0 1-2.2 2A17 17 0 0 1 4 5.2 2 2 0 0 1 6 3z"/></symbol>
   <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="M15 8l4 4-4 4M19 12H9"/></symbol>
 </svg>
 
@@ -453,6 +455,15 @@ nav#nav .navbtn .nbadge {
     <div id="todoList"></div>
   </section>
 
+  <section id="tab-leads" hidden>
+    <div class="page-title">线索</div>
+    <div class="seg" style="margin-bottom:12px">
+      <button id="segLeadNew" class="on" onclick="setLeadView('new')">待跟进</button>
+      <button id="segLeadAll" onclick="setLeadView('')">全部</button>
+    </div>
+    <div id="leadList"></div>
+  </section>
+
   <section id="tab-log" hidden>
     <div class="page-title">记录</div>
     <div class="seg">
@@ -494,6 +505,9 @@ nav#nav .navbtn .nbadge {
   </div>
   <button class="navbtn on" id="nav-todo" onclick="setTab('todo')">
     <svg class="ico"><use href="#i-clipboard"/></svg><span>待办</span><span class="nbadge" id="todoBadge" hidden></span>
+  </button>
+  <button class="navbtn" id="nav-leads" onclick="setTab('leads')" style="position:relative">
+    <svg class="ico"><use href="#i-flame"/></svg><span>线索</span><span class="nbadge" id="leadBadge" hidden></span>
   </button>
   <button class="navbtn" id="nav-log" onclick="setTab('log')">
     <svg class="ico"><use href="#i-message"/></svg><span>记录</span>
@@ -778,6 +792,7 @@ function openStatusPanel() {
     <div class="eyebrow">使用说明</div>
     <div class="status-rows">
       <div class="srow"><div class="k">${ico("clipboard")}待办</div><div class="v">AI 先稳住了客户，这里列出需要您接手的事项</div></div>
+      <div class="srow"><div class="k">${ico("flame")}线索</div><div class="v">客户留了联系方式或想约面谈时，AI 整理好的交接单，可直接拨号跟进</div></div>
       <div class="srow"><div class="k">${ico("message")}记录</div><div class="v">AI 说过的每句话都在这里，点「有帮助」或「需修正」能让它越来越像您</div></div>
       <div class="srow"><div class="k">${ico("chart")}看板</div><div class="v">AI 的工作量与质量总览</div></div>
       <div class="srow"><div class="k">${ico("users")}群管理</div><div class="v">控制 AI 在哪些客户群工作、以什么身份称呼律师</div></div>
@@ -913,6 +928,93 @@ async function doneTodo(id) {
       loadTodo();
     });
   } catch (e) { toast("操作失败，请重试", false); lastSig.todo = null; loadTodo(); }
+}
+
+/* ============ 线索 ============ */
+const INTENT = {
+  hot: { zh: "高意向", cls: "bad" },
+  warm: { zh: "有意向", cls: "warn" },
+  cold: { zh: "一般咨询", cls: "" },
+};
+const LEAD_STATUS = { new: "待跟进", contacted: "已联系", converted: "已成交", invalid: "无效" };
+const URGENCY = { high: "紧急", medium: "较急", low: "一般" };
+let leadView = "new";
+
+function setLeadView(v) {
+  leadView = v;
+  document.getElementById("segLeadNew").classList.toggle("on", v === "new");
+  document.getElementById("segLeadAll").classList.toggle("on", v === "");
+  lastSig.leads = null;
+  loadLeads();
+}
+async function loadLeads() {
+  const el = document.getElementById("leadList");
+  if (!loadedOnce.leads) el.innerHTML = skeleton();
+  let list;
+  try { list = await api("/leads" + (leadView ? "?status=" + leadView : "")); }
+  catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadLeads"); return; }
+  loadedOnce.leads = true;
+  const sig = leadView + JSON.stringify(list);
+  if (lastSig.leads === sig) return;
+  lastSig.leads = sig;
+  if (!list.length) {
+    el.innerHTML = emptyState("flame",
+      leadView ? "暂无待跟进线索" : "还没有线索记录",
+      "客户在咨询中留下联系方式、或表达面谈意愿时，AI 会自动整理一份交接单放到这里，并推送给接待律师。");
+    return;
+  }
+  el.innerHTML = list.map(l => {
+    let facts = [];
+    try { facts = JSON.parse(l.key_facts || "[]"); } catch (e) {}
+    const it = INTENT[l.intent] || INTENT.cold;
+    return `
+      <div class="card ${l.intent === "hot" ? "urgent" : ""}">
+        <div class="row">
+          <span class="badge ${it.cls}">${it.cls === "bad" ? '<span class="dot" style="background:var(--bad)"></span>' : ""}${it.zh}</span>
+          ${l.case_type ? `<span class="chip">${esc(l.case_type)}</span>` : ""}
+          ${l.urgency === "high" ? `<span class="badge warn">${esc(URGENCY[l.urgency])}</span>` : ""}
+          ${l.status !== "new" ? `<span class="chip">${esc(LEAD_STATUS[l.status] || l.status)}</span>` : ""}
+          ${timeEl(l.updated_at)}
+        </div>
+        <div class="body-l">${esc(l.summary || "（未归纳）")}</div>
+        ${facts.length ? `<div class="meta" style="line-height:1.8">${
+          facts.map(f => "· " + esc(f)).join("<br>")}</div>` : ""}
+        <div class="row" style="margin-top:10px">
+          ${l.contact
+            ? `<a href="tel:${esc(l.contact)}" class="btn-tonal" style="text-decoration:none">${ico("phone")}${esc(l.contact)}</a>`
+            : `<span class="meta">客户未留联系方式</span>`}
+        </div>
+        ${l.opening_line ? `<div class="meta" style="margin-top:8px">开场参考：「${esc(l.opening_line)}」</div>` : ""}
+        ${l.suggested_action ? `<div class="meta" style="margin-top:4px">建议：${esc(l.suggested_action)}</div>` : ""}
+        <div class="row fb-row">
+          ${l.status === "new" ? `
+            <button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'contacted')">${ico("check")}标记已联系</button>
+            <button class="btn-text muted" onclick="setLead(${l.id},'invalid')">无效</button>`
+            : `<button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'converted')">标记已成交</button>
+               <button class="btn-text muted" onclick="setLead(${l.id},'new')">退回待跟进</button>`}
+        </div>
+      </div>`;
+  }).join("");
+}
+async function setLead(id, status) {
+  try {
+    await api(`/leads/${id}/status`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    toast(status === "converted" ? "已标记成交 🎉" : `已标记为${LEAD_STATUS[status] || status}`);
+    lastSig.leads = null;
+    loadLeads(); refreshLeadBadge();
+  } catch (e) { toast("操作失败，请重试", false); }
+}
+async function refreshLeadBadge() {
+  try {
+    const list = await api("/leads?status=new");
+    const n = list.filter(l => l.intent !== "cold").length;
+    const b = document.getElementById("leadBadge");
+    b.hidden = n === 0;
+    b.textContent = n > 99 ? "99+" : n;
+  } catch (e) { /* 静默 */ }
 }
 
 /* ============ 记录 ============ */
@@ -1374,7 +1476,7 @@ async function saveGroup(isNew, aiEnabled) {
 /* ============ 框架 ============ */
 function setTab(t) {
   tab = t;
-  for (const k of ["todo", "log", "board", "groups"]) {
+  for (const k of ["todo", "leads", "log", "board", "groups"]) {
     document.getElementById("tab-" + k).hidden = k !== t;
     document.getElementById("nav-" + k).classList.toggle("on", k === t);
   }
@@ -1388,6 +1490,8 @@ async function refresh() {
     }
     if (tab === "todo") await loadTodo();
     else refreshTodoBadge(); // 角标跨页告警，不在待办页也保持新鲜
+    if (tab === "leads") await loadLeads();
+    else refreshLeadBadge();
     if (tab === "log") await loadLog();
     if (tab === "board") await loadBoard();
     if (tab === "groups") await loadGroups();

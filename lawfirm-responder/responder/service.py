@@ -8,8 +8,9 @@ import logging
 import time
 from datetime import datetime, timedelta
 
+from responder import lead
 from responder.config import Settings, get_settings
-from responder.engine import llm, rules
+from responder.engine import llm, rules, signals
 from responder.engine.decision import decide, wait_seconds
 from responder.gateway.sender import WeComSender
 from responder.models import Action, Category, Decision, GroupProfile, IncomingMessage
@@ -141,6 +142,10 @@ class Pipeline:
         # 判断日志在去重/门控修饰后入库，控制台看到的即最终裁决
         self.store.save_decision(decision)
 
+        # 转化信号：客户留了联系方式/表达面谈意愿 → 立刻整理交接单推给接待人。
+        # 首响只是止损，真正的业务价值在这一步。
+        self._maybe_dispatch_lead(msg, group, history)
+
         # 承接类一律触发人工提醒；直接回答类也提醒律师补充。
         # 同一条消息只提醒一次（到点复评会二次经过这里，不重复打扰律师）。
         # 开场问候不惊动律师——客户只是说了句「你好」。
@@ -151,6 +156,22 @@ class Pipeline:
             escalation.dispatch(reminder, self.store, self.sender)
 
         return decision
+
+    def _maybe_dispatch_lead(
+        self, msg: IncomingMessage, group: GroupProfile, history: list[dict]
+    ) -> None:
+        if not self.settings.lead_brief_enabled:
+            return
+        level, _ = signals.detect(msg.content)
+        if level == signals.COLD:
+            return
+        # 用「含本条」的完整上下文生成，history 取自本条入库之后的最近窗口
+        convo = self.store.recent_messages(msg.group_id, self.settings.lead_history_window)
+        try:
+            # 用门控后的 sender：影子模式只入库不外发（与律师提醒口径一致）
+            lead.dispatch(self.store, group, convo, self.sender, settings=self.settings)
+        except Exception:
+            logger.exception("lead dispatch failed: %s", msg.group_id)
 
     def _recent_cta(self, group_id: str) -> bool:
         """接管时间窗内该群是否已发过带面谈引导/收尾语的回复——有则本次不再带（防套路感）。"""

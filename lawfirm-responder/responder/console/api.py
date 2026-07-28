@@ -57,6 +57,24 @@ def reopen_todo(reminder_id: int, store: Store = Depends(get_store)):
     return {"ok": True}
 
 
+@router.get("/leads")
+def leads(status: str | None = None, limit: int = 200, store: Store = Depends(get_store)):
+    """线索看板：AI 筛查后的交接单，按意向热度排序（先打该打的电话）。"""
+    return store.list_leads(status, limit)
+
+
+class LeadStatus(BaseModel):
+    status: str  # new | contacted | converted | invalid
+
+
+@router.post("/leads/{lead_id}/status")
+def set_lead_status(lead_id: int, body: LeadStatus, store: Store = Depends(get_store)):
+    if body.status not in ("new", "contacted", "converted", "invalid"):
+        raise HTTPException(400, "无效的线索状态")
+    store.set_lead_status(lead_id, body.status)
+    return {"ok": True}
+
+
 @router.get("/decisions")
 def decisions(group_id: str | None = None, limit: int = 200, store: Store = Depends(get_store)):
     """全量判断日志，含「AI 判断为无需响应」的沉默日志，便于复盘误判。"""

@@ -17,8 +17,9 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
+from responder import lead
 from responder.gateway import wecom_kf
 from responder.models import ClientStatus, GroupProfile, IncomingMessage
 from responder.notify import escalation
@@ -105,6 +106,32 @@ class Worker:
             )
         except Exception:
             logger.exception("escalate_overdue failed")
+        self._sweep_idle_leads(now)
+
+    def _sweep_idle_leads(self, now: datetime) -> None:
+        """对话安静下来后补一份线索简报——聊完没留电话的咨询同样有跟进价值。
+
+        冷线索只归档进控制台，不推送打扰律师（见 lead.should_notify）。
+        """
+        s = self.pipeline.settings
+        if not s.lead_brief_enabled:
+            return
+        until = now - timedelta(seconds=s.lead_idle_seconds)
+        since = now - timedelta(seconds=s.lead_idle_seconds * 4)
+        for gid in self.store.idle_conversations(since, until):
+            if self.store.get_lead(gid):
+                continue  # 已有线索，交由实时触发路径更新
+            group = self.store.get_group(gid)
+            if group is None:
+                continue
+            try:
+                lead.dispatch(
+                    self.store, group,
+                    self.store.recent_messages(gid, s.lead_history_window),
+                    self.pipeline.sender, settings=s,
+                )
+            except Exception:
+                logger.exception("idle lead sweep failed: %s", gid)
 
     # ------------------------------------------------------------ 主循环
     def _run(self) -> None:
