@@ -75,6 +75,61 @@ def set_lead_status(lead_id: int, body: LeadStatus, store: Store = Depends(get_s
     return {"ok": True}
 
 
+@router.post("/kf/sync-servicers")
+def sync_kf_servicers(request: Request, store: Store = Depends(get_store)):
+    """按企微后台配置的接待人，回填所有客服会话档案的提醒接收人。
+
+    线索简报是人工复核的入口，收不到＝监督链断了，因此提供随时可执行的补齐动作。
+    """
+    pipeline = request.app.state.pipeline
+    kf_client = getattr(pipeline, "_kf_client", None)
+    if kf_client is None or not kf_client.available():
+        raise HTTPException(400, "微信客服通道未配置")
+    settings = pipeline.settings
+    cache: dict[str, list[str]] = {}
+    changed = []
+    for row in store.list_groups():
+        if not row.get("kf_open_kfid") or row.get("lawyer_userid"):
+            continue
+        kfid = row["kf_open_kfid"]
+        if kfid not in cache:
+            cache[kfid] = kf_client.servicer_list(kfid)
+        target = cache[kfid][0] if cache[kfid] else settings.default_notify_userid
+        if not target:
+            continue
+        g = store.get_group(row["group_id"])
+        g.lawyer_userid = target
+        if len(cache[kfid]) > 1 and not g.backup_userid:
+            g.backup_userid = cache[kfid][1]
+        store.upsert_group(g)
+        changed.append({"group_id": g.group_id, "to": target})
+    return {"ok": True, "updated": changed}
+
+
+@router.post("/leads/{lead_id}/notify")
+def notify_lead(lead_id: int, request: Request, store: Store = Depends(get_store)):
+    """（重新）把线索交接单推给接待人——人工复核收不到时的补救入口。"""
+    from responder import lead as lead_mod
+
+    row = next((x for x in store.list_leads(limit=1000) if x["id"] == lead_id), None)
+    if row is None:
+        raise HTTPException(404, "线索不存在")
+    group = store.get_group(row["group_id"])
+    if group is None:
+        raise HTTPException(404, "对应会话档案不存在")
+    pipeline = request.app.state.pipeline
+    to = group.lawyer_userid or pipeline.settings.default_notify_userid
+    if not to:
+        raise HTTPException(400, "该会话没有提醒接收人，请先执行接待人回填")
+    sender = pipeline.sender
+    if sender is None:
+        raise HTTPException(400, "影子模式不对外发送；切到正式模式后再试")
+    if not sender.send_direct_text(to, lead_mod.format_notification(row, group)):
+        raise HTTPException(502, "企微推送失败，请稍后重试")
+    store.mark_lead_notified(row["group_id"])
+    return {"ok": True, "to": to}
+
+
 @router.get("/decisions")
 def decisions(group_id: str | None = None, limit: int = 200, store: Store = Depends(get_store)):
     """全量判断日志，含「AI 判断为无需响应」的沉默日志，便于复盘误判。"""

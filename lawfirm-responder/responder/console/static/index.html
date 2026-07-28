@@ -974,6 +974,7 @@ async function loadLeads() {
           ${l.case_type ? `<span class="chip">${esc(l.case_type)}</span>` : ""}
           ${l.urgency === "high" ? `<span class="badge warn">${esc(URGENCY[l.urgency])}</span>` : ""}
           ${l.status !== "new" ? `<span class="chip">${esc(LEAD_STATUS[l.status] || l.status)}</span>` : ""}
+          ${l.notified_at ? "" : `<span class="badge warn">未推送</span>`}
           ${timeEl(l.updated_at)}
         </div>
         <div class="body-l">${esc(l.summary || "（未归纳）")}</div>
@@ -987,6 +988,7 @@ async function loadLeads() {
         ${l.opening_line ? `<div class="meta" style="margin-top:8px">开场参考：「${esc(l.opening_line)}」</div>` : ""}
         ${l.suggested_action ? `<div class="meta" style="margin-top:4px">建议：${esc(l.suggested_action)}</div>` : ""}
         <div class="row fb-row">
+          ${l.notified_at ? "" : `<button class="btn-text" onclick="notifyLead(${l.id})">${ico("refresh")}推送给律师</button>`}
           ${l.status === "new" ? `
             <button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'contacted')">${ico("check")}标记已联系</button>
             <button class="btn-text muted" onclick="setLead(${l.id},'invalid')">无效</button>`
@@ -1006,6 +1008,14 @@ async function setLead(id, status) {
     lastSig.leads = null;
     loadLeads(); refreshLeadBadge();
   } catch (e) { toast("操作失败，请重试", false); }
+}
+async function notifyLead(id) {
+  try {
+    const r = await api(`/leads/${id}/notify`, { method: "POST" });
+    toast("已推送给 " + (r.to || "接待人"));
+    lastSig.leads = null;
+    loadLeads();
+  } catch (e) { toast("推送失败，请检查该会话是否已配置接待人", false); }
 }
 async function refreshLeadBadge() {
   try {
