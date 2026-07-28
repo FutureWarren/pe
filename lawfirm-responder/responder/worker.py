@@ -16,19 +16,31 @@ import logging
 import queue
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
-from responder.models import IncomingMessage
+from responder.gateway import wecom_kf
+from responder.models import ClientStatus, GroupProfile, IncomingMessage
 from responder.notify import escalation
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class KfSyncJob:
+    """微信客服回调只给 Token，需据此拉取真实消息（见 gateway/wecom_kf.py）。"""
+
+    token: str
+    open_kfid: str
+
+
 class Worker:
-    def __init__(self, pipeline, store, sender=None, poll_seconds: float = 10.0):
+    def __init__(self, pipeline, store, sender=None, poll_seconds: float = 10.0,
+                 kf_client=None):
         self.pipeline = pipeline
         self.store = store
         self.sender = sender
+        self.kf_client = kf_client
         self.poll_seconds = poll_seconds
         self.q: queue.Queue = queue.Queue()
         self._stop = threading.Event()
@@ -53,17 +65,24 @@ class Worker:
         return self.q.qsize()
 
     # ------------------------------------------------------------ 入口
-    def submit(self, msg: IncomingMessage) -> None:
-        self.q.put(msg)
+    def submit(self, item) -> None:
+        """入队：IncomingMessage（应用回调）或 KfSyncJob（微信客服回调）。"""
+        self.q.put(item)
 
     def drain(self) -> None:
         """同步清空队列并跑一轮定时事务（测试/停机前用）。"""
         while True:
             try:
-                self._process_new(self.q.get_nowait())
+                self._dispatch(self.q.get_nowait())
             except queue.Empty:
                 break
         self.tick()
+
+    def _dispatch(self, item) -> None:
+        if isinstance(item, KfSyncJob):
+            self.process_kf(item)
+        else:
+            self._process_new(item)
 
     def tick(self, now: datetime | None = None) -> None:
         """跑一轮定时事务：补位等待到点复评 + 紧急提醒超时升级。"""
@@ -90,11 +109,11 @@ class Worker:
         last_tick = 0.0
         while not self._stop.is_set():
             try:
-                msg = self.q.get(timeout=1.0)
+                item = self.q.get(timeout=1.0)
             except queue.Empty:
-                msg = None
-            if msg is not None:
-                self._process_new(msg)
+                item = None
+            if item is not None:
+                self._dispatch(item)
             if time.time() - last_tick >= self.poll_seconds:
                 last_tick = time.time()
                 self.tick()
@@ -107,3 +126,72 @@ class Worker:
             self.pipeline.handle(msg)
         except Exception:
             logger.exception("message processing failed: %s", msg.msg_id)
+
+    # ------------------------------------------------------------ 微信客服
+    def process_kf(self, job: KfSyncJob) -> None:
+        """按回调 Token 拉取客服消息，逐条进判断管道。
+
+        游标持久化到库：重启不会重复处理历史消息（重复也会被 msg_id 去重兜底）。
+        """
+        if self.kf_client is None or not self.kf_client.available():
+            logger.warning("kf callback received but kf client unavailable")
+            return
+        cursor = self.store.get_kf_cursor(job.open_kfid)
+        for _ in range(20):  # has_more 循环上限，防异常游标导致死循环
+            batch = self.kf_client.sync_msg(job.token, job.open_kfid, cursor)
+            for raw in batch["msg_list"]:
+                try:
+                    self._handle_kf_message(raw)
+                except Exception:
+                    logger.exception("kf message failed: %s", raw.get("msgid"))
+            cursor = batch["next_cursor"]
+            if cursor:
+                self.store.set_kf_cursor(job.open_kfid, cursor)
+            if not batch["has_more"]:
+                break
+
+    def _handle_kf_message(self, raw: dict) -> None:
+        origin = raw.get("origin")
+        if origin == wecom_kf.ORIGIN_SYSTEM:
+            return  # 系统推送（欢迎语等）不进判断
+        open_kfid = raw.get("open_kfid", "")
+        external_userid = raw.get("external_userid", "")
+        if not open_kfid or not external_userid:
+            return
+        # 一个「客服账号 × 客户」= 一个会话档案，复用群档案的全部能力（开关/律师/留痕）
+        group_id = f"kf:{open_kfid}:{external_userid}"
+        self._ensure_kf_profile(group_id, open_kfid, external_userid)
+
+        is_staff = origin == wecom_kf.ORIGIN_SERVICER or bool(raw.get("servicer_userid"))
+        content = (raw.get("text") or {}).get("content", "")
+        msg = IncomingMessage(
+            msg_id=raw.get("msgid") or "",
+            group_id=group_id,
+            sender_id=raw.get("servicer_userid") or external_userid,
+            sender_is_staff=is_staff,
+            content=content,
+            msg_type="text" if raw.get("msgtype") == "text" else (raw.get("msgtype") or "other"),
+        )
+        if not msg.msg_id:
+            return
+        if not self.store.save_message(msg):
+            return  # 重复投递
+        self.pipeline.handle(msg)
+
+    def _ensure_kf_profile(self, group_id: str, open_kfid: str, external_userid: str) -> None:
+        """客服会话首次出现时自动建档——员工零操作即可让 AI 上岗。"""
+        if self.store.get_group(group_id) is not None:
+            return
+        s = self.pipeline.settings
+        self.store.upsert_group(
+            GroupProfile(
+                group_id=group_id,
+                name=f"微信客服 · 客户{external_userid[-6:]}",
+                client_status=ClientStatus.PROSPECT,  # 客服进线默认为新咨询
+                case_type=s.kf_default_case_type,
+                lawyer_name=s.kf_default_lawyer_name,
+                ai_enabled=s.kf_enabled,
+                kf_open_kfid=open_kfid,
+                kf_external_userid=external_userid,
+            )
+        )

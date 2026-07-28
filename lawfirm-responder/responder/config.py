@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     wecom_corp_secret: str = ""
     wecom_agent_id: str = ""
 
+    # 微信客服：独立 Secret（后台 → 客户与上下游 → 微信客服 → API）。
+    # 该通道客户消息全量推送、无需 @ 触发，是新咨询首响的主通道。
+    wecom_kf_secret: str = ""
+    kf_enabled: bool = True
+    # 客服会话首次出现时自动建档，用于话术点名；留空则话术说「承办律师」
+    kf_default_lawyer_name: str = ""
+    kf_default_case_type: str = ""
+
     # LLM 供应商：deepseek | anthropic | auto（auto = 谁的 key 在就用谁，deepseek 优先）
     # 业务决策 2026-07：默认 DeepSeek（成本考虑）；Anthropic 路径保留可随时切回
     llm_provider: str = "auto"

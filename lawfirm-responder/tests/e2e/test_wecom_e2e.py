@@ -191,6 +191,33 @@ def test_followup_policy_second_touch_then_suppress(env):
     assert len(sender.direct) == 3  # 每次都提醒了律师
 
 
+def test_kf_event_routed_to_worker(env):
+    """微信客服回调（加密事件）→ 解密 → 派发 KfSyncJob 给后台线程，5 秒内回 success。"""
+    from responder.worker import KfSyncJob, Worker
+
+    client, store, sender, crypto = env
+    settings = client.app.state.pipeline.settings
+    worker = Worker(client.app.state.pipeline, store, sender)
+    client.app.state.worker = worker
+    settings.callback_async = True
+
+    plain = ("<xml><ToUserName>wwe2ecorp</ToUserName><MsgType>event</MsgType>"
+             "<Event>kf_msg_or_event</Event><Token>kf-token-xyz</Token>"
+             "<OpenKfId>wk-e2e-01</OpenKfId></xml>")
+    encrypt = crypto.encrypt(plain)
+    ts, nonce = "1753000009", "kfn1"
+    sig = crypto.signature(ts, nonce, encrypt)
+    r = client.post(
+        f"/wecom/callback?msg_signature={sig}&timestamp={ts}&nonce={nonce}",
+        content=f"<xml><Encrypt><![CDATA[{encrypt}]]></Encrypt></xml>",
+        headers={"content-type": "text/xml"},
+    )
+    assert r.status_code == 200 and r.text == "success"
+    job = worker.q.get_nowait()
+    assert isinstance(job, KfSyncJob)
+    assert job.token == "kf-token-xyz" and job.open_kfid == "wk-e2e-01"
+
+
 def test_console_reflects_full_loop(env):
     client, _, _, crypto = env
     _post_encrypted(client, crypto, "m-c1", "你们收费标准是怎样的？")

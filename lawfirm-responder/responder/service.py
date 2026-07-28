@@ -26,11 +26,12 @@ REFINE_CONFIDENCE = 0.7
 
 class Pipeline:
     def __init__(self, store: Store, sender: WeComSender | None = None,
-                 settings: Settings | None = None):
+                 settings: Settings | None = None, kf_client=None):
         self.store = store
         self.settings = settings or get_settings()
-        # 影子模式不需要发送通道
+        # 影子模式不需要发送通道（客服 client 的「收」不受此限，见 worker）
         self.sender = sender if self.settings.mode == "live" else None
+        self.kf_client = kf_client if self.settings.mode == "live" else None
 
     # ------------------------------------------------------------ 分类
     def _classify(self, msg: IncomingMessage, group: GroupProfile, history: list[dict]) -> tuple:
@@ -123,7 +124,7 @@ class Pipeline:
                 msg.msg_id, msg.group_id, final_text, mode,
                 result.passed, category=decision.category.value,
             )
-            if mode == "live" and self.sender:
+            if mode == "live" and self._can_send(group):
                 self._send_group(group, msg.group_id, final_text)
             reply_text = final_text
 
@@ -151,8 +152,17 @@ class Pipeline:
         return False
 
     # ------------------------------------------------------------ 发送
+    def _is_kf(self, group: GroupProfile) -> bool:
+        return bool(group.kf_open_kfid and group.kf_external_userid)
+
+    def _can_send(self, group: GroupProfile) -> bool:
+        return bool(self.kf_client) if self._is_kf(group) else bool(self.sender)
+
     def _send_group(self, group: GroupProfile, group_id: str, text: str) -> None:
-        """分条发送：多句内容拆成多条消息，条间隔模拟打字（见 docs/voice-guide.md）。"""
+        """分条发送：多句内容拆成多条消息，条间隔模拟打字（见 docs/voice-guide.md）。
+
+        通道优先级：微信客服会话 → 群机器人 webhook → 应用群聊。
+        """
         chunks = (
             sanitize.split_messages(text, self.settings.split_max_parts)
             if self.settings.split_messages
@@ -161,7 +171,11 @@ class Pipeline:
         for i, chunk in enumerate(chunks):
             if i and self.settings.split_delay_seconds > 0:
                 time.sleep(self.settings.split_delay_seconds)
-            if group.robot_webhook:
+            if self._is_kf(group):
+                self.kf_client.send_text(
+                    group.kf_open_kfid, group.kf_external_userid, chunk
+                )
+            elif group.robot_webhook:
                 self.sender.send_robot_text(group.robot_webhook, chunk)
             else:
                 self.sender.send_group_text(group_id, chunk)

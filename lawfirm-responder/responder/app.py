@@ -11,6 +11,7 @@ from responder.console.api import ui_router
 from responder.engine import llm
 from responder.gateway.callback import router as callback_router
 from responder.gateway.sender import WeComSender
+from responder.gateway.wecom_kf import KfClient
 from responder.service import Pipeline
 from responder.store.db import Store
 from responder.worker import Worker
@@ -22,9 +23,11 @@ def create_app() -> FastAPI:
     settings = get_settings()
     store = Store(settings.db_path)
     sender = WeComSender(settings) if settings.mode == "live" else None
-    pipeline = Pipeline(store, sender, settings)
+    # 客服 client 在任何模式下都要能「收」（拉消息），「发」由 Pipeline 按模式门控
+    kf_client = KfClient(settings) if settings.wecom_kf_secret else None
+    pipeline = Pipeline(store, sender, settings, kf_client=kf_client)
     worker = Worker(pipeline, store, pipeline.sender,
-                    poll_seconds=settings.worker_poll_seconds)
+                    poll_seconds=settings.worker_poll_seconds, kf_client=kf_client)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -48,6 +51,7 @@ def create_app() -> FastAPI:
             "mode": settings.mode,
             "version": app.version,
             "llm": f"{provider.name}:{provider.model}" if provider else "rules-only",
+            "kf": bool(kf_client and kf_client.available()),
             "queued": worker.qsize(),
         }
 

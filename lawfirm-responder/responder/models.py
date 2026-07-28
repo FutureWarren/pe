@@ -44,6 +44,9 @@ class GroupProfile(BaseModel):
     backup_userid: str = ""  # 第二责任人，升级提醒用
     ai_enabled: bool = True  # 控制台可按群开关 AI
     robot_webhook: str = ""  # 群机器人 webhook（key 或完整 URL），有则优先用机器人发言
+    # 微信客服会话（一对一）：两者齐备时回复走客服通道，优先于机器人/群聊
+    kf_open_kfid: str = ""  # 客服账号 ID
+    kf_external_userid: str = ""  # 客户的外部联系人 ID
 
 
 class IncomingMessage(BaseModel):

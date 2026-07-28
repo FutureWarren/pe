@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS groups (
     lawyer_userid TEXT DEFAULT '',
     backup_userid TEXT DEFAULT '',
     ai_enabled INTEGER DEFAULT 1,
-    robot_webhook TEXT DEFAULT ''
+    robot_webhook TEXT DEFAULT '',
+    kf_open_kfid TEXT DEFAULT '',
+    kf_external_userid TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS messages (
     msg_id TEXT PRIMARY KEY,
@@ -71,7 +73,22 @@ CREATE TABLE IF NOT EXISTS pending_checks (
     due_at TEXT,
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS kf_cursors (
+    open_kfid TEXT PRIMARY KEY,
+    cursor TEXT DEFAULT '',
+    updated_at TEXT
+);
 """
+
+# 旧库平滑升级：新增列在此登记，启动时按需 ALTER（SQLite 无 IF NOT EXISTS 列语法）
+_ADDED_COLUMNS = {
+    "groups": {
+        "robot_webhook": "TEXT DEFAULT ''",
+        "kf_open_kfid": "TEXT DEFAULT ''",
+        "kf_external_userid": "TEXT DEFAULT ''",
+    },
+    "replies": {"category": "TEXT DEFAULT ''"},
+}
 
 
 class Store:
@@ -81,6 +98,16 @@ class Store:
             # WAL：API 线程与后台工作线程并发读写不互斥（对文件持久生效）
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn) -> None:
+        """为已存在的旧库补齐新增列（幂等，升级部署不丢数据）。"""
+        for table, columns in _ADDED_COLUMNS.items():
+            have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for name, decl in columns.items():
+                if name not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     @contextmanager
     def _conn(self):
@@ -97,17 +124,22 @@ class Store:
     def upsert_group(self, g: GroupProfile) -> None:
         with self._conn() as conn:
             conn.execute(
-                """INSERT INTO groups VALUES (?,?,?,?,?,?,?,?,?,?)
+                """INSERT INTO groups (group_id,name,client_status,case_type,case_stage,
+                   lawyer_name,lawyer_userid,backup_userid,ai_enabled,robot_webhook,
+                   kf_open_kfid,kf_external_userid)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(group_id) DO UPDATE SET
                    name=excluded.name, client_status=excluded.client_status,
                    case_type=excluded.case_type, case_stage=excluded.case_stage,
                    lawyer_name=excluded.lawyer_name, lawyer_userid=excluded.lawyer_userid,
                    backup_userid=excluded.backup_userid, ai_enabled=excluded.ai_enabled,
-                   robot_webhook=excluded.robot_webhook""",
+                   robot_webhook=excluded.robot_webhook,
+                   kf_open_kfid=excluded.kf_open_kfid,
+                   kf_external_userid=excluded.kf_external_userid""",
                 (
                     g.group_id, g.name, g.client_status.value, g.case_type, g.case_stage,
                     g.lawyer_name, g.lawyer_userid, g.backup_userid, int(g.ai_enabled),
-                    g.robot_webhook,
+                    g.robot_webhook, g.kf_open_kfid, g.kf_external_userid,
                 ),
             )
 
@@ -242,6 +274,23 @@ class Store:
         q += " ORDER BY id DESC LIMIT ?"
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
+
+    # ------------------------------------------------------------ 微信客服游标
+    def get_kf_cursor(self, open_kfid: str) -> str:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT cursor FROM kf_cursors WHERE open_kfid=?", (open_kfid,)
+            ).fetchone()
+        return row["cursor"] if row else ""
+
+    def set_kf_cursor(self, open_kfid: str, cursor: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO kf_cursors (open_kfid,cursor,updated_at) VALUES (?,?,?)"
+                " ON CONFLICT(open_kfid) DO UPDATE SET"
+                " cursor=excluded.cursor, updated_at=excluded.updated_at",
+                (open_kfid, cursor, datetime.now().isoformat()),
+            )
 
     # ------------------------------------------------------------ pending checks
     def add_pending_check(self, msg_id: str, group_id: str, due_at: datetime) -> None:

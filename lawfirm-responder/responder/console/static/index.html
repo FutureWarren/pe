@@ -757,11 +757,15 @@ function openStatusPanel() {
   const llmTxt = h.llm && h.llm !== "rules-only"
     ? "AI 引擎正常" : "规则模式——AI 引擎未接入，当前按预设规则运行";
   const qTxt = h.queued ? `${h.queued} 条` : "畅通";
+  const kfTxt = h.kf
+    ? "微信客服已接入——客户咨询会自动进入，无需任何人操作"
+    : "微信客服未接入——当前只处理群内 @ 消息";
   openSheet(`
     <h2><span class="gold-tag"></span>系统状态</h2>
     <div class="status-rows">
       <div class="srow"><div class="k">运行模式</div><div class="v">${esc(modeTxt)}</div></div>
       <div class="srow"><div class="k">AI 引擎</div><div class="v">${esc(llmTxt)}</div></div>
+      <div class="srow"><div class="k">接入通道</div><div class="v">${esc(kfTxt)}</div></div>
       <div class="srow"><div class="k">待处理队列</div><div class="v">${esc(qTxt)}</div></div>
     </div>
     <div class="eyebrow">使用说明</div>
@@ -1147,6 +1151,7 @@ async function loadGroups() {
     <div class="card">
       <div class="row" style="flex-wrap:nowrap">
         <b style="font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(g.name || g.group_id)}</b>
+        ${g.kf_open_kfid ? `<span class="chip" style="flex:none">微信客服</span>` : ""}
         <span class="badge ${g.client_status === "signed" ? "ok" : "brand"}" style="flex:none">${zh(ZH.status, g.client_status)}</span>
         <label class="switch" style="margin-left:auto">
           <input type="checkbox" ${g.ai_enabled ? "checked" : ""} aria-label="AI 开关"
@@ -1156,9 +1161,11 @@ async function loadGroups() {
       </div>
       ${metaBits ? `<div class="meta" style="margin-top:4px">${esc(metaBits)}</div>` : ""}
       <div class="row" style="margin-top:10px">
-        ${g.robot_webhook
-          ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
-          : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
+        ${g.kf_open_kfid
+          ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("message")}微信客服会话 · 自动接入</span>`
+          : g.robot_webhook
+            ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
+            : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
         <button class="btn-text muted" style="margin-left:auto" data-act="edit" data-gid="${esc(g.group_id)}">编辑${ico("chevron")}</button>
       </div>
     </div>`;

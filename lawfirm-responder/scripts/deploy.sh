@@ -84,13 +84,23 @@ RESPONDER_WECOM_AGENT_ID=$WECOM_AGENT_ID
 RESPONDER_WECOM_TOKEN=$WECOM_TOKEN
 RESPONDER_WECOM_ENCODING_AES_KEY=$WECOM_AES_KEY
 RESPONDER_ADMIN_TOKEN=$ADMIN_TOKEN
+RESPONDER_WECOM_KF_SECRET=${WECOM_KF_SECRET:-}
 RESPONDER_API_HOST=0.0.0.0
 RESPONDER_API_PORT=80
 RESPONDER_DB_PATH=/opt/pe/lawfirm-responder/responder.db
 EOF
   chmod 600 "$ENVFILE"
 else
-  echo "==> .env 已存在，保留原配置"
+  echo "==> .env 已存在，保留原配置（仅补齐缺失项）"
+  # 新版本引入的配置项按需追加，绝不覆盖既有值
+  _ensure_env() {
+    grep -q "^$1=" "$ENVFILE" || echo "$1=$2" >> "$ENVFILE"
+  }
+  _ensure_env RESPONDER_WECOM_KF_SECRET "${WECOM_KF_SECRET:-}"
+  # 传入 WECOM_KF_SECRET 时以传入值为准（首次配置客服通道的路径）
+  if [ -n "${WECOM_KF_SECRET:-}" ]; then
+    sed -i "s|^RESPONDER_WECOM_KF_SECRET=.*|RESPONDER_WECOM_KF_SECRET=${WECOM_KF_SECRET}|" "$ENVFILE"
+  fi
 fi
 
 echo "==> 配置 systemd 服务"
@@ -165,6 +175,14 @@ echo "   Token:          $(grep -oP '^RESPONDER_WECOM_TOKEN=\K.*' "$ENVFILE")"
 echo "   EncodingAESKey: $(grep -oP '^RESPONDER_WECOM_ENCODING_AES_KEY=\K.*' "$ENVFILE")"
 echo
 echo "② 企业可信IP：$IP"
+echo
+KF=$(grep -oP '^RESPONDER_WECOM_KF_SECRET=\K.*' "$ENVFILE" || true)
+if [ -n "$KF" ]; then
+  echo "   微信客服通道：已配置 ✅（客户咨询自动进入，无需 @）"
+else
+  echo "   微信客服通道：未配置（可选）。后台 → 客户与上下游 → 微信客服 → API"
+  echo "   拿到 Secret 后重跑本命令并加上 WECOM_KF_SECRET=xxx 即可开启"
+fi
 echo
 echo "③ 控制台访问令牌（发给运维/Claude 用，勿泄露）："
 echo "   X-Admin-Token: $(grep -oP '^RESPONDER_ADMIN_TOKEN=\K.*' "$ENVFILE")"

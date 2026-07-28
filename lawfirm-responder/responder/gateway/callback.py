@@ -15,6 +15,7 @@ from responder.config import get_settings
 from responder.gateway.wecom_crypto import WeComCrypto
 from responder.models import IncomingMessage
 from responder.service import Pipeline
+from responder.worker import KfSyncJob
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,9 @@ async def receive(
         # 签名已验真但内容异常：回 success 避免企微按超时重发，仅记日志排查
         logger.warning("undecodable callback payload, ts=%s nonce=%s", timestamp, nonce)
         return Response(content="success", media_type="text/plain")
+    worker = getattr(request.app.state, "worker", None)
+    async_ok = worker is not None and pipeline.settings.callback_async
+
     if xml.findtext("MsgType") == "text":
         msg = IncomingMessage(
             msg_id=xml.findtext("MsgId") or f"{timestamp}-{nonce}",
@@ -76,11 +80,20 @@ async def receive(
         )
         # 企微要求 5 秒内应答，判断链路含 LLM 调用与分条发送延时，必须异步处理；
         # 超时会触发企微重发回调 → 重复处理 → 群里重复说话（worker 以 msg_id 去重兜底）
-        worker = getattr(request.app.state, "worker", None)
-        if worker is not None and pipeline.settings.callback_async:
+        if async_ok:
             worker.submit(msg)
         else:
             pipeline.handle(msg)
+    elif xml.findtext("Event") == "kf_msg_or_event":
+        # 微信客服：回调只带一个 10 分钟有效的 Token，真实消息要用它去 sync_msg 拉
+        job = KfSyncJob(
+            token=xml.findtext("Token") or "",
+            open_kfid=xml.findtext("OpenKfId") or "",
+        )
+        if async_ok:
+            worker.submit(job)
+        else:
+            worker.process_kf(job) if worker else None
     # 回复走主动发送通道，回调只回 success
     return Response(content="success", media_type="text/plain")
 
