@@ -240,6 +240,24 @@ def test_urgent_kf_pushes_one_brief_to_servicer(tmp_path):
     assert kf.sent, "群里仍应立即安抚客户"
 
 
+def test_backfills_missing_notify_target(tmp_path):
+    """早期建的档案没有接待人 → 下条消息到达时补齐，否则线索永远推不出去。"""
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("b1", "我要投诉你们的服务态度")],
+         "next_cursor": "c1", "has_more": 0},
+    ], servicers=("weilai",))
+    # 模拟历史遗留：档案存在但无接收人
+    from responder.models import ClientStatus, GroupProfile
+    store.upsert_group(GroupProfile(
+        group_id=GID, name="旧档案", client_status=ClientStatus.PROSPECT,
+        kf_open_kfid=OPEN_KFID, kf_external_userid=EXT_USER,
+    ))
+    assert store.get_group(GID).lawyer_userid == ""
+
+    worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
+    assert store.get_group(GID).lawyer_userid == "weilai"
+
+
 def test_servicer_lookup_cached(tmp_path):
     """接待人列表按客服账号缓存，不为每个新客户重复查询。"""
     store, kf, worker = make_env(tmp_path, [

@@ -213,9 +213,21 @@ class Worker:
         提醒接收人取该客服账号在企微后台配置的接待人（首位），保证
         「已通知律师」这句承诺真的兑现；取不到时回落全局兜底配置。
         """
-        if self.store.get_group(group_id) is not None:
-            return
         s = self.pipeline.settings
+        existing = self.store.get_group(group_id)
+        if existing is not None:
+            # 旧档案（建档时还没有接待人查询能力，或当时后台尚未配置接待人）
+            # 会导致简报无人可推——在这里补齐，否则线索只会静静躺在库里。
+            if not existing.lawyer_userid:
+                servicers = self._kf_servicers(open_kfid)
+                target = servicers[0] if servicers else s.default_notify_userid
+                if target:
+                    existing.lawyer_userid = target
+                    if len(servicers) > 1 and not existing.backup_userid:
+                        existing.backup_userid = servicers[1]
+                    self.store.upsert_group(existing)
+                    logger.info("backfilled notify target for %s → %s", group_id, target)
+            return
         servicers = self._kf_servicers(open_kfid)
         self.store.upsert_group(
             GroupProfile(

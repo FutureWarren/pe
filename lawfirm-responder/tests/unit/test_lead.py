@@ -150,6 +150,38 @@ def test_notification_without_contact_says_so(tmp_path):
     assert "客户未留" in text
 
 
+def test_session_split_ignores_earlier_consultation(tmp_path):
+    """隔了几小时的另一次咨询不并入本次交接单，否则摘要串味、律师无从下手。"""
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    history = [
+        {"sender_is_staff": False, "content": "上次问的拖欠工资仲裁",
+         "created_at": (now - timedelta(hours=5)).isoformat()},
+        {"sender_is_staff": False, "content": "我借款家人3000不还能起诉吗",
+         "created_at": (now - timedelta(minutes=3)).isoformat()},
+        {"sender_is_staff": False, "content": "我的电话是17721275495",
+         "created_at": now.isoformat()},
+    ]
+    kept = lead_mod.current_session(history, gap_seconds=7200)
+    assert len(kept) == 2
+    assert "拖欠工资" not in "".join(m["content"] for m in kept)
+
+
+def test_session_split_keeps_continuous_conversation(tmp_path):
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    history = [
+        {"sender_is_staff": False, "content": "a",
+         "created_at": (now - timedelta(minutes=20)).isoformat()},
+        {"sender_is_staff": False, "content": "b",
+         "created_at": (now - timedelta(minutes=10)).isoformat()},
+        {"sender_is_staff": False, "content": "c", "created_at": now.isoformat()},
+    ]
+    assert len(lead_mod.current_session(history, gap_seconds=7200)) == 3
+
+
 def test_fallback_summary_uses_client_words(tmp_path):
     store, _, _ = make(tmp_path)
     group = store.get_group("kf:acct:cust")

@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     lead_history_window: int = 30  # 整理简报时回看的对话条数
     # 会话静默多久后为「有意向但未触发即时通知」的咨询补一份简报（秒）
     lead_idle_seconds: int = 900
+    # 同一客户两次咨询的分隔阈值：超过此空档视为另一次咨询，不并入同一张交接单
+    lead_session_gap_seconds: int = 7200
     # 群聊单条回复长度上限（字符），超出按句号截断
     answer_max_chars: int = 240
 

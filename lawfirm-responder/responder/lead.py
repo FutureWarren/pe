@@ -12,6 +12,7 @@
 
 import json
 import logging
+from datetime import datetime
 
 from responder.config import Settings, get_settings
 from responder.engine import llm, signals
@@ -23,6 +24,28 @@ logger = logging.getLogger(__name__)
 
 _URGENCY_ZH = {"high": "紧急", "medium": "较急", "low": "一般"}
 _INTENT_ZH = {"hot": "高意向", "warm": "有意向", "cold": "一般咨询"}
+
+
+def current_session(history: list[dict], gap_seconds: int) -> list[dict]:
+    """只取「这一次」咨询：从最新一条往回，遇到超过 gap 的时间空档就断开。
+
+    同一个客户可能隔几小时又来问一件毫不相干的事；把两次混在一张交接单里，
+    摘要会变成「咨询了拖欠工资、拘留、借款纠纷等多个问题」，律师无从下手。
+    """
+    if len(history) < 2:
+        return history
+    out = [history[-1]]
+    for m in reversed(history[:-1]):
+        try:
+            newer = datetime.fromisoformat(out[0]["created_at"])
+            older = datetime.fromisoformat(m["created_at"])
+        except (KeyError, ValueError, TypeError):
+            out.insert(0, m)  # 读不到时间就保留：宁可多带上下文，不可凭空丢失
+            continue
+        if (newer - older).total_seconds() > gap_seconds:
+            break
+        out.insert(0, m)
+    return out
 
 
 def _fallback_summary(history: list[dict]) -> str:
@@ -50,6 +73,7 @@ def build_and_store(
     settings = settings or get_settings()
     if not history:
         return None
+    history = current_session(history, settings.lead_session_gap_seconds)
 
     intent, contact, hits = signals.scan(history)
     brief = (
@@ -146,7 +170,7 @@ def dispatch(
     if not history:
         return None
     previous = store.get_lead(group.group_id)
-    intent, _, _ = signals.scan(history)
+    intent, _, _ = signals.scan(current_session(history, settings.lead_session_gap_seconds))
     notify = force or should_notify(previous, intent)
     lead = build_and_store(
         store, group, history, settings=settings, summarize=notify,

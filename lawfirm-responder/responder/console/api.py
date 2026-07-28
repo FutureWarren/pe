@@ -192,6 +192,12 @@ def diagnostics(request: Request):
             for a in accounts
         ]
         kf["ok"] = bool(accounts)
+    # 没有提醒接收人的会话＝线索生成了也没人知道，属静默失败，必须显式暴露
+    store = request.app.state.store
+    orphan = [
+        g["group_id"] for g in store.list_groups()
+        if g.get("ai_enabled") and not (g.get("lawyer_userid") or s.default_notify_userid)
+    ]
     return {
         "mode": s.mode,
         "llm": {
@@ -200,6 +206,11 @@ def diagnostics(request: Request):
             "error": llm_err,
         },
         "kf": kf,
+        "notify": {
+            "ok": not orphan,
+            "groups_without_target": orphan[:10],
+            "hint": "" if not orphan else "这些会话没有提醒接收人，线索与紧急提醒推不出去",
+        },
     }
 
 
