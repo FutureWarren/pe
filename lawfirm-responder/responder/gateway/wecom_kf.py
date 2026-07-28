@@ -67,6 +67,17 @@ class KfClient:
             raise RuntimeError(f"kf {path} failed: {resp}")
         return resp
 
+    def _get(self, path: str, params: dict) -> dict:
+        """部分客服接口是 GET + 查询参数（如 servicer/list），不能用 POST body。"""
+        resp = httpx.get(
+            f"{_API}/{path}",
+            params={"access_token": self._access_token(), **params},
+            timeout=15,
+        ).json()
+        if resp.get("errcode"):
+            raise RuntimeError(f"kf {path} failed: {resp}")
+        return resp
+
     def post_raw(self, path: str, payload: dict) -> dict:
         """直调客服接口（控制台自检/生成入口链接等用途），异常向上抛。"""
         return self._post(path, payload)
@@ -93,7 +104,7 @@ class KfClient:
     def servicer_raw(self, open_kfid: str) -> dict:
         """接待人接口的原始返回（诊断用：接待人取不到时要能看清是为什么）。"""
         try:
-            return self._post("kf/servicer/list", {"open_kfid": open_kfid})
+            return self._get("kf/servicer/list", {"open_kfid": open_kfid})
         except Exception as e:
             logger.exception("kf servicer/list error (open_kfid=%s)", open_kfid)
             return {"error": str(e)[:200]}
