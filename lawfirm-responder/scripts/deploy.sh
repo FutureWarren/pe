@@ -109,6 +109,8 @@ else
   _ensure_env RESPONDER_WECOM_BOT_AES_KEY "${WECOM_BOT_AES_KEY:-}"
   # 群聊没有「接待人」可查，线索简报的默认接收人只能显式指定，否则简报无人可推
   _ensure_env RESPONDER_BOT_DEFAULT_NOTIFY_USERID "${BOT_DEFAULT_NOTIFY_USERID:-}"
+  # 律师登录链接的对外地址（留空则按请求 Host 推断，经 nginx 部署无需配置）
+  _ensure_env RESPONDER_PUBLIC_BASE_URL "${PUBLIC_BASE_URL:-}"
   for k in WECOM_BOT_TOKEN WECOM_BOT_AES_KEY BOT_DEFAULT_NOTIFY_USERID; do
     v="$(eval echo "\${$k:-}")"
     [ -n "$v" ] && sed -i "s|^RESPONDER_$k=.*|RESPONDER_$k=$v|" "$ENVFILE"

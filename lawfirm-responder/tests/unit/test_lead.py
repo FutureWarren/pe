@@ -20,8 +20,8 @@ class RecordingSender:
 
     @property
     def leads(self) -> list[tuple[str, str]]:
-        """只看线索交接单，滤掉常规的待跟进提醒。"""
-        return [x for x in self.direct if "线索】" in x[1]]
+        """只看线索交接单（首行为优先级层级），滤掉常规的待跟进提醒。"""
+        return [x for x in self.direct if "客户诉求：" in x[1]]
 
     def send_direct_text(self, userid, text):
         self.direct.append((userid, text))
@@ -93,7 +93,7 @@ def test_contact_message_creates_and_notifies_lead(tmp_path):
     assert sender.leads, "高意向线索应推送接待人"
     to, text = sender.leads[-1]
     assert to == "weilai"
-    assert "高意向线索" in text and "17721275495" in text
+    assert text.startswith("【P") and "17721275495" in text
     # 降级路径下摘要取客户原话，绝不编造
     assert "试用期被辞退有补偿吗？" in text or "电话是17721275495" in text
 
@@ -109,7 +109,7 @@ def test_no_duplicate_notification(tmp_path):
 
     p.handle(_msg("我电话17721275495你们打给我", "h1"))  # 升级为 hot → 再通知
     assert len(sender.leads) == n1 + 1
-    assert "高意向" in sender.leads[-1][1]
+    assert "已留电话" in sender.leads[-1][1]  # 升级依据可见
 
 
 def test_cold_message_never_notifies(tmp_path):

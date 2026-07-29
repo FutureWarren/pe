@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     lead_idle_seconds: int = 900
     # 同一客户两次咨询的分隔阈值：超过此空档视为另一次咨询，不并入同一张交接单
     lead_session_gap_seconds: int = 7200
+
+    # ---- 分案与优先级（规则定义与权重见 docs/lead-routing.md；阈值调整须人工确认）
+    # P0 强意愿 / P1 有意愿 的分数门槛
+    priority_p0_threshold: int = 60
+    priority_p1_threshold: int = 30
+    # P0 线索超过该时长仍未标记「已联系」→ 追加提醒并抄送第二责任人
+    lead_sla_enabled: bool = True
+    lead_p0_sla_seconds: int = 3600
+    # 控制台对外基础地址（生成律师登录链接用）；留空时从请求 Host 推断
+    public_base_url: str = ""
     # 群聊单条回复长度上限（字符），超出按句号截断
     answer_max_chars: int = 240
 

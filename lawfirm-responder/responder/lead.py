@@ -14,8 +14,9 @@ import json
 import logging
 from datetime import datetime
 
+from responder import assignment
 from responder.config import Settings, get_settings
-from responder.engine import llm, signals
+from responder.engine import llm, priority, signals
 from responder.models import GroupProfile
 from responder.reply import prompts
 from responder.store.db import Store
@@ -115,21 +116,37 @@ def build_and_store(
     # 规则引擎判定的紧急（拘留/传唤/开庭临近…）是确定性信号，优先于模型的估计
     if urgent:
         fields["urgency"] = "high"
+    # 优先级评分：律师排队跟进的依据（见 engine/priority.py 与 docs/lead-routing.md）
+    score, tier, factors = priority.evaluate(history, urgent=urgent, settings=settings)
+    fields.update(
+        score=score, priority=tier, factors=json.dumps(factors, ensure_ascii=False)
+    )
     store.upsert_lead(group.group_id, fields)
     return store.get_lead(group.group_id)
 
 
 def format_notification(lead: dict, group: GroupProfile) -> str:
-    """推给律师的交接单文本（企微单聊）。"""
+    """推给律师的交接单文本（企微单聊）。
+
+    首行即优先级与时限预期——律师扫一眼就知道这单该排在手头哪个位置；
+    「优先依据」把评分摊开，可解释的排序才会被照着执行。
+    """
     facts = []
     try:
         facts = json.loads(lead.get("key_facts") or "[]")
     except (ValueError, TypeError):
         pass
-    head = "【高意向线索】" if lead["intent"] == "hot" else "【新咨询线索】"
+    tier = lead.get("priority") or ""
+    if tier:
+        head = f"【{tier} {priority.TIER_ZH.get(tier, '')}】"
+        sla = priority.TIER_SLA_ZH.get(tier, "")
+    else:  # 旧数据未评分
+        head = "【高意向线索】" if lead["intent"] == "hot" else "【新咨询线索】"
+        sla = ""
     lines = [
         f"{head}{lead.get('case_type') or '类型待确认'} · "
-        f"{_URGENCY_ZH.get(lead.get('urgency'), '一般')}",
+        f"{_URGENCY_ZH.get(lead.get('urgency'), '一般')}"
+        + (f" · 建议{sla}" if sla else ""),
         "",
         f"客户诉求：{lead.get('summary') or '（未归纳）'}",
     ]
@@ -137,6 +154,12 @@ def format_notification(lead: dict, group: GroupProfile) -> str:
         lines.append("关键信息：")
         lines += [f"  · {f}" for f in facts]
     lines.append(f"联系方式：{lead.get('contact') or '客户未留，需在会话中继续沟通'}")
+    try:
+        factors = json.loads(lead.get("factors") or "[]")
+    except (ValueError, TypeError):
+        factors = []
+    if factors:
+        lines.append(f"优先依据：{priority.factors_line(factors)}")
     if lead.get("suggested_action"):
         lines += ["", f"建议动作：{lead['suggested_action']}"]
     if lead.get("opening_line"):
@@ -176,9 +199,14 @@ def dispatch(
         store, group, history, settings=settings, summarize=notify,
         previous=previous, urgent=urgent,
     )
-    if lead is None or not notify:
+    if lead is None:
         return lead
-    to = group.lawyer_userid or settings.default_notify_userid
+    # 派单在通知之前：交接单要推给被派到的律师，而不是笼统的接待人。
+    # 名册为空时 ensure 回落旧链路（会话承办人/全局兜底），行为与旧版完全一致。
+    to = assignment.ensure(store, group, lead, settings)
+    if not notify:
+        return lead
+    lead = store.get_lead(group.group_id) or lead  # 取回含指派信息的最新版
     if sender and to:
         if sender.send_direct_text(to, format_notification(lead, group)):
             store.mark_lead_notified(group.group_id)

@@ -99,6 +99,17 @@ CREATE TABLE IF NOT EXISTS kf_cursors (
     cursor TEXT DEFAULT '',
     updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS lawyers (
+    userid TEXT PRIMARY KEY,          -- 企微 userid，同时是登录身份
+    name TEXT DEFAULT '',
+    specialties TEXT DEFAULT '',      -- 顿号/逗号分隔的专长领域，派单匹配用
+    role TEXT DEFAULT 'lawyer',       -- lawyer | admin（个人令牌也可拥有管理权限）
+    on_duty INTEGER DEFAULT 1,        -- 停诊/休假时关掉，不再接新派单
+    active INTEGER DEFAULT 1,         -- 停用即禁止登录；不物理删除，保留分案历史归属
+    token_hash TEXT DEFAULT '',       -- 登录令牌只存 sha256，泄库不泄令牌
+    last_assigned_at TEXT,            -- 负载均衡的平局裁决：最久没接单的先接
+    created_at TEXT
+);
 """
 
 # 旧库平滑升级：新增列在此登记，启动时按需 ALTER（SQLite 无 IF NOT EXISTS 列语法）
@@ -115,6 +126,15 @@ _ADDED_COLUMNS = {
     "replies": {"category": "TEXT DEFAULT ''"},
     # 待办卡片要把「客户问的什么」当主角展示，不能让控制台去解析摘要文本
     "reminders": {"question": "TEXT DEFAULT ''", "ai_reply": "TEXT DEFAULT ''"},
+    # 分案系统：指派对象 + 优先级评分（factors 是评分依据清单，控制台与推送共用）
+    "leads": {
+        "assigned_userid": "TEXT DEFAULT ''",
+        "assigned_at": "TEXT",
+        "priority": "TEXT DEFAULT ''",
+        "score": "INTEGER DEFAULT 0",
+        "factors": "TEXT DEFAULT '[]'",
+        "sla_nudged": "INTEGER DEFAULT 0",
+    },
 }
 
 
@@ -135,6 +155,14 @@ class Store:
             for name, decl in columns.items():
                 if name not in have:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+        # 升级前的存量线索没有优先级：按旧意向估一个，让排序不至于把热线索排到最后。
+        # 只填 priority='' 的行，幂等；下次消息触达时会被真实评分覆盖。
+        conn.execute(
+            "UPDATE leads SET"
+            " priority = CASE intent WHEN 'hot' THEN 'P1' ELSE 'P2' END,"
+            " score = CASE intent WHEN 'hot' THEN 40 WHEN 'warm' THEN 15 ELSE 0 END"
+            " WHERE priority = '' OR priority IS NULL"
+        )
 
     @contextmanager
     def _conn(self):
@@ -327,9 +355,15 @@ class Store:
     def upsert_lead(self, group_id: str, fields: dict) -> None:
         """一个会话一条线索：反复更新而非追加，避免同一客户刷屏。"""
         now = datetime.now().isoformat()
-        cols = ["intent", "contact", "summary", "case_type", "key_facts", "urgency",
-                "suggested_action", "opening_line", "signals"]
-        vals = [fields.get(c, "") for c in cols]
+        # 只覆盖内容字段；status / assigned_userid 有专用方法，内容更新不得触碰
+        defaults = {
+            "intent": "", "contact": "", "summary": "", "case_type": "",
+            "key_facts": "", "urgency": "", "suggested_action": "",
+            "opening_line": "", "signals": "",
+            "score": 0, "priority": "", "factors": "[]",
+        }
+        cols = list(defaults)
+        vals = [fields.get(c, defaults[c]) for c in cols]
         with self._conn() as conn:
             conn.execute(
                 f"""INSERT INTO leads (group_id,{','.join(cols)},created_at,updated_at)
@@ -347,19 +381,57 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
-    def list_leads(self, status: str | None = None, limit: int = 200) -> list[dict]:
-        """按意向热度、时间倒序——律师先看最该打电话的那个。"""
+    def list_leads(
+        self, status: str | None = None, limit: int = 200,
+        assigned_userid: str | None = None,
+    ) -> list[dict]:
+        """按优先级、评分、时间排序——律师先看最该打电话的那个。
+
+        assigned_userid 用于律师个人视角：只看派给自己的单。
+        """
         q = "SELECT * FROM leads"
-        args: tuple = ()
+        where, args = [], []
         if status:
-            q += " WHERE status=?"
-            args = (status,)
+            where.append("status=?")
+            args.append(status)
+        if assigned_userid is not None:
+            where.append("assigned_userid=?")
+            args.append(assigned_userid)
+        if where:
+            q += " WHERE " + " AND ".join(where)
+        # 未评分的旧行按意向近似归位（hot≈P1、warm≈P2、cold 殿后），不至于沉底
         q += (
-            " ORDER BY CASE intent WHEN 'hot' THEN 0 WHEN 'warm' THEN 1 ELSE 2 END,"
-            " updated_at DESC LIMIT ?"
+            " ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1"
+            " WHEN 'P2' THEN 2 ELSE CASE intent WHEN 'hot' THEN 1"
+            " WHEN 'warm' THEN 2 ELSE 3 END END,"
+            " score DESC, updated_at DESC LIMIT ?"
         )
         with self._conn() as conn:
-            return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
+            return [dict(r) for r in conn.execute(q, (*args, limit)).fetchall()]
+
+    def assign_lead(self, group_id: str, userid: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE leads SET assigned_userid=?, assigned_at=?, updated_at=?"
+                " WHERE group_id=?",
+                (userid, datetime.now().isoformat(), datetime.now().isoformat(), group_id),
+            )
+
+    def overdue_p0_leads(self, notified_before: datetime) -> list[dict]:
+        """通知已发、超时仍停在 new 的强意愿线索——SLA 升级的扫描对象。"""
+        with self._conn() as conn:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM leads WHERE priority='P0' AND status='new'"
+                    " AND sla_nudged=0 AND notified_at IS NOT NULL AND notified_at<=?",
+                    (notified_before.isoformat(),),
+                ).fetchall()
+            ]
+
+    def mark_lead_nudged(self, group_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE leads SET sla_nudged=1 WHERE group_id=?", (group_id,))
 
     def set_lead_status(self, lead_id: int, status: str) -> None:
         with self._conn() as conn:
@@ -391,6 +463,72 @@ class Store:
                 " cursor=excluded.cursor, updated_at=excluded.updated_at",
                 (open_kfid, cursor, datetime.now().isoformat()),
             )
+
+    # ------------------------------------------------------------ 律师名册
+    def upsert_lawyer(self, userid: str, fields: dict) -> None:
+        """新建/更新律师档案。fields 只含要改的列；token_hash 走专用方法。"""
+        allowed = {"name", "specialties", "role", "on_duty", "active"}
+        cols = [c for c in fields if c in allowed]
+        vals = [
+            int(fields[c]) if c in ("on_duty", "active") else fields[c] for c in cols
+        ]
+        with self._conn() as conn:
+            conn.execute(
+                f"""INSERT INTO lawyers (userid,{','.join(cols)},created_at)
+                    VALUES ({','.join('?' * (len(cols) + 2))})
+                    ON CONFLICT(userid) DO UPDATE SET
+                    {','.join(f'{c}=excluded.{c}' for c in cols)}""",
+                (userid, *vals, datetime.now().isoformat()),
+            )
+
+    def get_lawyer(self, userid: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM lawyers WHERE userid=?", (userid,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_lawyers(self, active_only: bool = False) -> list[dict]:
+        q = "SELECT * FROM lawyers"
+        if active_only:
+            q += " WHERE active=1"
+        q += " ORDER BY created_at ASC"
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(q).fetchall()]
+
+    def get_lawyer_by_token_hash(self, token_hash: str) -> dict | None:
+        """登录鉴权入口：库里只有哈希，比对同样只用哈希。"""
+        if not token_hash:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM lawyers WHERE token_hash=? AND active=1", (token_hash,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_lawyer_token_hash(self, userid: str, token_hash: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE lawyers SET token_hash=? WHERE userid=?", (token_hash, userid)
+            )
+
+    def touch_lawyer_assigned(self, userid: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE lawyers SET last_assigned_at=? WHERE userid=?",
+                (datetime.now().isoformat(), userid),
+            )
+
+    def lawyer_load(self) -> dict[str, dict]:
+        """每位律师手上的在办量：{userid: {open, p0}}。派单负载均衡与团队看板共用。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT assigned_userid AS u,"
+                " SUM(CASE WHEN status IN ('new','contacted') THEN 1 ELSE 0 END) AS open,"
+                " SUM(CASE WHEN status='new' AND priority='P0' THEN 1 ELSE 0 END) AS p0"
+                " FROM leads WHERE assigned_userid != '' GROUP BY assigned_userid"
+            ).fetchall()
+        return {r["u"]: {"open": r["open"] or 0, "p0": r["p0"] or 0} for r in rows}
 
     # ------------------------------------------------------------ pending checks
     def add_pending_check(self, msg_id: str, group_id: str, due_at: datetime) -> None:
@@ -435,15 +573,15 @@ class Store:
             )
             return cur.lastrowid
 
-    def pending_reminders(self) -> list[dict]:
+    def pending_reminders(self, to_userid: str | None = None) -> list[dict]:
+        q = "SELECT * FROM reminders WHERE status IN ('pending','sent','escalated')"
+        args: tuple = ()
+        if to_userid is not None:
+            q += " AND to_userid=?"
+            args = (to_userid,)
+        q += " ORDER BY urgent DESC, id ASC"
         with self._conn() as conn:
-            return [
-                dict(r)
-                for r in conn.execute(
-                    "SELECT * FROM reminders WHERE status IN ('pending','sent','escalated')"
-                    " ORDER BY urgent DESC, id ASC"
-                ).fetchall()
-            ]
+            return [dict(r) for r in conn.execute(q, args).fetchall()]
 
     def set_reminder_status(self, reminder_id: int, status: str) -> None:
         with self._conn() as conn:

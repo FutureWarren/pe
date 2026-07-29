@@ -381,7 +381,17 @@ nav#nav .navbtn .nbadge {
   .board-split .tiles { grid-template-columns: 1fr 1fr; }
   #groupList { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   #groupList .card { margin-bottom: 0; }
+  #teamList { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #teamList .card { margin-bottom: 0; }
 }
+/* 角色门控：律师身份不渲染管理入口（服务端仍强制鉴权，这里只是少画） */
+body:not([data-role=admin]) .admin-only { display: none !important; }
+/* 优先级标识：P0 必须一眼跳出来 */
+.pchip { display:inline-flex; align-items:center; gap:4px; padding:2px 9px;
+  border-radius:999px; font-size:12px; font-weight:700; letter-spacing:.02em; }
+.pchip.p0 { background: var(--bad-bg, #FBEAEA); color: var(--bad); }
+.pchip.p1 { background: var(--warn-bg); color: var(--warn); }
+.pchip.p2 { background: var(--chip-bg); color: var(--ink-2); }
 </style>
 </head>
 <body>
@@ -391,6 +401,8 @@ nav#nav .navbtn .nbadge {
   <symbol id="i-message" viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-6 4V6z"/><path d="M8 9h8M8 12h5"/></symbol>
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-8M12 20V5M19 20v-6"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3.5 19.5c0-3.2 2.4-5.3 5.5-5.3s5.5 2.1 5.5 5.3"/><circle cx="17" cy="9.5" r="2.4"/><path d="M17.5 14.4c2 .3 3.5 1.9 3.5 4.1"/></symbol>
+  <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4 18-7z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V13"/><path d="M12 16.5h.01"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 2.8V11c0 4.4-2.9 7.8-7 9-4.1-1.2-7-4.6-7-9V5.8L12 3z"/><path d="M9.3 12l1.9 1.9 3.5-3.8"/></symbol>
@@ -489,6 +501,11 @@ nav#nav .navbtn .nbadge {
         <div class="legend" id="distLegend"></div>
       </div>
     </div>
+    <div class="card admin-only" style="margin-top:10px" id="lawyerBoardCard" hidden>
+      <div class="eyebrow" style="margin:0 0 2px">分律师负载</div>
+      <div class="meta">在办 = 待跟进 + 已联系；P0 = 待联系的强意愿单</div>
+      <div id="lawyerBoard" style="margin-top:8px"></div>
+    </div>
     <div class="meta" id="boardFoot" style="margin-top:10px"></div>
   </section>
 
@@ -497,6 +514,17 @@ nav#nav .navbtn .nbadge {
     <div id="groupList"></div>
     <button class="btn-outline" style="width:100%" onclick="editGroup(null)">
       <svg class="ico"><use href="#i-plus"/></svg>新增群档案
+    </button>
+  </section>
+
+  <section id="tab-team" hidden>
+    <div class="page-title">团队</div>
+    <div class="meta" style="margin-bottom:12px">
+      名册里有在班律师时，新线索会按「专长匹配 + 在办最少」自动派单；名册为空则一切照旧。
+    </div>
+    <div id="teamList"></div>
+    <button class="btn-outline" style="width:100%" onclick="editLawyer(null)">
+      <svg class="ico"><use href="#i-plus"/></svg>添加律师
     </button>
   </section>
 </main>
@@ -520,8 +548,11 @@ nav#nav .navbtn .nbadge {
   <button class="navbtn" id="nav-board" onclick="setTab('board')">
     <svg class="ico"><use href="#i-chart"/></svg><span>看板</span>
   </button>
-  <button class="navbtn" id="nav-groups" onclick="setTab('groups')">
+  <button class="navbtn admin-only" id="nav-groups" onclick="setTab('groups')">
     <svg class="ico"><use href="#i-users"/></svg><span>群管理</span>
+  </button>
+  <button class="navbtn admin-only" id="nav-team" onclick="setTab('team')">
+    <svg class="ico"><use href="#i-briefcase"/></svg><span>团队</span>
   </button>
   <div class="nav-foot">
     <button class="capsule" onclick="openStatusPanel()" style="width:100%">
@@ -563,6 +594,13 @@ function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} _mem[k] 
 function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} delete _mem[k]; }
 
 let token = lsGet("admin_token") || "";
+/* 律师登录链接把令牌放在 # 片段（不进服务器日志）：进页即收取并抹掉地址栏痕迹 */
+if (location.hash.startsWith("#t=")) {
+  token = decodeURIComponent(location.hash.slice(3));
+  lsSet("admin_token", token);
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+}
+let me = null; // /console/me 的结果：{role, userid, name}
 let tab = "todo", logView = "replies", groupsCache = [], loadedOnce = {};
 let lastSuccess = null, offline = false, logReq = 0;
 const expanded = new Set(), lastSig = {}, repliesFb = {};
@@ -738,13 +776,22 @@ function toggleEye() {
   inp.type = isPw ? "text" : "password";
   document.getElementById("eyeIco").innerHTML = `<use href="#i-${isPw ? "eyeoff" : "eye"}"/>`;
 }
+function applyRole() {
+  document.body.dataset.role = me ? me.role : "";
+  // 律师身份若停在管理页（如上次会话是管理员），拉回待办
+  if (me && me.role !== "admin" && (tab === "groups" || tab === "team")) setTab("todo");
+}
+async function whoami() {
+  me = await api("/me");
+  applyRole();
+}
 async function doLogin(ev) {
   if (ev) ev.preventDefault();
   const btn = document.getElementById("loginBtn");
   token = document.getElementById("tokenInput").value.trim();
   btn.disabled = true; btn.textContent = "验证中…";
   try {
-    await api("/metrics");
+    await whoami();
     lsSet("admin_token", token);
     document.getElementById("login").hidden = true;
     refresh();
@@ -762,7 +809,8 @@ async function doLogin(ev) {
   return false;
 }
 function logout() {
-  lsDel("admin_token"); token = "";
+  lsDel("admin_token"); token = ""; me = null;
+  document.body.dataset.role = "";
   forceCloseSheet(); showLogin("");
   toast("已退出登录");
 }
@@ -786,10 +834,12 @@ function openStatusPanel() {
       <div class="srow">
         <div class="k">运行模式</div>
         <div class="v">${esc(modeTxt)}</div>
-        <button class="btn-outline" style="margin-top:8px" onclick="askSwitchMode()">
+        <button class="btn-outline admin-only" style="margin-top:8px" onclick="askSwitchMode()">
           ${h.mode === "live" ? "切回影子模式（停止对外发言）" : "切换到正式模式"}
         </button>
       </div>
+      ${me && me.userid ? `<div class="srow"><div class="k">当前身份</div>
+        <div class="v">${esc(me.name)}（${me.role === "admin" ? "管理员" : "律师"}）</div></div>` : ""}
       <div class="srow"><div class="k">AI 引擎</div><div class="v">${esc(llmTxt)}</div></div>
       <div class="srow"><div class="k">接入通道</div><div class="v">${esc(kfTxt)}</div></div>
       <div class="srow"><div class="k">待处理队列</div><div class="v">${esc(qTxt)}</div></div>
@@ -974,6 +1024,16 @@ const INTENT = {
 };
 const LEAD_STATUS = { new: "待跟进", contacted: "已联系", converted: "已成交", invalid: "无效" };
 const URGENCY = { high: "紧急", medium: "较急", low: "一般" };
+const PRIORITY = {
+  P0: { zh: "P0 强意愿", cls: "p0" },
+  P1: { zh: "P1 有意愿", cls: "p1" },
+  P2: { zh: "P2 一般", cls: "p2" },
+};
+let teamCache = [];
+function lawyerName(userid) {
+  const l = teamCache.find(x => x.userid === userid);
+  return l && l.name ? l.name : userid;
+}
 let leadView = "new";
 
 function setLeadView(v) {
@@ -987,7 +1047,13 @@ async function loadLeads() {
   const el = document.getElementById("leadList");
   if (!loadedOnce.leads) el.innerHTML = skeleton();
   let list;
-  try { list = await api("/leads" + (leadView ? "?status=" + leadView : "")); }
+  try {
+    list = await api("/leads" + (leadView ? "?status=" + leadView : ""));
+    // 承办人姓名与改派选单需要名册；律师身份无权也无需
+    if (me && me.role === "admin" && !teamCache.length) {
+      try { teamCache = await api("/lawyers"); } catch (e) {}
+    }
+  }
   catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadLeads"); return; }
   loadedOnce.leads = true;
   const sig = leadView + JSON.stringify(list);
@@ -1000,13 +1066,19 @@ async function loadLeads() {
     return;
   }
   el.innerHTML = list.map(l => {
-    let facts = [];
+    let facts = [], factors = [];
     try { facts = JSON.parse(l.key_facts || "[]"); } catch (e) {}
+    try { factors = JSON.parse(l.factors || "[]"); } catch (e) {}
     const it = INTENT[l.intent] || INTENT.cold;
+    const pr = PRIORITY[l.priority];
+    // 律师看到的全是自己的单，「X承办」是废话；只有管理员全量视角需要归属
+    const who = (me && me.role === "admin" && l.assigned_userid)
+      ? lawyerName(l.assigned_userid) : "";
     return `
-      <div class="card ${l.intent === "hot" ? "urgent" : ""}">
+      <div class="card ${l.priority === "P0" ? "urgent" : ""}">
         <div class="row">
-          <span class="badge ${it.cls}">${it.cls === "bad" ? '<span class="dot" style="background:var(--bad)"></span>' : ""}${it.zh}</span>
+          ${pr ? `<span class="pchip ${pr.cls}">${pr.zh}</span>`
+               : `<span class="badge ${it.cls}">${it.zh}</span>`}
           ${l.case_type ? `<span class="chip">${esc(l.case_type)}</span>` : ""}
           ${l.urgency === "high" ? `<span class="badge warn">${esc(URGENCY[l.urgency])}</span>` : ""}
           ${l.status !== "new" ? `<span class="chip">${esc(LEAD_STATUS[l.status] || l.status)}</span>` : ""}
@@ -1016,10 +1088,15 @@ async function loadLeads() {
         <div class="body-l">${esc(l.summary || "（未归纳）")}</div>
         ${facts.length ? `<div class="meta" style="line-height:1.8">${
           facts.map(f => "· " + esc(f)).join("<br>")}</div>` : ""}
+        ${factors.length ? `<div class="meta" style="margin-top:6px">优先依据：${
+          factors.map(f => esc(f.label + " +" + f.points)).join(" · ")}</div>` : ""}
         <div class="row" style="margin-top:10px">
           ${l.contact
             ? `<a href="tel:${esc(l.contact)}" class="btn-tonal" style="text-decoration:none">${ico("phone")}${esc(l.contact)}</a>`
             : `<span class="meta">客户未留联系方式</span>`}
+          ${who ? `<span class="chip" style="margin-left:auto">${esc(who)}承办</span>` : ""}
+          <button class="btn-text muted admin-only" ${who ? "" : 'style="margin-left:auto"'}
+            onclick="openAssign(${l.id})">${who ? "改派" : "指派律师"}</button>
         </div>
         ${l.opening_line ? `<div style="margin-top:10px;padding:8px 12px;border-radius:8px;
           background:var(--brand-tint);color:var(--brand);font-size:14px;line-height:1.6">
@@ -1064,6 +1141,161 @@ async function refreshLeadBadge() {
     b.hidden = n === 0;
     b.textContent = n > 99 ? "99+" : n;
   } catch (e) { /* 静默 */ }
+}
+
+/* ============ 指派 / 改派 ============ */
+async function openAssign(leadId) {
+  if (!teamCache.length) {
+    try { teamCache = await api("/lawyers"); } catch (e) {}
+  }
+  const usable = teamCache.filter(l => l.active);
+  if (!usable.length) {
+    openSheet(`<h2>指派律师</h2>
+      <p class="meta" style="margin-top:10px">名册还是空的。先在「团队」里添加律师，
+      之后新线索会按专长与在办量自动派单，这里用于手动调整。</p>
+      <button class="btn-primary xl" style="margin-top:14px" onclick="forceCloseSheet();setTab('team')">去添加律师</button>`);
+    return;
+  }
+  openSheet(`<h2>指派律师</h2>
+    <div class="meta" style="margin:6px 0 10px">改派会立即企微通知新负责人，并同步该会话的承办律师</div>
+    ${usable.map(l => `
+      <button class="btn-outline" style="width:100%;justify-content:space-between;margin-bottom:8px"
+        onclick="doAssign(${leadId},'${esc(l.userid)}')">
+        <span>${esc(l.name || l.userid)}${l.on_duty ? "" : "（停接新单）"}</span>
+        <span class="meta">在办 ${l.open}${l.p0 ? " · P0×" + l.p0 : ""}</span>
+      </button>`).join("")}`);
+}
+async function doAssign(leadId, userid) {
+  try {
+    await api(`/leads/${leadId}/assign`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userid }),
+    });
+    forceCloseSheet();
+    toast("已改派并通知 " + lawyerName(userid));
+    lastSig.leads = null;
+    loadLeads();
+  } catch (e) { toast("改派失败，请重试", false); }
+}
+
+/* ============ 团队 ============ */
+async function loadTeam() {
+  const el = document.getElementById("teamList");
+  if (!loadedOnce.team) el.innerHTML = skeleton();
+  try { teamCache = await api("/lawyers"); }
+  catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadTeam"); return; }
+  loadedOnce.team = true;
+  if (!teamCache.length) {
+    el.innerHTML = emptyState("briefcase", "还没有律师账号",
+      "添加律师后：新线索按专长自动派单；每位律师用自己的登录链接进工作台，只看派给自己的客户。");
+    return;
+  }
+  el.innerHTML = teamCache.map(l => `
+    <div class="card" style="${l.active ? "" : "opacity:.55"}">
+      <div class="row" style="flex-wrap:nowrap">
+        <b style="font-size:15px">${esc(l.name || l.userid)}</b>
+        <span class="meta">${esc(l.userid)}</span>
+        ${l.role === "admin" ? `<span class="chip">管理</span>` : ""}
+        ${l.active ? "" : `<span class="badge warn">已停用</span>`}
+        <label class="switch" style="margin-left:auto" title="是否接收新派单">
+          <input type="checkbox" ${l.on_duty ? "checked" : ""} ${l.active ? "" : "disabled"}
+            aria-label="接单开关" onchange="toggleDuty('${esc(l.userid)}', this)">
+          <span></span>
+        </label>
+      </div>
+      <div class="meta" style="margin-top:4px">
+        ${l.specialties ? "专长：" + esc(l.specialties) : "未填专长（将参与所有类型派单）"}
+      </div>
+      <div class="meta" style="margin-top:2px">在办 ${l.open} 单${l.p0 ? ` · 其中 P0 待联系 ${l.p0} 单` : ""}
+        ${l.has_token ? "" : " · 尚未开通登录"}</div>
+      <div class="row fb-row">
+        <button class="btn-text" onclick="sendLogin('${esc(l.userid)}')">${ico("send")}发登录链接</button>
+        <button class="btn-text muted" onclick="copyLogin('${esc(l.userid)}')">复制链接</button>
+        <button class="btn-text muted" style="margin-left:auto" onclick="editLawyer('${esc(l.userid)}')">编辑${ico("chevron")}</button>
+      </div>
+    </div>`).join("");
+}
+function editLawyer(userid) {
+  const l = teamCache.find(x => x.userid === userid) ||
+    { userid: "", name: "", specialties: "", role: "lawyer", on_duty: true, active: true };
+  const isNew = !userid;
+  openSheet(`<h2>${isNew ? "添加律师" : "编辑律师"}</h2>
+    <div class="field"><label>企微账号（userid）</label>
+      <input id="lw_id" value="${esc(l.userid)}" ${isNew ? "" : "disabled"}
+        placeholder="企微通讯录里的账号，如 zhangsan">
+      ${isNew ? `<div class="help">在企业微信管理后台 → 通讯录 → 成员详情里能看到</div>` : ""}
+    </div>
+    <div class="field"><label>姓名</label><input id="lw_name" value="${esc(l.name)}" placeholder="张三"></div>
+    <div class="field"><label>专长领域（顿号分隔）</label>
+      <input id="lw_spec" value="${esc(l.specialties)}" placeholder="劳动仲裁、工伤、合同纠纷">
+      <div class="help">新线索按案件类型匹配专长派单；留空则参与所有类型的派单</div>
+    </div>
+    <div class="row" style="margin:8px 0">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px">
+        <input type="checkbox" id="lw_admin" ${l.role === "admin" ? "checked" : ""}>管理权限（看全所数据）
+      </label>
+      ${isNew ? "" : `<label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-left:auto">
+        <input type="checkbox" id="lw_active" ${l.active ? "checked" : ""}>启用
+      </label>`}
+    </div>
+    <button class="btn-primary xl" onclick="saveLawyer(${isNew})">保存</button>`);
+}
+async function saveLawyer(isNew) {
+  const userid = document.getElementById("lw_id").value.trim();
+  if (!userid) { toast("请填写企微账号", false); return; }
+  const body = {
+    name: document.getElementById("lw_name").value.trim(),
+    specialties: document.getElementById("lw_spec").value.trim(),
+    role: document.getElementById("lw_admin").checked ? "admin" : "lawyer",
+    on_duty: true,
+    active: isNew ? true : document.getElementById("lw_active").checked,
+  };
+  const old = teamCache.find(x => x.userid === userid);
+  if (old) body.on_duty = !!old.on_duty;
+  try {
+    await api(`/lawyers/${encodeURIComponent(userid)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    sheetDirty = false; forceCloseSheet();
+    toast(isNew ? "已添加；点「发登录链接」即可开通其工作台" : "已保存");
+    loadedOnce.team = false;
+    loadTeam();
+  } catch (e) { toast("保存失败，请重试", false); }
+}
+async function toggleDuty(userid, input) {
+  const l = teamCache.find(x => x.userid === userid);
+  try {
+    await api(`/lawyers/${encodeURIComponent(userid)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: l.name, specialties: l.specialties, role: l.role,
+        on_duty: input.checked, active: !!l.active,
+      }),
+    });
+    l.on_duty = input.checked;
+    toast(input.checked ? "已恢复接单" : "已暂停接新单（手上的单不受影响）");
+  } catch (e) { input.checked = !input.checked; toast("操作失败，请重试", false); }
+}
+async function sendLogin(userid) {
+  try {
+    await api(`/lawyers/${encodeURIComponent(userid)}/send-login`, { method: "POST" });
+    toast("已把登录链接企微发给 " + lawyerName(userid) + "（旧链接同时失效）");
+    loadedOnce.team = false; loadTeam();
+  } catch (e) { toast("发送失败：确认该账号在应用可见范围内", false); }
+}
+async function copyLogin(userid) {
+  try {
+    const r = await api(`/lawyers/${encodeURIComponent(userid)}/token`, { method: "POST" });
+    const url = r.login_url || r.token;
+    let copied = false;
+    try { await navigator.clipboard.writeText(url); copied = true; } catch (e) {}
+    if (copied) toast("登录链接已复制（旧链接已失效），请私发给本人");
+    else openSheet(`<h2>登录链接</h2>
+      <p class="meta" style="margin:8px 0">请完整复制后私发给本人（旧链接已失效）：</p>
+      <textarea readonly style="width:100%;min-height:90px" onclick="this.select()">${esc(url)}</textarea>`);
+    loadedOnce.team = false; loadTeam();
+  } catch (e) { toast("生成失败，请重试", false); }
 }
 
 /* ============ 记录 ============ */
@@ -1319,6 +1551,22 @@ async function loadBoard() {
          <div class="l">成交率</div>
        </div>`;
   }
+  /* 分律师负载（管理员）：谁手上压着 P0、派单是否均衡，一眼可见 */
+  const lbCard = document.getElementById("lawyerBoardCard");
+  if (m.by_lawyer && m.by_lawyer.length) {
+    lbCard.hidden = false;
+    document.getElementById("lawyerBoard").innerHTML =
+      m.by_lawyer.map(l => `
+        <div class="row" style="padding:7px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap">
+          <span style="font-size:14px;${l.active ? "" : "opacity:.5"}">${esc(l.name)}</span>
+          ${l.on_duty ? "" : `<span class="chip">停接新单</span>`}
+          <span class="meta" style="margin-left:auto">在办 ${l.open}</span>
+          ${l.p0 ? `<span class="pchip p0" style="margin-left:8px">P0×${l.p0}</span>` : ""}
+        </div>`).join("") +
+      (m.leads_unassigned
+        ? `<div class="meta" style="margin-top:8px;color:var(--warn)">另有 ${m.leads_unassigned} 条线索未指派（名册启用前的旧单）</div>`
+        : "");
+  } else if (lbCard) lbCard.hidden = true;
   const order = [["answer", "--s1"], ["handoff", "--s2"], ["silence", "--s3"]];
   const total = order.reduce((s, [k]) => s + (m.by_action[k] || 0), 0);
   document.getElementById("dist").innerHTML = total === 0
@@ -1557,7 +1805,7 @@ async function saveGroup(isNew, aiEnabled) {
 /* ============ 框架 ============ */
 function setTab(t) {
   tab = t;
-  for (const k of ["todo", "leads", "log", "board", "groups"]) {
+  for (const k of ["todo", "leads", "log", "board", "groups", "team"]) {
     document.getElementById("tab-" + k).hidden = k !== t;
     document.getElementById("nav-" + k).classList.toggle("on", k === t);
   }
@@ -1576,6 +1824,7 @@ async function refresh() {
     if (tab === "log") await loadLog();
     if (tab === "board") await loadBoard();
     if (tab === "groups") await loadGroups();
+    if (tab === "team") await loadTeam();
   } catch (e) { /* 401 已弹登录层 */ }
 }
 setInterval(() => {
@@ -1585,7 +1834,7 @@ setInterval(() => {
 (async () => {
   if (!token) { showLogin(""); return; }
   try {
-    await api("/metrics");
+    await whoami();
     refresh();
     if (!lsGet("help_seen")) {
       lsSet("help_seen", "1");

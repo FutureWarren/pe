@@ -109,6 +109,7 @@ class Worker:
         except Exception:
             logger.exception("escalate_overdue failed")
         self._sweep_idle_leads(now)
+        self._sweep_lead_sla(now)
 
     def _sweep_idle_leads(self, now: datetime) -> None:
         """对话安静下来后补一份线索简报——聊完没留电话的咨询同样有跟进价值。
@@ -157,6 +158,40 @@ class Worker:
             self.pipeline.handle(msg)
         except Exception:
             logger.exception("message processing failed: %s", msg.msg_id)
+
+    def _sweep_lead_sla(self, now: datetime) -> None:
+        """P0 强意愿线索超时未联系 → 追加提醒并抄送第二责任人。
+
+        「一小时内联系」是分层规则对律师的要求（docs/lead-routing.md），没有督办
+        它就只是一句口号。每单只追一次（sla_nudged），避免变成骚扰。
+        """
+        s = self.pipeline.settings
+        sender = self.pipeline.sender
+        if not (s.lead_brief_enabled and s.lead_sla_enabled and sender):
+            return
+        cutoff = now - timedelta(seconds=s.lead_p0_sla_seconds)
+        for row in self.store.overdue_p0_leads(cutoff):
+            group = self.store.get_group(row["group_id"])
+            if group is None:
+                continue
+            to = row.get("assigned_userid") or group.lawyer_userid or s.default_notify_userid
+            if not to:
+                continue
+            mins = int(s.lead_p0_sla_seconds // 60)
+            text = (
+                f"【督办】强意愿线索已超 {mins} 分钟未标记联系\n"
+                f"客户：{group.name or row['group_id']}\n"
+                f"诉求：{(row.get('summary') or '')[:60]}\n"
+                f"联系方式：{row.get('contact') or '见会话'}\n"
+                "请尽快联系并在工作台标记「已联系」。"
+            )
+            ok = sender.send_direct_text(to, text)
+            cc = group.backup_userid or s.default_notify_userid
+            if cc and cc != to:
+                sender.send_direct_text(cc, f"（抄送）{text}")
+            if ok:
+                self.store.mark_lead_nudged(row["group_id"])
+                logger.info("lead SLA nudge: %s → %s", row["group_id"], to)
 
     # ------------------------------------------------------------ 群聊助手
     def process_bot(self, env: bot.BotEnvelope) -> None:
