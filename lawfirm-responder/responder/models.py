@@ -93,4 +93,7 @@ class Reminder(BaseModel):
     group_id: str
     to_userid: str
     urgent: bool = False
-    summary: str = ""
+    summary: str = ""  # 推送给律师的完整文本（需自带上下文）
+    # 结构化字段：控制台按信息层级展示，不必去解析 summary
+    question: str = ""
+    ai_reply: str = ""

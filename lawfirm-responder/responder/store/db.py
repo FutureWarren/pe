@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS reminders (
     urgent INTEGER DEFAULT 0,
     summary TEXT DEFAULT '',
     status TEXT DEFAULT 'pending',
+    question TEXT DEFAULT '',
+    ai_reply TEXT DEFAULT '',
     created_at TEXT,
     escalated_at TEXT
 );
@@ -105,6 +107,8 @@ _ADDED_COLUMNS = {
         "kf_external_userid": "TEXT DEFAULT ''",
     },
     "replies": {"category": "TEXT DEFAULT ''"},
+    # 待办卡片要把「客户问的什么」当主角展示，不能让控制台去解析摘要文本
+    "reminders": {"question": "TEXT DEFAULT ''", "ai_reply": "TEXT DEFAULT ''"},
 }
 
 
@@ -296,12 +300,16 @@ class Store:
             conn.execute("UPDATE replies SET feedback=? WHERE id=?", (feedback, reply_id))
 
     def list_replies(self, group_id: str | None = None, limit: int = 200) -> list[dict]:
-        q = "SELECT * FROM replies"
+        # 带上客户原话：复核一句回复是否得当，前提是能看到它在回什么
+        q = (
+            "SELECT r.*, m.content AS question FROM replies r"
+            " LEFT JOIN messages m ON m.msg_id = r.msg_id"
+        )
         args: tuple = ()
         if group_id:
-            q += " WHERE group_id=?"
+            q += " WHERE r.group_id=?"
             args = (group_id,)
-        q += " ORDER BY id DESC LIMIT ?"
+        q += " ORDER BY r.id DESC LIMIT ?"
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
 
@@ -410,10 +418,10 @@ class Store:
     def save_reminder(self, r: Reminder) -> int:
         with self._conn() as conn:
             cur = conn.execute(
-                "INSERT INTO reminders (msg_id,group_id,to_userid,urgent,summary,status,created_at)"
-                " VALUES (?,?,?,?,?, 'pending', ?)",
+                "INSERT INTO reminders (msg_id,group_id,to_userid,urgent,summary,"
+                "question,ai_reply,status,created_at) VALUES (?,?,?,?,?,?,?, 'pending', ?)",
                 (r.msg_id, r.group_id, r.to_userid, int(r.urgent), r.summary,
-                 datetime.now().isoformat()),
+                 r.question, r.ai_reply, datetime.now().isoformat()),
             )
             return cur.lastrowid
 

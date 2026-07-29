@@ -475,6 +475,11 @@ nav#nav .navbtn .nbadge {
 
   <section id="tab-board" hidden>
     <div class="page-title">看板</div>
+    <div class="card" style="margin-bottom:10px">
+      <div class="eyebrow" style="margin:0 0 2px">线索转化</div>
+      <div class="meta">从 AI 首轮筛查到成交的全过程</div>
+      <div class="row" style="margin-top:10px;flex-wrap:nowrap;gap:0" id="funnel"></div>
+    </div>
     <div class="board-split">
       <div class="tiles" id="tiles"></div>
       <div class="card" style="margin-top:10px">
@@ -883,21 +888,29 @@ async function loadTodo() {
     return;
   }
   const urgent = list.filter(r => r.urgent), normal = list.filter(r => !r.urgent);
-  const cardHtml = r => `
+  /* 客户问的什么＝主角。摘要里那句「客户群 X 有待跟进消息」在这里是冗余的
+     （群名已是 chip、紧急已是 badge），把它挤掉正文会让律师扫不到重点。 */
+  const cardHtml = r => {
+    const q = r.question || (r.summary || "").split("\n").find(l => l.startsWith("客户问题："))?.slice(5) || r.summary;
+    const ai = r.ai_reply || (r.summary || "").split("\n").find(l => l.startsWith("AI 已回复："))?.slice(6) || "";
+    const tip = (r.summary || "").split("\n").find(l => l.startsWith("建议回复要点："))?.slice(7) || "";
+    return `
     <div class="card ${r.urgent ? "urgent" : ""}" id="todo-${r.id}">
       <div class="row">
         ${r.urgent ? `<span class="badge bad"><span class="dot" style="background:var(--bad)"></span>紧急</span>` : ""}
         <span class="chip"><span class="tx">${esc(groupName(r.group_id))}</span></span>
+        ${r.escalated_at ? `<span class="badge warn">已提醒第二责任人</span>` : ""}
         ${timeEl(r.created_at)}
       </div>
-      <div class="body-l">${esc(r.summary)}</div>
-      <div class="row">
-        ${r.escalated_at
-          ? `<span class="badge warn">已提醒第二责任人</span>`
-          : `<span class="meta">状态：${zh(ZH.todo, r.status)}</span>`}
+      <div class="body-l">${esc(q)}</div>
+      ${ai ? `<div class="meta" style="border-left:2px solid var(--line);padding-left:10px;margin-top:6px">AI 已回复：${esc(ai)}</div>` : ""}
+      ${tip ? `<div class="meta" style="margin-top:6px">${esc(tip)}</div>` : ""}
+      <div class="row fb-row">
+        <button class="btn-text muted" onclick="openConversation('${esc(r.group_id)}')">${ico("message")}查看对话</button>
         <button class="btn-tonal" style="margin-left:auto" onclick="doneTodo(${r.id})">${ico("check")}标记已处理</button>
       </div>
     </div>`;
+  };
   el.innerHTML =
     `<div class="overview">共 ${list.length} 条待跟进${urgent.length ? `，其中 ${urgent.length} 条紧急` : ""}</div>` +
     (urgent.length ? `<div class="eyebrow">紧急 · ${urgent.length}</div>` + urgent.map(cardHtml).join("") : "") +
@@ -928,6 +941,29 @@ async function doneTodo(id) {
       loadTodo();
     });
   } catch (e) { toast("操作失败，请重试", false); lastSig.todo = null; loadTodo(); }
+}
+
+/* ============ 会话原文（复核依据） ============ */
+async function openConversation(gid) {
+  openSheet(`<h2>完整对话</h2><div class="sub">${esc(groupName(gid))}</div>
+    <div id="convoBody">${skeleton()}</div>`);
+  let list;
+  try { list = await api(`/conversation?group_id=${encodeURIComponent(gid)}`); }
+  catch (e) { document.getElementById("convoBody").innerHTML =
+    `<div class="meta">对话加载失败，请重试</div>`; return; }
+  const el = document.getElementById("convoBody");
+  if (!el) return;
+  if (!list.length) { el.innerHTML = `<div class="meta">暂无消息记录</div>`; return; }
+  el.innerHTML = list.map(m => {
+    const staff = m.sender_is_staff;
+    return `<div style="margin:12px 0;display:flex;flex-direction:column;align-items:${staff ? "flex-end" : "flex-start"}">
+      <div class="meta" style="margin-bottom:2px">${staff ? "我方" : "客户"} · ${ago(m.created_at)}</div>
+      <div style="max-width:88%;padding:8px 12px;border-radius:10px;font-size:15px;line-height:1.6;
+        white-space:pre-wrap;word-break:break-word;
+        background:${staff ? "var(--brand-tint)" : "var(--chip-bg)"};
+        color:${staff ? "var(--brand)" : "var(--ink-1)"}">${esc(m.content || "（非文字消息）")}</div>
+    </div>`;
+  }).join("");
 }
 
 /* ============ 线索 ============ */
@@ -985,9 +1021,12 @@ async function loadLeads() {
             ? `<a href="tel:${esc(l.contact)}" class="btn-tonal" style="text-decoration:none">${ico("phone")}${esc(l.contact)}</a>`
             : `<span class="meta">客户未留联系方式</span>`}
         </div>
-        ${l.opening_line ? `<div class="meta" style="margin-top:8px">开场参考：「${esc(l.opening_line)}」</div>` : ""}
-        ${l.suggested_action ? `<div class="meta" style="margin-top:4px">建议：${esc(l.suggested_action)}</div>` : ""}
+        ${l.opening_line ? `<div style="margin-top:10px;padding:8px 12px;border-radius:8px;
+          background:var(--brand-tint);color:var(--brand);font-size:14px;line-height:1.6">
+          开场参考：${esc(l.opening_line)}</div>` : ""}
+        ${l.suggested_action ? `<div class="meta" style="margin-top:6px">建议：${esc(l.suggested_action)}</div>` : ""}
         <div class="row fb-row">
+          <button class="btn-text muted" onclick="openConversation('${esc(l.group_id)}')">${ico("message")}查看对话</button>
           ${l.notified_at ? "" : `<button class="btn-text" onclick="notifyLead(${l.id})">${ico("refresh")}推送给律师</button>`}
           ${l.status === "new" ? `
             <button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'contacted')">${ico("check")}标记已联系</button>
@@ -1075,21 +1114,26 @@ async function loadLog() {
         const note = r.feedback && r.feedback.startsWith("needs_fix:") && r.feedback.slice(10)
           ? `<div class="fb-note">备注：${esc(r.feedback.slice(10))}</div>` : "";
         const isOpen = expanded.has("r" + r.id);
+        /* 客户原话在上、AI 回复在下：复核一句话是否得当，得先看见它在回什么 */
         return `
           <div class="card">
             <div class="row">
               ${r.mode === "live" ? `<span class="badge ok">已发出</span>`
                                   : `<span class="badge brand">草稿</span>`}
               <span class="chip">${zh(ZH.category, r.category)}</span>
-              ${r.compliance_passed ? "" : `<button class="badge warn" onclick="toggleNote(${r.id})">${ico("shield")}已替换为安全话术</button>`}
+              ${r.compliance_passed ? "" : `<button class="badge warn" onclick="toggleNote(${r.id})">${ico("shield")}已替换</button>`}
               <span class="chip"><span class="tx">${esc(groupName(r.group_id))}</span></span>
               ${timeEl(r.created_at)}
             </div>
             <div class="fb-note" id="cmp-${r.id}" hidden>该回复触碰合规红线，已自动替换为安全话术——这是系统在保护所里，不是故障。</div>
+            ${r.question ? `<div class="meta" style="margin-top:8px">客户：${esc(r.question)}</div>` : ""}
             <div class="quote ${isOpen ? "" : "clamp"}" id="q-${r.id}">${esc(r.text)}</div>
             <button class="btn-text muted" id="qx-${r.id}" style="display:none;min-height:40px"
                     onclick="toggleQuote(${r.id})">${isOpen ? "收起" : "展开"}</button>
-            <div class="row fb-row">${fb}</div>
+            <div class="row fb-row">
+              <button class="btn-text muted" onclick="openConversation('${esc(r.group_id)}')">${ico("message")}查看对话</button>
+              ${fb}
+            </div>
             ${note}
           </div>`;
       });
@@ -1238,11 +1282,15 @@ async function loadBoard() {
   catch (e) { if (String(e.message) !== "401") t.innerHTML = errCard("loadBoard"); return; }
   loadedOnce.board = true;
   document.getElementById("boardFoot").textContent =
-    "数据每分钟自动更新" + (lastSuccess ? ` · 最后更新 ${fmtHM(lastSuccess)}` : "");
+    "统计口径：系统上线以来累计 · 每分钟自动更新" +
+    (lastSuccess ? ` · 最后更新 ${fmtHM(lastSuccess)}` : "");
   const sig = JSON.stringify(m);
   if (lastSig.board === sig) return;
   lastSig.board = sig;
+  const st = m.leads_by_status || {};
   t.innerHTML = `
+    <div class="tile"><div class="n" style="color:var(--bad)">${m.leads_hot || 0}</div><div class="l">高意向线索</div></div>
+    <div class="tile"><div class="n">${m.leads_with_contact || 0}</div><div class="l">留下联系方式</div></div>
     <div class="tile"><div class="n">${m.decisions_total}</div><div class="l">消息判断总数</div></div>
     <div class="tile"><div class="n">${m.replies_total}</div><div class="l">AI 回复条数</div></div>
     <div class="tile"><div class="n" ${m.urgent_count > 0 ? 'style="color:var(--bad)"' : ""}>${m.urgent_count}</div><div class="l">紧急消息</div></div>
@@ -1250,7 +1298,27 @@ async function loadBoard() {
     <div class="tile"><div class="duo">
       <div><div class="n" style="color:var(--ok)">${m.feedback_good}</div><div class="l">有帮助</div></div>
       <div><div class="n" style="color:var(--warn)">${m.feedback_needs_fix}</div><div class="l">需修正</div></div>
-    </div><div class="l" style="margin-top:4px">收到的反馈</div></div>`;
+    </div><div class="l" style="margin-top:4px">话术反馈</div></div>`;
+  /* 线索漏斗：合伙人真正关心的是「进来多少 → 联系了多少 → 成交多少」 */
+  const funnel = [
+    ["线索总数", m.leads_total || 0, "var(--ink-1)"],
+    ["待跟进", st.new || 0, "var(--bad)"],
+    ["已联系", st.contacted || 0, "var(--warn)"],
+    ["已成交", st.converted || 0, "var(--ok)"],
+  ];
+  const fEl = document.getElementById("funnel");
+  if (fEl) {
+    const conv = m.leads_total ? Math.round((st.converted || 0) / m.leads_total * 100) : 0;
+    fEl.innerHTML = funnel.map(([label, n, c]) =>
+      `<div style="flex:1;text-align:center">
+         <div style="font-size:22px;font-weight:700;color:${c}">${n}</div>
+         <div class="l">${label}</div>
+       </div>`).join("") +
+      `<div style="flex:1;text-align:center">
+         <div style="font-size:22px;font-weight:700;color:var(--brand)">${conv}%</div>
+         <div class="l">成交率</div>
+       </div>`;
+  }
   const order = [["answer", "--s1"], ["handoff", "--s2"], ["silence", "--s3"]];
   const total = order.reduce((s, [k]) => s + (m.by_action[k] || 0), 0);
   document.getElementById("dist").innerHTML = total === 0

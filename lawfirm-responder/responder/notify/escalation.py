@@ -42,6 +42,8 @@ def build_reminder(
     return Reminder(
         msg_id=msg.msg_id,
         group_id=msg.group_id,
+        question=msg.content,
+        ai_reply=ai_reply or "",
         # 群档案未配律师企微号时回落到全局兜底接收人——话术已经向客户承诺
         # 「已通知律师」，提醒必须真的送得出去。
         to_userid=group.lawyer_userid or settings.default_notify_userid,

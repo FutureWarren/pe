@@ -293,14 +293,24 @@ def kf_contact_link(request: Request, open_kfid: str, scene: str = ""):
     return {"url": data.get("url", "")}
 
 
+@router.get("/conversation")
+def conversation(group_id: str, limit: int = 60, store: Store = Depends(get_store)):
+    """会话原文——人工复核的依据。没有它，律师无法判断 AI 那句话回得对不对。"""
+    return store.recent_messages(group_id, limit)
+
+
 @router.get("/metrics")
 def metrics(store: Store = Depends(get_store)):
-    """看板雏形：三分类分布、承接量、合规拦截数。首响时长依赖上线后真实时间戳。"""
+    """看板：三分类分布、承接量、合规拦截，以及线索转化漏斗（业务侧最关心）。"""
     decisions = store.list_decisions(limit=10000)
     replies = store.list_replies(limit=10000)
+    leads = store.list_leads(limit=10000)
     by_action: dict[str, int] = {}
     for d in decisions:
         by_action[d["action"]] = by_action.get(d["action"], 0) + 1
+    by_status: dict[str, int] = {}
+    for lead_row in leads:
+        by_status[lead_row["status"]] = by_status.get(lead_row["status"], 0) + 1
     return {
         "decisions_total": len(decisions),
         "by_action": by_action,
@@ -309,4 +319,8 @@ def metrics(store: Store = Depends(get_store)):
         "compliance_blocked": sum(1 for r in replies if not r["compliance_passed"]),
         "feedback_good": sum(1 for r in replies if r["feedback"] == "good"),
         "feedback_needs_fix": sum(1 for r in replies if r["feedback"].startswith("needs_fix")),
+        "leads_total": len(leads),
+        "leads_with_contact": sum(1 for x in leads if x["contact"]),
+        "leads_by_status": by_status,
+        "leads_hot": sum(1 for x in leads if x["intent"] == "hot"),
     }
