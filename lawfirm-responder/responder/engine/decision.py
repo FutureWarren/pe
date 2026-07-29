@@ -32,6 +32,11 @@ def wait_seconds(
     return settings.wait_seconds_night if _is_night(now, settings) else settings.wait_seconds_day
 
 
+def _no_wait(msg: IncomingMessage, group: GroupProfile) -> bool:
+    """客服会话、或群里被 @ 点名——客户是直接冲着助手来的，等待没有意义。"""
+    return group.is_kf or msg.mentioned_bot
+
+
 def decide(
     msg: IncomingMessage,
     group: GroupProfile,
@@ -58,10 +63,16 @@ def decide(
     # 一对一客服：意图不明的开场（「你好」「我想咨询一下」）在群里该沉默，
     # 在客服窗口沉默 = 把客户晾着。转为引导型开场白，同时服务于首轮筛查。
     # 「谢谢/好的」这类收尾应答（chitchat-fastpath）仍保持沉默，不刷屏。
+    # 「@助手 在吗」——被叫的人就是助手本人，回「我帮您叫律师」很荒谬，直接应答
+    if msg.mentioned_bot and rules.is_presence_check(msg.content):
+        action, category = Action.ANSWER, Category.GREETING
+        reasons = reasons + ["bot:presence-answer"]
+
+    # 被 @ 点名同样不能沉默：客户明确在叫助手，不吭声比答错更伤
     if (
         action == Action.SILENCE
         and "default-silence" in reasons
-        and group.is_kf
+        and (group.is_kf or msg.mentioned_bot)
         and msg.msg_type == "text"
         and msg.content.strip()
     ):
@@ -103,7 +114,7 @@ def decide(
         decision.reasons.append("gate:urgent-bypass-wait")
         return decision
 
-    required = wait_seconds(now, settings, group)
+    required = 0 if _no_wait(msg, group) else wait_seconds(now, settings, group)
     if seconds_unanswered < required:
         decision.reasons.append(f"gate:waiting({int(seconds_unanswered)}s/{required}s)")
         return decision

@@ -81,8 +81,12 @@ CASE_PATTERNS = [
 ]
 
 # ---------------------------------------------------------------- 找人 / 催回复
+# 「在吗」这类纯探问：群里问的是「有没有人在」，被 @ 的助手本人就在，
+# 此时不该回「我帮您叫律师」，而应直接应答（见 engine/decision.py）
+PRESENCE_PATTERN = r"^(在吗|在么|在不在|有人吗|有人在吗)[?？!！。~～]*$"
+
 CONTACT_PATTERNS = [
-    r"^(在吗|在么|在不在|有人吗|有人在吗)[?？!！。~～]*$",
+    PRESENCE_PATTERN,
     r"(律师|王律|李律|张律|刘律|陈律|.{1,3}律师)(在吗|在么|在不在|方便吗|有空吗|忙吗)",
     r"(怎么|咋)(还)?(没|不)(人)?(回|回复|理|说话)",
     r"(有人|谁)(能|可以)?(回|回复|理|看)一?下(吗|么|嘛)?",
@@ -120,6 +124,12 @@ _ANGRY = [re.compile(p) for p in ANGRY_PATTERNS]
 _FEE = [re.compile(p) for p in FEE_PATTERNS]
 _CASE = [re.compile(p) for p in CASE_PATTERNS]
 _CONTACT = [re.compile(p) for p in CONTACT_PATTERNS]
+_PRESENCE = re.compile(PRESENCE_PATTERN)
+
+
+def is_presence_check(text: str) -> bool:
+    """纯「在吗」式探问（未点名任何律师）。"""
+    return bool(_PRESENCE.match((text or "").strip()))
 _GENERAL_TOPIC = re.compile(GENERAL_TOPIC)
 _QUESTION = re.compile(QUESTION_HINT)
 

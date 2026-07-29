@@ -266,6 +266,10 @@ def diagnostics(request: Request):
             "error": llm_err,
         },
         "kf": kf,
+        "bot": {
+            "configured": bool(s.wecom_bot_token and s.wecom_bot_aes_key),
+            "enabled": s.bot_enabled,
+        },
         "notify": {
             "ok": not orphan,
             "groups_without_target": orphan[:10],

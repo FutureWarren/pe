@@ -18,7 +18,7 @@
 | | 读（收消息） | 写（发消息） | 前提条件 | 系统对接点 |
 |---|---|---|---|---|
 | **D. 微信客服** ⭐ | ✅ 客户每条消息自动推送，无需 @ | ✅ `kf/send_msg` | 免费；后台开通微信客服 + 客服 Secret | 读:`/wecom/callback` 的 `kf_msg_or_event` → `kf/sync_msg`；写:`gateway/wecom_kf.py` |
-| **A. 群机器人** | 群内 **@机器人** 的消息 | ✅ webhook 直发，无需 token | 机器人可加入试点群 | 读:`/wecom/callback`；写:`robot_webhook` |
+| **A. 群聊助手（@ 触发）** | 群内 **@智能机器人** 的消息 | ✅ 群机器人 webhook 直发 | 免费；后台创建智能机器人并拉入群 | 读:`/wecom/bot/callback`（独立 Token/AESKey）；写:`robot_webhook` |
 | **B. 会话存档** | ✅ 全量客户群消息（官方 SDK 拉取） | ❌ 本身不能发 | 服务版 900 元/人/年、5 人起购；群内告知存档 | 拉取器 → `POST /ingest` |
 | **C. 影子模式 + 人工** | 同上任一 | 人（销售）复制粘贴 AI 草稿 | 无 | 控制台 `/console/replies` |
 
@@ -32,12 +32,35 @@
 2. 该页 **API** 处：填回调 URL（同 `/wecom/callback`，Token/AESKey 复用），复制**客服 Secret**
 3. Secret 写入 `.env` 的 `RESPONDER_WECOM_KF_SECRET`（或部署命令带 `WECOM_KF_SECRET=xxx`）
 
+客户入口：后台「微信客服 → 连接场景」可生成**链接与二维码**（官网/名片/朋友圈/公众号等），
+客户扫码或点链接即进入咨询窗口，**无需添加好友**。
+
 运行时行为：
 - 回调只带 10 分钟有效的 `Token` → 系统据此调 `kf/sync_msg` 拉真实消息，`next_cursor` 持久化
   在 `kf_cursors` 表（重启不重复处理）
 - 每个「客服账号 × 客户」自动建一份会话档案（默认**新咨询/prospect**，承办律师取
   `RESPONDER_KF_DEFAULT_LAWYER_NAME`），在控制台「群管理」里可直接编辑与开关 AI
 - `origin=5`（真人接待发言）自动记为 staff → 触发人工接管静默；`origin=4`（系统推送）忽略
+
+## 通道 A：群聊助手（@ 触发，已实现）
+
+**适用场景**：已成交客户的服务群——客户与律师同在群里，助手只在被点名时出手，
+不抢律师的话。客户零操作，员工只需建群时把机器人拉进来。
+
+配置：
+1. 企微后台 → 应用管理 → **智能机器人** → 创建（名称即对外身份，如「松沪助理」）
+2. 在机器人的「接收消息」处填：URL `https://你的域名/wecom/bot/callback`，
+   并记下它**独立的 Token / EncodingAESKey**（与应用的那套不同）
+3. 写入 `.env` 的 `RESPONDER_WECOM_BOT_TOKEN` / `RESPONDER_WECOM_BOT_AES_KEY`
+   （或部署命令带 `WECOM_BOT_TOKEN=xxx WECOM_BOT_AES_KEY=xxx`）
+4. 把机器人加入试点群；同群再加一个**群机器人**并把 webhook 填进群档案（发言通道）
+
+运行时行为：
+- 正文先剥离开头的 `@昵称`（`gateway/mention.py`），否则「@点名→沉默」规则会误伤，
+  且 @ 名字会污染模型上下文；句中出现的 @某某 属于对话内容，保留
+- **被 @ = 客户直接叫助手 → 零等待**（群里未被 @ 的消息仍走原有补位等待，人工优先）
+- 「@助手 在吗」不回「我帮您叫律师」——被叫的就是助手本人，直接应答
+- 留联系方式同样进线索闭环，与客服通道共用一套简报与看板
 
 ## 推荐路线（按周推进）
 

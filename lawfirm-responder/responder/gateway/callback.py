@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from responder.config import get_settings
+from responder.gateway import mention
 from responder.gateway.wecom_crypto import WeComCrypto
 from responder.models import IncomingMessage
 from responder.service import Pipeline
@@ -95,6 +96,78 @@ async def receive(
         else:
             worker.process_kf(job) if worker else None
     # 回复走主动发送通道，回调只回 success
+    return Response(content="success", media_type="text/plain")
+
+
+def get_bot_crypto() -> WeComCrypto:
+    """智能机器人有独立的 Token / EncodingAESKey（后台创建机器人时生成）。"""
+    s = get_settings()
+    return WeComCrypto(s.wecom_bot_token, s.wecom_bot_aes_key, s.wecom_corp_id)
+
+
+@router.get("/wecom/bot/callback")
+def verify_bot_url(
+    msg_signature: str = Query(...),
+    timestamp: str = Query(...),
+    nonce: str = Query(...),
+    echostr: str = Query(...),
+    crypto: WeComCrypto = Depends(get_bot_crypto),
+):
+    if not crypto.verify(msg_signature, timestamp, nonce, echostr):
+        return Response(status_code=403)
+    return Response(content=crypto.decrypt(echostr), media_type="text/plain")
+
+
+@router.post("/wecom/bot/callback")
+async def receive_bot(
+    request: Request,
+    msg_signature: str = Query(...),
+    timestamp: str = Query(...),
+    nonce: str = Query(...),
+    crypto: WeComCrypto = Depends(get_bot_crypto),
+    pipeline: Pipeline = Depends(get_pipeline),
+):
+    """群聊 @ 智能机器人 / 与机器人单聊的消息回调。
+
+    与应用回调是两套凭据、两条路由，但共用同一条判断与话术管道。
+    """
+    body = await request.body()
+    try:
+        encrypt = ET.fromstring(body).findtext("Encrypt", "")
+    except ET.ParseError:
+        return Response(status_code=400)
+    if not crypto.verify(msg_signature, timestamp, nonce, encrypt):
+        return Response(status_code=403)
+    try:
+        xml = ET.fromstring(crypto.decrypt(encrypt))
+    except (ET.ParseError, ValueError):
+        logger.warning("undecodable bot callback, ts=%s nonce=%s", timestamp, nonce)
+        return Response(content="success", media_type="text/plain")
+
+    if xml.findtext("MsgType") == "text" and pipeline.settings.bot_enabled:
+        raw = xml.findtext("Content") or ""
+        content, mentioned = mention.strip_mentions(raw)
+        # 群里未被 @ 的消息机器人本来也收不到；单聊则视为直接对话
+        chat_id = xml.findtext("ChatId") or ""
+        sender = (
+            xml.findtext("From/UserId")
+            or xml.findtext("FromUserName")
+            or xml.findtext("From/ExternalUserId")
+            or ""
+        )
+        msg = IncomingMessage(
+            msg_id=xml.findtext("MsgId") or f"bot-{timestamp}-{nonce}",
+            group_id=chat_id or f"bot:{sender}",
+            sender_id=sender,
+            content=content,
+            msg_type="text",
+            mentioned_bot=mentioned or not chat_id,
+        )
+        worker = getattr(request.app.state, "worker", None)
+        if worker is not None and pipeline.settings.callback_async:
+            worker.submit(msg)
+        else:
+            pipeline.handle(msg)
     return Response(content="success", media_type="text/plain")
 
 

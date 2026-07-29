@@ -63,6 +63,8 @@ class IncomingMessage(BaseModel):
     sender_is_staff: bool = False  # 律师/客服发言 → 触发接管
     content: str = ""
     msg_type: str = "text"
+    # 群里被 @ 点名：客户是冲着助手来的，不应再走「给律师留时间」的补位等待
+    mentioned_bot: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
 
 

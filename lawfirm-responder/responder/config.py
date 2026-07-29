@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # 该通道客户消息全量推送、无需 @ 触发，是新咨询首响的主通道。
     wecom_kf_secret: str = ""
     kf_enabled: bool = True
+
+    # 智能机器人（群聊 @ 触发）：独立的 Token / EncodingAESKey，在后台创建机器人时获得。
+    # 收：机器人回调；发：沿用该群的群机器人 webhook（已验证通道）。
+    wecom_bot_token: str = ""
+    wecom_bot_aes_key: str = ""
+    bot_enabled: bool = True
     # 客服会话首次出现时自动建档，用于话术点名；留空则话术说「承办律师」
     kf_default_lawyer_name: str = ""
     kf_default_case_type: str = ""
