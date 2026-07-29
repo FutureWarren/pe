@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS groups (
     backup_userid TEXT DEFAULT '',
     ai_enabled INTEGER DEFAULT 1,
     robot_webhook TEXT DEFAULT '',
+    bot_webhook TEXT DEFAULT '',
+    bot_webhook_at TEXT,
     kf_open_kfid TEXT DEFAULT '',
     kf_external_userid TEXT DEFAULT ''
 );
@@ -103,6 +105,10 @@ CREATE TABLE IF NOT EXISTS kf_cursors (
 _ADDED_COLUMNS = {
     "groups": {
         "robot_webhook": "TEXT DEFAULT ''",
+        # 智能机器人回调下发的会话 webhook（短期有效）；NULL 而非 ''，
+        # 因为 bot_webhook_at 要按 datetime | None 回填模型
+        "bot_webhook": "TEXT DEFAULT ''",
+        "bot_webhook_at": "TEXT",
         "kf_open_kfid": "TEXT DEFAULT ''",
         "kf_external_userid": "TEXT DEFAULT ''",
     },
@@ -147,20 +153,24 @@ class Store:
             conn.execute(
                 """INSERT INTO groups (group_id,name,client_status,case_type,case_stage,
                    lawyer_name,lawyer_userid,backup_userid,ai_enabled,robot_webhook,
-                   kf_open_kfid,kf_external_userid)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                   bot_webhook,bot_webhook_at,kf_open_kfid,kf_external_userid)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(group_id) DO UPDATE SET
                    name=excluded.name, client_status=excluded.client_status,
                    case_type=excluded.case_type, case_stage=excluded.case_stage,
                    lawyer_name=excluded.lawyer_name, lawyer_userid=excluded.lawyer_userid,
                    backup_userid=excluded.backup_userid, ai_enabled=excluded.ai_enabled,
                    robot_webhook=excluded.robot_webhook,
+                   bot_webhook=excluded.bot_webhook,
+                   bot_webhook_at=excluded.bot_webhook_at,
                    kf_open_kfid=excluded.kf_open_kfid,
                    kf_external_userid=excluded.kf_external_userid""",
                 (
                     g.group_id, g.name, g.client_status.value, g.case_type, g.case_stage,
                     g.lawyer_name, g.lawyer_userid, g.backup_userid, int(g.ai_enabled),
-                    g.robot_webhook, g.kf_open_kfid, g.kf_external_userid,
+                    g.robot_webhook, g.bot_webhook,
+                    g.bot_webhook_at.isoformat() if g.bot_webhook_at else None,
+                    g.kf_open_kfid, g.kf_external_userid,
                 ),
             )
 

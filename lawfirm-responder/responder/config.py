@@ -30,10 +30,16 @@ class Settings(BaseSettings):
     kf_enabled: bool = True
 
     # 智能机器人（群聊 @ 触发）：独立的 Token / EncodingAESKey，在后台创建机器人时获得。
-    # 收：机器人回调；发：沿用该群的群机器人 webhook（已验证通道）。
+    # 收：机器人回调；发：优先用回调随消息下发的会话 webhook（员工零配置），
+    # 过期则回落该群人工配置的群机器人 webhook。
     wecom_bot_token: str = ""
     wecom_bot_aes_key: str = ""
     bot_enabled: bool = True
+    # 会话 webhook 的可用窗口。企微侧为分钟级，这里取保守值：宁可回落到人工通道，
+    # 也不要拿一个已过期的地址去发（发失败客户就等于没收到回复）。
+    bot_webhook_ttl_seconds: int = 240
+    # 群聊会话首次出现时自动建档，接收线索简报的默认对象（群里查不到「接待人」）
+    bot_default_notify_userid: str = ""
     # 客服会话首次出现时自动建档，用于话术点名；留空则话术说「承办律师」
     kf_default_lawyer_name: str = ""
     kf_default_case_type: str = ""

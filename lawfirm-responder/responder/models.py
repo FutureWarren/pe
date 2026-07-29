@@ -44,7 +44,11 @@ class GroupProfile(BaseModel):
     lawyer_userid: str = ""  # 企微 userid，提醒推送用
     backup_userid: str = ""  # 第二责任人，升级提醒用
     ai_enabled: bool = True  # 控制台可按群开关 AI
-    robot_webhook: str = ""  # 群机器人 webhook（key 或完整 URL），有则优先用机器人发言
+    robot_webhook: str = ""  # 群机器人 webhook（key 或完整 URL），人工配置，长期有效
+    # 智能机器人回调随每条消息下发的会话专用发送地址：有效期短（分钟级），每次回调刷新。
+    # 有它就不必让员工手工配 robot_webhook——群聊通道「员工零配置」靠这一对字段。
+    bot_webhook: str = ""
+    bot_webhook_at: datetime | None = None
     # 微信客服会话（一对一）：两者齐备时回复走客服通道，优先于机器人/群聊
     kf_open_kfid: str = ""  # 客服账号 ID
     kf_external_userid: str = ""  # 客户的外部联系人 ID

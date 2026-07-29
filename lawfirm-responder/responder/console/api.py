@@ -161,6 +161,12 @@ def groups(store: Store = Depends(get_store)):
 def upsert_group(group_id: str, profile: GroupProfile, store: Store = Depends(get_store)):
     if profile.group_id != group_id:
         raise HTTPException(400, "group_id 不一致")
+    # bot_webhook 由机器人回调自动写入、不在编辑表单里，整档覆盖时要保留，
+    # 否则改一次「承办律师」就把群聊通道的发送地址抹掉了
+    existing = store.get_group(group_id)
+    if existing is not None and not profile.bot_webhook:
+        profile.bot_webhook = existing.bot_webhook
+        profile.bot_webhook_at = existing.bot_webhook_at
     store.upsert_group(profile)
     return {"ok": True}
 
@@ -222,6 +228,32 @@ def update_log(request: Request, lines: int = 40):
     }
 
 
+def _bot_diag(s, store: Store) -> dict:
+    """群聊助手自检：光有凭据不算通——还得真有群把消息推进来。
+
+    `chats` 为 0 说明机器人还没被拉进任何群（或回调没到）；`sendable` 为 0 说明
+    有群但拿不到发送地址，AI 只会出草稿不会发言，是必须暴露的静默失败。
+    """
+    groups = [g for g in store.list_groups() if not g.get("kf_open_kfid")]
+    sendable = [g for g in groups if g.get("bot_webhook") or g.get("robot_webhook")]
+    return {
+        "configured": bool(s.wecom_bot_token and s.wecom_bot_aes_key),
+        "enabled": s.bot_enabled,
+        "chats": len(groups),
+        "sendable": len(sendable),
+        "hint": (
+            "未配置智能机器人凭据（后台创建机器人后回填 Token/EncodingAESKey）"
+            if not (s.wecom_bot_token and s.wecom_bot_aes_key)
+            else "机器人还没收到过任何群消息（确认已拉入群且群内 @ 过它）"
+            if not groups
+            else "群里拿不到发送地址，AI 只会出草稿：等下一条 @ 消息刷新，"
+            "或在群档案里手工填 robot_webhook"
+            if not sendable
+            else ""
+        ),
+    }
+
+
 @router.get("/diagnostics")
 def diagnostics(request: Request):
     """远程自检：模型连通性、微信客服通道与客服账号列表。
@@ -266,10 +298,7 @@ def diagnostics(request: Request):
             "error": llm_err,
         },
         "kf": kf,
-        "bot": {
-            "configured": bool(s.wecom_bot_token and s.wecom_bot_aes_key),
-            "enabled": s.bot_enabled,
-        },
+        "bot": _bot_diag(s, store),
         "notify": {
             "ok": not orphan,
             "groups_without_target": orphan[:10],

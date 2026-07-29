@@ -92,6 +92,7 @@ RESPONDER_ADMIN_TOKEN=$ADMIN_TOKEN
 RESPONDER_WECOM_KF_SECRET=${WECOM_KF_SECRET:-}
 RESPONDER_WECOM_BOT_TOKEN=${WECOM_BOT_TOKEN:-}
 RESPONDER_WECOM_BOT_AES_KEY=${WECOM_BOT_AES_KEY:-}
+RESPONDER_BOT_DEFAULT_NOTIFY_USERID=${BOT_DEFAULT_NOTIFY_USERID:-}
 RESPONDER_API_HOST=0.0.0.0
 RESPONDER_API_PORT=80
 RESPONDER_DB_PATH=/opt/pe/lawfirm-responder/responder.db
@@ -106,7 +107,9 @@ else
   _ensure_env RESPONDER_WECOM_KF_SECRET "${WECOM_KF_SECRET:-}"
   _ensure_env RESPONDER_WECOM_BOT_TOKEN "${WECOM_BOT_TOKEN:-}"
   _ensure_env RESPONDER_WECOM_BOT_AES_KEY "${WECOM_BOT_AES_KEY:-}"
-  for k in WECOM_BOT_TOKEN WECOM_BOT_AES_KEY; do
+  # 群聊没有「接待人」可查，线索简报的默认接收人只能显式指定，否则简报无人可推
+  _ensure_env RESPONDER_BOT_DEFAULT_NOTIFY_USERID "${BOT_DEFAULT_NOTIFY_USERID:-}"
+  for k in WECOM_BOT_TOKEN WECOM_BOT_AES_KEY BOT_DEFAULT_NOTIFY_USERID; do
     v="$(eval echo "\${$k:-}")"
     [ -n "$v" ] && sed -i "s|^RESPONDER_$k=.*|RESPONDER_$k=$v|" "$ENVFILE"
   done
@@ -195,6 +198,15 @@ if [ -n "$KF" ]; then
 else
   echo "   微信客服通道：未配置（可选）。后台 → 客户与上下游 → 微信客服 → API"
   echo "   拿到 Secret 后重跑本命令并加上 WECOM_KF_SECRET=xxx 即可开启"
+fi
+BOTT=$(grep -oP '^RESPONDER_WECOM_BOT_TOKEN=\K.*' "$ENVFILE" || true)
+if [ -n "$BOTT" ]; then
+  echo "   群聊助手通道：已配置 ✅（群内 @ 机器人触发，新群自动建档）"
+else
+  echo "   群聊助手通道：未配置（可选）。后台 → 应用管理 → 智能机器人 → 创建"
+  echo "   接收消息 URL 填 https://<域名>/wecom/bot/callback，拿到它自己的"
+  echo "   Token / EncodingAESKey 后重跑本命令并加上："
+  echo "   WECOM_BOT_TOKEN=xxx WECOM_BOT_AES_KEY=xxx BOT_DEFAULT_NOTIFY_USERID=<接收简报的企微userid>"
 fi
 echo
 echo "③ 控制台访问令牌（发给运维/Claude 用，勿泄露）："

@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from responder.config import get_settings
-from responder.gateway import mention
+from responder.gateway import bot
 from responder.gateway.wecom_crypto import WeComCrypto
 from responder.models import IncomingMessage
 from responder.service import Pipeline
@@ -144,30 +144,16 @@ async def receive_bot(
         logger.warning("undecodable bot callback, ts=%s nonce=%s", timestamp, nonce)
         return Response(content="success", media_type="text/plain")
 
-    if xml.findtext("MsgType") == "text" and pipeline.settings.bot_enabled:
-        raw = xml.findtext("Content") or ""
-        content, mentioned = mention.strip_mentions(raw)
-        # 群里未被 @ 的消息机器人本来也收不到；单聊则视为直接对话
-        chat_id = xml.findtext("ChatId") or ""
-        sender = (
-            xml.findtext("From/UserId")
-            or xml.findtext("FromUserName")
-            or xml.findtext("From/ExternalUserId")
-            or ""
-        )
-        msg = IncomingMessage(
-            msg_id=xml.findtext("MsgId") or f"bot-{timestamp}-{nonce}",
-            group_id=chat_id or f"bot:{sender}",
-            sender_id=sender,
-            content=content,
-            msg_type="text",
-            mentioned_bot=mentioned or not chat_id,
-        )
-        worker = getattr(request.app.state, "worker", None)
-        if worker is not None and pipeline.settings.callback_async:
-            worker.submit(msg)
-        else:
-            pipeline.handle(msg)
+    if pipeline.settings.bot_enabled:
+        env = bot.parse(xml, fallback_msg_id=f"bot-{timestamp}-{nonce}")
+        if env is not None:
+            worker = getattr(request.app.state, "worker", None)
+            if worker is not None and pipeline.settings.callback_async:
+                worker.submit(env)
+            elif worker is not None:
+                worker.process_bot(env)
+            elif env.msg is not None:
+                pipeline.handle(env.msg)
     return Response(content="success", media_type="text/plain")
 
 

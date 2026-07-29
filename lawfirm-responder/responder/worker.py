@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from responder import lead
-from responder.gateway import wecom_kf
+from responder.gateway import bot, wecom_kf
 from responder.models import ClientStatus, GroupProfile, IncomingMessage
 from responder.notify import escalation
 
@@ -83,6 +83,8 @@ class Worker:
     def _dispatch(self, item) -> None:
         if isinstance(item, KfSyncJob):
             self.process_kf(item)
+        elif isinstance(item, bot.BotEnvelope):
+            self.process_bot(item)
         else:
             self._process_new(item)
 
@@ -155,6 +157,59 @@ class Worker:
             self.pipeline.handle(msg)
         except Exception:
             logger.exception("message processing failed: %s", msg.msg_id)
+
+    # ------------------------------------------------------------ 群聊助手
+    def process_bot(self, env: bot.BotEnvelope) -> None:
+        """智能机器人回调：刷新会话档案（含发送地址）后进判断管道。
+
+        每条回调都先落档案：一是让新群立刻出现在控制台「群管理」里，人工能马上
+        补承办律师；二是刷新回调下发的会话 webhook——那是这条通道的发送地址。
+        """
+        try:
+            self._ensure_bot_profile(env)
+        except Exception:
+            logger.exception("bot profile upsert failed: %s", env.group_id)
+        if env.msg is None:
+            return  # 入群等事件：建档即可
+        self._process_new(env.msg)
+
+    def _ensure_bot_profile(self, env: bot.BotEnvelope) -> None:
+        s = self.pipeline.settings
+        group_id = env.group_id
+        if not group_id:
+            return
+        existing = self.store.get_group(group_id)
+        if existing is not None:
+            if env.webhook_url:
+                existing.bot_webhook = env.webhook_url
+                existing.bot_webhook_at = datetime.now()
+            # 建档时后台还没配兜底接收人的旧档案：补齐，否则简报无人可推
+            if not existing.lawyer_userid:
+                existing.lawyer_userid = self._bot_notify_userid()
+            self.store.upsert_group(existing)
+            return
+        self.store.upsert_group(
+            GroupProfile(
+                group_id=group_id,
+                name=(
+                    f"助手单聊 · {env.sender_name or env.sender_id}"
+                    if env.is_single
+                    else f"客户群 · {group_id[-6:]}"
+                ),
+                # 群聊助手同样先按「新咨询」处理；成交客户的服务群由人工在控制台改状态
+                client_status=ClientStatus.PROSPECT,
+                case_type=s.kf_default_case_type,
+                lawyer_name=s.kf_default_lawyer_name,
+                lawyer_userid=self._bot_notify_userid(),
+                ai_enabled=s.bot_enabled,
+                bot_webhook=env.webhook_url,
+                bot_webhook_at=datetime.now() if env.webhook_url else None,
+            )
+        )
+
+    def _bot_notify_userid(self) -> str:
+        s = self.pipeline.settings
+        return s.bot_default_notify_userid or s.default_notify_userid
 
     # ------------------------------------------------------------ 微信客服
     def process_kf(self, job: KfSyncJob) -> None:

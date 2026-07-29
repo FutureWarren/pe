@@ -211,11 +211,27 @@ class Pipeline:
     def _can_send(self, group: GroupProfile) -> bool:
         return bool(self.kf_client) if self._is_kf(group) else bool(self.sender)
 
+    def _reply_webhook(self, group: GroupProfile) -> str:
+        """群聊回复地址。
+
+        优先用智能机器人回调随消息下发的会话 webhook——回复由被 @ 的机器人本人发出，
+        身份一致，且员工不必手工配置。但它只在分钟级窗口内有效，过期（例如补位等待
+        到点才发言、或线索简报隔了很久才补发）就回落到人工配置的群机器人 webhook。
+        """
+        fresh = (
+            group.bot_webhook
+            and group.bot_webhook_at
+            and (datetime.now() - group.bot_webhook_at).total_seconds()
+            < self.settings.bot_webhook_ttl_seconds
+        )
+        return group.bot_webhook if fresh else group.robot_webhook
+
     def _send_group(self, group: GroupProfile, group_id: str, text: str) -> None:
         """分条发送：多句内容拆成多条消息，条间隔模拟打字（见 docs/voice-guide.md）。
 
-        通道优先级：微信客服会话 → 群机器人 webhook → 应用群聊。
+        通道优先级：微信客服会话 → 机器人 webhook（回调下发的 > 人工配置的）→ 应用群聊。
         """
+        webhook = self._reply_webhook(group)
         chunks = (
             sanitize.split_messages(text, self.settings.split_max_parts)
             if self.settings.split_messages
@@ -228,8 +244,8 @@ class Pipeline:
                 self.kf_client.send_text(
                     group.kf_open_kfid, group.kf_external_userid, chunk
                 )
-            elif group.robot_webhook:
-                self.sender.send_robot_text(group.robot_webhook, chunk)
+            elif webhook:
+                self.sender.send_robot_text(webhook, chunk)
             else:
                 self.sender.send_group_text(group_id, chunk)
 

@@ -1367,7 +1367,8 @@ async function loadGroups() {
     <div class="card">
       <div class="row" style="flex-wrap:nowrap">
         <b style="font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(g.name || g.group_id)}</b>
-        ${g.kf_open_kfid ? `<span class="chip" style="flex:none">微信客服</span>` : ""}
+        ${g.kf_open_kfid ? `<span class="chip" style="flex:none">微信客服</span>`
+          : g.bot_webhook ? `<span class="chip" style="flex:none">群聊助手</span>` : ""}
         <span class="badge ${g.client_status === "signed" ? "ok" : "brand"}" style="flex:none">${zh(ZH.status, g.client_status)}</span>
         <label class="switch" style="margin-left:auto">
           <input type="checkbox" ${g.ai_enabled ? "checked" : ""} aria-label="AI 开关"
@@ -1379,9 +1380,11 @@ async function loadGroups() {
       <div class="row" style="margin-top:10px">
         ${g.kf_open_kfid
           ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("message")}微信客服会话 · 自动接入</span>`
-          : g.robot_webhook
-            ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
-            : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
+          : g.bot_webhook
+            ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}群内 @ 助手 · 自动接入</span>`
+            : g.robot_webhook
+              ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
+              : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
         <button class="btn-text muted" style="margin-left:auto" data-act="edit" data-gid="${esc(g.group_id)}">编辑${ico("chevron")}</button>
       </div>
     </div>`;
