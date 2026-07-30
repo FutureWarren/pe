@@ -16,6 +16,8 @@ dependencies = [
   "httpx>=0.27,<1.0",
   "pycryptodome>=3.20,<4.0",
   "anthropic>=0.40",
+  # 客资导入：平台导出多为 xlsx，让非技术同事少一步「另存为 CSV」
+  "openpyxl>=3.1,<4.0",
 ]
 
 [project.optional-dependencies]

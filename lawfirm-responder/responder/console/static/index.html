@@ -474,6 +474,11 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
       <button id="segLeadAll" onclick="setLeadView('')">全部</button>
     </div>
     <div id="leadList"></div>
+    <input type="file" id="kzFile" accept=".csv,.xlsx,.xlsm" hidden onchange="uploadKezi(this)">
+    <button class="btn-outline admin-only" style="width:100%"
+            onclick="document.getElementById('kzFile').click()">
+      <svg class="ico"><use href="#i-plus"/></svg>导入平台客资表
+    </button>
   </section>
 
   <section id="tab-log" hidden>
@@ -1141,6 +1146,36 @@ async function refreshLeadBadge() {
     b.hidden = n === 0;
     b.textContent = n > 99 ? "99+" : n;
   } catch (e) { /* 静默 */ }
+}
+
+/* ============ 客资导入 ============ */
+async function uploadKezi(input) {
+  const file = input.files && input.files[0];
+  input.value = "";                       // 允许连续上传同一个文件
+  if (!file) return;
+  toast("正在导入 " + file.name + "…");
+  try {
+    /* 原始字节直传（服务端不依赖 multipart）；默认不推送，导入后人工复核 */
+    const r = await api("/leads/import?filename=" + encodeURIComponent(file.name), {
+      method: "POST", body: file,
+    });
+    const bits = [`新增 ${r.imported} 条`];
+    if (r.updated) bits.push(`更新 ${r.updated} 条`);
+    if (r.no_contact) bits.push(`${r.no_contact} 条手机号不可用已跳过`);
+    toast(bits.join(" · "));
+    lastSig.leads = null;
+    loadLeads(); refreshLeadBadge();
+    if (r.no_contact) {
+      openSheet(`<h2>有 ${r.no_contact} 条没导进来</h2>
+        <p style="font-size:15px;margin:12px 0">这些行的手机号是打码的（如 138****5678）或为空，
+        打不通就没法跟进，所以没有放进队列。</p>
+        <p class="meta">请到抖音来客「线索经营 → 客资中心」里查看这几条的完整号码，
+        或确认导出时是否勾选了完整手机号。</p>`);
+    }
+  } catch (e) {
+    toast(String(e.message).startsWith("HTTP 400")
+      ? "文件格式不对：请确认表里有「手机号 / 电话」列" : "导入失败，请重试", false);
+  }
 }
 
 /* ============ 指派 / 改派 ============ */

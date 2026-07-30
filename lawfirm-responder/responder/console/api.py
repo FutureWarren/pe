@@ -195,6 +195,34 @@ def reassign_lead(
     return {"ok": True, "assigned_userid": law["userid"]}
 
 
+@router.post("/leads/import")
+async def import_leads(
+    request: Request, filename: str = "", notify: bool = False,
+    store: Store = Depends(get_store), _: Principal = Depends(require_admin),
+):
+    """导入平台客资表（抖音来客「客资中心」导出的 CSV/XLSX）。
+
+    文件以原始字节 POST 上传（避开 multipart 依赖），notify 默认 false——
+    一次导入几十条历史客资还挨个推律师是骚扰，复核后再按需单条推送。
+    """
+    from responder import importer
+
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "没有收到文件内容")
+    try:
+        table = importer.parse_table(data, filename)
+        result = importer.import_leads(
+            store, table,
+            settings=request.app.state.pipeline.settings,
+            sender=request.app.state.pipeline.sender,
+            notify=notify,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, **result}
+
+
 @router.post("/kf/sync-servicers")
 def sync_kf_servicers(
     request: Request, store: Store = Depends(get_store),
