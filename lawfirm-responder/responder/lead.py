@@ -183,11 +183,15 @@ def should_notify(previous: dict | None, intent: str) -> bool:
 def dispatch(
     store: Store, group: GroupProfile, history: list[dict], sender, *,
     settings: Settings | None = None, force: bool = False, urgent: bool = False,
+    summarize: bool | None = None,
 ) -> dict | None:
     """生成线索 →（按需）推送接待人。sender 为 None（影子模式）时只入库。
 
     先用零成本的规则判定「这次要不要通知」，只有要通知时才让模型归纳——
     一次咨询里客户可能说十句话，但律师只需要收到一条交接单。
+
+    summarize 显式传 False 可强制跳过模型归纳（批量导入用：几百条历史客资
+    逐条调模型要十几分钟，请求早超时了，而平台自带的描述本就比模型转述更如实）。
     """
     settings = settings or get_settings()
     if not history:
@@ -196,7 +200,8 @@ def dispatch(
     intent, _, _ = signals.scan(current_session(history, settings.lead_session_gap_seconds))
     notify = force or should_notify(previous, intent)
     lead = build_and_store(
-        store, group, history, settings=settings, summarize=notify,
+        store, group, history, settings=settings,
+        summarize=notify if summarize is None else summarize,
         previous=previous, urgent=urgent,
     )
     if lead is None:
