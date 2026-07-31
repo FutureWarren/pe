@@ -18,6 +18,8 @@ dependencies = [
   "anthropic>=0.40",
   # 客资导入：平台导出多为 xlsx，让非技术同事少一步「另存为 CSV」
   "openpyxl>=3.1,<4.0",
+  # 客户进线二维码：本地生成，链接不经过任何第三方生码服务
+  "segno>=1.6,<2.0",
 ]
 
 [project.optional-dependencies]

@@ -90,7 +90,8 @@ def test_recheck_suppressed_after_staff_reply(tmp_path):
 def test_reminder_not_duplicated_on_recheck(tmp_path):
     """首判已提醒律师，到点复评不再重复提醒同一条消息。"""
     store, sender, worker = make_env(tmp_path)
-    worker._process_new(_msg("你们收费标准是怎么样的？", "f1", age_seconds=600))
+    # 用不触发线索简报的通用问题：费用类现在由交接单统一承载，不进逐条提醒
+    worker._process_new(_msg("拖欠工资多久可以申请劳动仲裁？", "f1", age_seconds=600))
     assert len(store.pending_reminders()) == 1
     worker.tick()
     assert len(store.pending_reminders()) == 1

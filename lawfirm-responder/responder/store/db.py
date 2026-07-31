@@ -134,6 +134,8 @@ _ADDED_COLUMNS = {
         "score": "INTEGER DEFAULT 0",
         "factors": "TEXT DEFAULT '[]'",
         "sla_nudged": "INTEGER DEFAULT 0",
+        # 律师跟进备注：打完电话记两句，下次跟进不从零开始
+        "notes": "TEXT DEFAULT ''",
     },
 }
 
@@ -163,6 +165,18 @@ class Store:
             " score = CASE intent WHEN 'hot' THEN 40 WHEN 'warm' THEN 15 ELSE 0 END"
             " WHERE priority = '' OR priority IS NULL"
         )
+        # 索引必须建在补列之后：assigned_userid 等列由上面的 ALTER 引入，
+        # 放进建表 SCHEMA 会在新库上因「列不存在」直接炸掉
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS idx_messages_group_time"
+            " ON messages(group_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_decisions_group ON decisions(group_id)",
+            "CREATE INDEX IF NOT EXISTS idx_replies_group ON replies(group_id)",
+            "CREATE INDEX IF NOT EXISTS idx_leads_assigned"
+            " ON leads(assigned_userid, status)",
+            "CREATE INDEX IF NOT EXISTS idx_reminders_status ON reminders(status)",
+        ):
+            conn.execute(stmt)
 
     @contextmanager
     def _conn(self):
@@ -381,15 +395,11 @@ class Store:
             ).fetchone()
         return dict(row) if row else None
 
-    def list_leads(
-        self, status: str | None = None, limit: int = 200,
-        assigned_userid: str | None = None,
-    ) -> list[dict]:
-        """按优先级、评分、时间排序——律师先看最该打电话的那个。
-
-        assigned_userid 用于律师个人视角：只看派给自己的单。
-        """
-        q = "SELECT * FROM leads"
+    @staticmethod
+    def _lead_filters(
+        status: str | None, assigned_userid: str | None,
+        q: str | None, priority: str | None, source: str | None,
+    ) -> tuple[list[str], list]:
         where, args = [], []
         if status:
             where.append("status=?")
@@ -397,17 +407,70 @@ class Store:
         if assigned_userid is not None:
             where.append("assigned_userid=?")
             args.append(assigned_userid)
+        if priority:
+            where.append("priority=?")
+            args.append(priority)
+        if source == "dy":
+            where.append("group_id LIKE 'dy:%'")
+        elif source == "kf":
+            where.append("group_id LIKE 'kf:%'")
+        elif source == "group":  # 企微群/机器人会话：除上述两种前缀外的一切
+            where.append("group_id NOT LIKE 'dy:%' AND group_id NOT LIKE 'kf:%'")
+        if q:
+            # 搜索：电话直搜 contact；关键词搜摘要/案由/备注
+            like = f"%{q.strip()}%"
+            where.append("(contact LIKE ? OR summary LIKE ? OR case_type LIKE ? OR notes LIKE ?)")
+            args += [like, like, like, like]
+        return where, args
+
+    def list_leads(
+        self, status: str | None = None, limit: int = 200,
+        assigned_userid: str | None = None, *,
+        q: str | None = None, priority: str | None = None,
+        source: str | None = None, offset: int = 0,
+    ) -> list[dict]:
+        """按优先级、评分、时间排序——律师先看最该打电话的那个。
+
+        assigned_userid 用于律师个人视角；q/priority/source/offset 供控制台
+        在几百条线索规模下检索与分页（导入一次抖音客资就是 350+ 条）。
+        """
+        where, args = self._lead_filters(status, assigned_userid, q, priority, source)
+        sql = "SELECT * FROM leads"
         if where:
-            q += " WHERE " + " AND ".join(where)
+            sql += " WHERE " + " AND ".join(where)
         # 未评分的旧行按意向近似归位（hot≈P1、warm≈P2、cold 殿后），不至于沉底
-        q += (
+        sql += (
             " ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1"
             " WHEN 'P2' THEN 2 ELSE CASE intent WHEN 'hot' THEN 1"
             " WHEN 'warm' THEN 2 ELSE 3 END END,"
-            " score DESC, updated_at DESC LIMIT ?"
+            " score DESC, updated_at DESC LIMIT ? OFFSET ?"
         )
         with self._conn() as conn:
-            return [dict(r) for r in conn.execute(q, (*args, limit)).fetchall()]
+            return [dict(r) for r in conn.execute(sql, (*args, limit, offset)).fetchall()]
+
+    def count_leads(
+        self, status: str | None = None, assigned_userid: str | None = None, *,
+        q: str | None = None, priority: str | None = None, source: str | None = None,
+    ) -> int:
+        """与 list_leads 同一套过滤条件的总数——分页 UI 要能说「共 N 条」。"""
+        where, args = self._lead_filters(status, assigned_userid, q, priority, source)
+        sql = "SELECT COUNT(*) AS n FROM leads"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        with self._conn() as conn:
+            return conn.execute(sql, args).fetchone()["n"]
+
+    def set_lead_notes(self, lead_id: int, notes: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE leads SET notes=?, updated_at=? WHERE id=?",
+                (notes, datetime.now().isoformat(), lead_id),
+            )
+
+    def get_lead_by_id(self, lead_id: int) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM leads WHERE id=?", (lead_id,)).fetchone()
+        return dict(row) if row else None
 
     def assign_lead(self, group_id: str, userid: str) -> None:
         with self._conn() as conn:

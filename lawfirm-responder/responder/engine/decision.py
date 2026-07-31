@@ -68,6 +68,13 @@ def decide(
         action, category = Action.ANSWER, Category.GREETING
         reasons = reasons + ["bot:presence-answer"]
 
+    # 客服会话里的语音/图片/文件：沉默 = 把客户晾着（他不知道这里其实是要打字的）。
+    # 转承接：一句「收到，稍后回复」+ 提醒人工去客服后台看内容。
+    # 客户连发多张图不会刷屏——追问去重策略（second_touch/静默升级）按类别兜着。
+    if action == Action.SILENCE and group.is_kf and msg.msg_type != "text":
+        action, category = Action.HANDOFF, Category.OTHER
+        reasons = reasons + ["kf:non-text-handoff"]
+
     # 被 @ 点名同样不能沉默：客户明确在叫助手，不吭声比答错更伤
     if (
         action == Action.SILENCE

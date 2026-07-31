@@ -19,6 +19,17 @@ _HINTS = {
     Category.CONTACT: "建议回复要点：客户在催回复，请尽快在群内响应。",
 }
 
+_MSG_TYPE_ZH = {"voice": "语音", "image": "图片", "video": "视频", "file": "文件"}
+
+
+def _question_text(msg: IncomingMessage) -> str:
+    """提醒里的「客户问题」。语音/图片没有文字原文，要说清让人去哪看，
+    而不是留一个空字段让律师猜。"""
+    if msg.content:
+        return msg.content
+    zh = _MSG_TYPE_ZH.get(msg.msg_type, "非文字")
+    return f"（客户发来{zh}消息，请在企微·微信客服后台查看原文）"
+
 
 def build_reminder(
     msg: IncomingMessage,
@@ -33,7 +44,7 @@ def build_reminder(
     channel_hint = "客服会话中" if group.is_kf else "群内"
     lines = [
         f"{prefix}{where}「{group.name or group.group_id}」有待跟进消息",
-        f"客户问题：{msg.content}",
+        f"客户问题：{_question_text(msg)}",
     ]
     if ai_reply:
         lines.append(f"AI 已回复：{ai_reply}")
@@ -42,7 +53,7 @@ def build_reminder(
     return Reminder(
         msg_id=msg.msg_id,
         group_id=msg.group_id,
-        question=msg.content,
+        question=_question_text(msg),
         ai_reply=ai_reply or "",
         # 群档案未配律师企微号时回落到全局兜底接收人——话术已经向客户承诺
         # 「已通知律师」，提醒必须真的送得出去。

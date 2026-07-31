@@ -128,23 +128,78 @@ def reopen_todo(reminder_id: int, store: Store = Depends(get_store)):
 
 @router.get("/leads")
 def leads(
-    status: str | None = None, limit: int = 200, assigned: str | None = None,
+    status: str | None = None, limit: int = 60, assigned: str | None = None,
+    q: str | None = None, priority: str | None = None, source: str | None = None,
+    offset: int = 0,
     store: Store = Depends(get_store), p: Principal = Depends(get_principal),
 ):
-    """线索队列：按 P0/P1/P2 与评分排序（先打该打的电话）。律师只看派给自己的。"""
+    """线索队列：按 P0/P1/P2 与评分排序（先打该打的电话）。律师只看派给自己的。
+
+    带 total 供分页 UI 说「共 N 条」——导入一次抖音客资就是 350+ 条，
+    没有检索与分页的列表在这个量级上等于不可用。
+    """
     if not p.is_admin:
         assigned = p.userid
-    return store.list_leads(status, limit, assigned_userid=assigned)
+    kw = dict(q=q, priority=priority, source=source)
+    return {
+        "total": store.count_leads(status, assigned, **kw),
+        "items": store.list_leads(status, limit, assigned, offset=offset, **kw),
+    }
 
 
 def _get_lead_scoped(store: Store, p: Principal, lead_id: int) -> dict:
-    row = next((x for x in store.list_leads(limit=5000) if x["id"] == lead_id), None)
+    row = store.get_lead_by_id(lead_id)
     if row is None:
         raise HTTPException(404, "线索不存在")
     # 越权按不存在处理，不向律师泄露他人线索的存在性
     if not p.is_admin and row.get("assigned_userid") != p.userid:
         raise HTTPException(404, "线索不存在")
     return row
+
+
+class LeadNotes(BaseModel):
+    notes: str
+
+
+@router.post("/leads/{lead_id}/notes")
+def set_lead_notes(
+    lead_id: int, body: LeadNotes,
+    store: Store = Depends(get_store), p: Principal = Depends(get_principal),
+):
+    """跟进备注：打完电话记两句，下次跟进不从零开始。律师只能写自己的单。"""
+    _get_lead_scoped(store, p, lead_id)
+    store.set_lead_notes(lead_id, body.notes.strip()[:2000])
+    return {"ok": True}
+
+
+@router.post("/leads/assign-unrouted")
+def assign_unrouted(
+    request: Request,
+    store: Store = Depends(get_store), _: Principal = Depends(require_admin),
+):
+    """把所有未指派的在办线索按规则批量分派（专长匹配 + 负载均衡）。
+
+    典型场景：先导入了几百条客资、后建的律师名册——存量线索不会自动补派
+    （派单只在新消息触达时发生），这里一键补齐。只动 new/contacted，
+    已成交/无效不折腾；全程不推送企微消息，律师在工作台里看得到即可。
+    """
+    from responder import assignment
+
+    done, skipped = 0, 0
+    for status in ("new", "contacted"):
+        for row in store.list_leads(status=status, limit=5000, assigned_userid=""):
+            group = store.get_group(row["group_id"])
+            if group is None:
+                skipped += 1
+                continue
+            law = assignment.pick(store, row.get("case_type") or group.case_type)
+            if law is None:
+                # 名册为空/无人在班：直接结束，不用把剩下几百条都试一遍
+                return {"ok": True, "assigned": done, "skipped": skipped,
+                        "hint": "名册为空或无人在班，未能分派"}
+            assignment.assign(store, group, row["group_id"], law)
+            done += 1
+    return {"ok": True, "assigned": done, "skipped": skipped, "hint": ""}
 
 
 class LeadStatus(BaseModel):
@@ -517,6 +572,37 @@ def kf_contact_link(
     return {"url": data.get("url", "")}
 
 
+@router.get("/kf/qrcode")
+def kf_qrcode(
+    request: Request, open_kfid: str, scene: str = "qrcode",
+    _: Principal = Depends(require_admin),
+):
+    """客户进线二维码（PNG）。本地生码，链接不经过任何第三方服务。
+
+    客户扫这个码直接进咨询窗口——**不是加好友**，无需通过验证、无需占用
+    员工个人微信。印名片/易拉宝/朋友圈图都用它。
+    """
+    import io
+
+    import segno
+    from fastapi.responses import Response as RawResponse
+
+    data = kf_contact_link(request, open_kfid, scene, _)
+    url = data.get("url") or ""
+    if not url:
+        raise HTTPException(502, "企微未返回进线链接，请稍后重试")
+    buf = io.BytesIO()
+    # 高容错等级：印在物料上被 logo 或折痕遮住一角仍可扫
+    segno.make(url, error="h").save(
+        buf, kind="png", scale=12, border=3, dark="#0F2C4C", light="#FFFFFF"
+    )
+    return RawResponse(
+        content=buf.getvalue(),
+        media_type="image/png",
+        headers={"Content-Disposition": 'inline; filename="kf-qrcode.png"'},
+    )
+
+
 @router.get("/conversation")
 def conversation(
     group_id: str, limit: int = 60,
@@ -562,6 +648,14 @@ def metrics(store: Store = Depends(get_store), p: Principal = Depends(get_princi
         "leads_by_status": by_status,
         "leads_hot": sum(1 for x in leads if x["intent"] == "hot"),
         "leads_p0": sum(1 for x in leads if x.get("priority") == "P0"),
+        "leads_by_source": {
+            "dy": sum(1 for x in leads if x["group_id"].startswith("dy:")),
+            "kf": sum(1 for x in leads if x["group_id"].startswith("kf:")),
+            "group": sum(
+                1 for x in leads
+                if not x["group_id"].startswith(("dy:", "kf:"))
+            ),
+        },
     }
     if p.is_admin:
         load = store.lawyer_load()

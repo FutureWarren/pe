@@ -106,8 +106,10 @@ def build_and_store(
             "summary": _fallback_summary(history),
             "case_type": group.case_type,
             "key_facts": json.dumps([], ensure_ascii=False),
-            "urgency": "high" if intent == signals.HOT else "low",
-            "suggested_action": "请查看完整对话后跟进（AI 摘要不可用）",
+            # 意向 ≠ 紧急：留了电话是「较急」，「紧急」这顶帽子留给拘留/传唤/开庭临近
+            # （由下面的 urgent 规则命中才戴）。混为一谈会让紧急标记失去意义。
+            "urgency": "medium" if intent == signals.HOT else "low",
+            "suggested_action": "请电话联系客户，了解具体情况",
             "opening_line": "",
         }
     fields.update(
@@ -215,5 +217,8 @@ def dispatch(
     if sender and to:
         if sender.send_direct_text(to, format_notification(lead, group)):
             store.mark_lead_notified(group.group_id)
+            # 瞬态标记（不入库）：告诉调用方「这一轮真的推送了」。
+            # service 据此跳过同一条消息的逐条提醒——律师不该为一件事收到两条 DM。
+            lead["_notified_now"] = True
             logger.info("lead notified: %s → %s", group.group_id, to)
     return lead

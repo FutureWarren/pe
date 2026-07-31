@@ -131,8 +131,9 @@ def test_lawyer_sees_only_own_leads_and_conversations(tmp_path):
     wei, zhang = seed_two_lawyers_with_leads(store, snd, pipeline, client)
 
     mine = client.get("/console/leads", headers=H(wei)).json()
-    assert [x["group_id"] for x in mine] == ["kf:a:c1"]
-    assert len(client.get("/console/leads", headers=H(ADMIN)).json()) == 2
+    assert mine["total"] == 1
+    assert [x["group_id"] for x in mine["items"]] == ["kf:a:c1"]
+    assert client.get("/console/leads", headers=H(ADMIN)).json()["total"] == 2
 
     # 会话原文：自己的可看，别人的按不存在处理
     assert client.get("/console/conversation?group_id=kf:a:c1", headers=H(wei)).status_code == 200

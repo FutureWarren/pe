@@ -221,7 +221,11 @@ def test_kf_event_routed_to_worker(env):
 def test_console_reflects_full_loop(env):
     client, _, _, crypto = env
     _post_encrypted(client, crypto, "m-c1", "你们收费标准是怎样的？")
-    todo = client.get("/console/todo").json()
-    assert todo and "收费标准" in todo[0]["summary"]
+    # 费用咨询是 warm 转化信号 → 走线索简报（一件事只给律师一条 DM），
+    # 不再同时进逐条待办；线索队列里必须能看到这单
+    leads = client.get("/console/leads").json()
+    assert leads["total"] >= 1
+    assert any("收费" in (x["summary"] or "") for x in leads["items"])
+    assert client.get("/console/todo").json() == []
     metrics = client.get("/console/metrics").json()
     assert metrics["decisions_total"] >= 1 and metrics["compliance_blocked"] == 0

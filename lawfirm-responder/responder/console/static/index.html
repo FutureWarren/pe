@@ -325,6 +325,9 @@ nav#nav .navbtn .nbadge {
   display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px;
 }
 #login[hidden] { display: none; }
+/* 组件类里的 display（如 .btn-outline 的 inline-flex）会盖掉浏览器对 hidden 的
+   默认 display:none，导致「加载更多/自动分派」这类按钮藏不住。全局兜住。 */
+[hidden] { display: none !important; }
 #login .box { width: min(360px, 100%); text-align: center; }
 #login .goldline { width: 24px; height: 2px; background: var(--accent-line); margin: 0 auto 16px; }
 #login .firm { font-size: 22px; letter-spacing: .12em; color: var(--ink-1); margin-top: 16px; }
@@ -386,6 +389,20 @@ nav#nav .navbtn .nbadge {
 }
 /* 角色门控：律师身份不渲染管理入口（服务端仍强制鉴权，这里只是少画） */
 body:not([data-role=admin]) .admin-only { display: none !important; }
+/* 检索条：几百条线索/群档案时的生存工具 */
+.filterbar { margin-bottom: 8px; }
+.searchwrap { display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  background: var(--card, #fff); border: 1px solid var(--line); border-radius: 10px; }
+.searchwrap .ico { width: 17px; height: 17px; color: var(--ink-2); flex: none; }
+.searchwrap input { flex: 1; border: 0; outline: 0; background: transparent;
+  min-height: 42px; font-size: 15px; color: var(--ink-1); }
+.chiprow { display: flex; gap: 6px; margin-top: 8px; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.chiprow::-webkit-scrollbar { display: none; }
+.fchip { flex: none; padding: 6px 12px; border-radius: 999px; font-size: 13px;
+  border: 1px solid var(--line); background: var(--card, #fff); color: var(--ink-2);
+  min-height: 32px; }
+.fchip.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
 /* 优先级标识：P0 必须一眼跳出来 */
 .pchip { display:inline-flex; align-items:center; gap:4px; padding:2px 9px;
   border-radius:999px; font-size:12px; font-weight:700; letter-spacing:.02em; }
@@ -402,6 +419,8 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-8M12 20V5M19 20v-6"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3.5 19.5c0-3.2 2.4-5.3 5.5-5.3s5.5 2.1 5.5 5.3"/><circle cx="17" cy="9.5" r="2.4"/><path d="M17.5 14.4c2 .3 3.5 1.9 3.5 4.1"/></symbol>
   <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M9 10h6M9 14h6"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4 18-7z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V13"/><path d="M12 16.5h.01"/></symbol>
@@ -469,11 +488,28 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
 
   <section id="tab-leads" hidden>
     <div class="page-title">线索</div>
-    <div class="seg" style="margin-bottom:12px">
+    <div class="seg" style="margin-bottom:10px">
       <button id="segLeadNew" class="on" onclick="setLeadView('new')">待跟进</button>
       <button id="segLeadAll" onclick="setLeadView('')">全部</button>
     </div>
+    <div class="filterbar">
+      <div class="searchwrap">
+        <svg class="ico"><use href="#i-search"/></svg>
+        <input id="leadQ" type="search" placeholder="搜电话 / 姓名 / 案由 / 备注"
+               oninput="debouncedLeadSearch()">
+      </div>
+      <div class="chiprow" id="leadFilters">
+        <button class="fchip" data-f="priority" data-v="P0" onclick="toggleLeadFilter(this)">P0 强意愿</button>
+        <button class="fchip" data-f="priority" data-v="P1" onclick="toggleLeadFilter(this)">P1</button>
+        <button class="fchip" data-f="source" data-v="dy" onclick="toggleLeadFilter(this)">抖音</button>
+        <button class="fchip" data-f="source" data-v="kf" onclick="toggleLeadFilter(this)">微信客服</button>
+        <button class="fchip" data-f="source" data-v="group" onclick="toggleLeadFilter(this)">群聊</button>
+      </div>
+    </div>
+    <div class="meta" id="leadCount" style="margin:2px 2px 10px"></div>
     <div id="leadList"></div>
+    <button class="btn-outline" id="leadMore" hidden style="width:100%;margin-bottom:10px"
+            onclick="loadLeads(true)">加载更多</button>
     <input type="file" id="kzFile" accept=".csv,.xlsx,.xlsm" hidden onchange="uploadKezi(this)">
     <button class="btn-outline admin-only" style="width:100%"
             onclick="document.getElementById('kzFile').click()">
@@ -496,6 +532,7 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
       <div class="eyebrow" style="margin:0 0 2px">线索转化</div>
       <div class="meta">从 AI 首轮筛查到成交的全过程</div>
       <div class="row" style="margin-top:10px;flex-wrap:nowrap;gap:0" id="funnel"></div>
+      <div class="meta" id="funnelSrc" style="margin-top:6px"></div>
     </div>
     <div class="board-split">
       <div class="tiles" id="tiles"></div>
@@ -515,8 +552,23 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
   </section>
 
   <section id="tab-groups" hidden>
-    <div class="page-title">群管理</div>
+    <div class="page-title">会话管理</div>
+    <div class="filterbar">
+      <div class="searchwrap">
+        <svg class="ico"><use href="#i-search"/></svg>
+        <input id="groupQ" type="search" placeholder="搜名称 / 律师 / 案由 / 电话"
+               oninput="debouncedGroupSearch()">
+      </div>
+      <div class="chiprow" id="groupFilters">
+        <button class="fchip" data-v="dy" onclick="toggleGroupFilter(this)">抖音</button>
+        <button class="fchip" data-v="kf" onclick="toggleGroupFilter(this)">微信客服</button>
+        <button class="fchip" data-v="group" onclick="toggleGroupFilter(this)">群聊</button>
+      </div>
+    </div>
+    <div class="meta" id="groupCount" style="margin:2px 2px 10px"></div>
     <div id="groupList"></div>
+    <button class="btn-outline" id="groupMore" hidden style="width:100%;margin-bottom:10px"
+            onclick="renderGroups(true)">加载更多</button>
     <button class="btn-outline" style="width:100%" onclick="editGroup(null)">
       <svg class="ico"><use href="#i-plus"/></svg>新增群档案
     </button>
@@ -530,6 +582,10 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
     <div id="teamList"></div>
     <button class="btn-outline" style="width:100%" onclick="editLawyer(null)">
       <svg class="ico"><use href="#i-plus"/></svg>添加律师
+    </button>
+    <button class="btn-outline" id="bulkAssignBtn" hidden style="width:100%;margin-top:8px"
+            onclick="askBulkAssign()">
+      <svg class="ico"><use href="#i-refresh"/></svg>自动分派未指派线索<span id="bulkAssignN"></span>
     </button>
   </section>
 </main>
@@ -554,7 +610,7 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
     <svg class="ico"><use href="#i-chart"/></svg><span>看板</span>
   </button>
   <button class="navbtn admin-only" id="nav-groups" onclick="setTab('groups')">
-    <svg class="ico"><use href="#i-users"/></svg><span>群管理</span>
+    <svg class="ico"><use href="#i-users"/></svg><span>会话</span>
   </button>
   <button class="navbtn admin-only" id="nav-team" onclick="setTab('team')">
     <svg class="ico"><use href="#i-briefcase"/></svg><span>团队</span>
@@ -846,7 +902,10 @@ function openStatusPanel() {
       ${me && me.userid ? `<div class="srow"><div class="k">当前身份</div>
         <div class="v">${esc(me.name)}（${me.role === "admin" ? "管理员" : "律师"}）</div></div>` : ""}
       <div class="srow"><div class="k">AI 引擎</div><div class="v">${esc(llmTxt)}</div></div>
-      <div class="srow"><div class="k">接入通道</div><div class="v">${esc(kfTxt)}</div></div>
+      <div class="srow"><div class="k">接入通道</div><div class="v">${esc(kfTxt)}</div>
+        ${h.kf ? `<button class="btn-outline admin-only" style="margin-top:8px"
+          onclick="openKfQr()">${ico("phone")}获取客户进线二维码</button>` : ""}
+      </div>
       <div class="srow"><div class="k">待处理队列</div><div class="v">${esc(qTxt)}</div></div>
     </div>
     <div class="eyebrow">使用说明</div>
@@ -855,11 +914,49 @@ function openStatusPanel() {
       <div class="srow"><div class="k">${ico("flame")}线索</div><div class="v">客户留了联系方式或想约面谈时，AI 整理好的交接单，可直接拨号跟进</div></div>
       <div class="srow"><div class="k">${ico("message")}记录</div><div class="v">AI 说过的每句话都在这里，点「有帮助」或「需修正」能让它越来越像您</div></div>
       <div class="srow"><div class="k">${ico("chart")}看板</div><div class="v">AI 的工作量与质量总览</div></div>
-      <div class="srow"><div class="k">${ico("users")}群管理</div><div class="v">控制 AI 在哪些客户群工作、以什么身份称呼律师</div></div>
+      <div class="srow"><div class="k">${ico("users")}会话</div><div class="v">全部客户会话档案：控制 AI 开关、承办律师与接入通道</div></div>
     </div>
     <button class="btn-text muted" onclick="logout()" style="margin-top:8px">${ico("logout")}退出登录</button>
   `);
 }
+/* 客户进线二维码：扫码即进咨询窗口，不是加好友 */
+async function openKfQr() {
+  openSheet(`<h2>客户进线二维码</h2><div id="qrBody">${skeleton()}</div>`);
+  let accounts = [];
+  try {
+    accounts = (await api("/diagnostics")).kf.accounts || [];
+  } catch (e) {
+    document.getElementById("qrBody").innerHTML = "<p class='meta'>暂时取不到客服账号，请稍后重试</p>";
+    return;
+  }
+  if (!accounts.length) {
+    document.getElementById("qrBody").innerHTML =
+      "<p class='meta'>还没有客服账号。请在企微后台「客户与上下游 → 微信客服」里创建。</p>";
+    return;
+  }
+  /* 图片带令牌只能走 fetch → blob（<img src> 不会带自定义请求头） */
+  const parts = await Promise.all(accounts.map(async a => {
+    let src = "";
+    try {
+      const r = await fetch("/console/kf/qrcode?open_kfid=" + encodeURIComponent(a.open_kfid),
+        { headers: { "X-Admin-Token": token } });
+      if (r.ok) src = URL.createObjectURL(await r.blob());
+    } catch (e) {}
+    return `<div style="text-align:center;margin-bottom:18px">
+      <div style="font-weight:600;font-size:15px;margin-bottom:8px">${esc(a.name || a.open_kfid)}</div>
+      ${src ? `<img src="${src}" alt="进线二维码" style="width:200px;height:200px;border-radius:12px">
+        <div><a class="btn-text" href="${src}" download="${esc(a.name || "kf")}-二维码.png">下载图片</a></div>`
+        : `<div class="meta">该账号二维码生成失败</div>`}
+    </div>`;
+  }));
+  document.getElementById("qrBody").innerHTML = parts.join("") + `
+    <div class="meta" style="line-height:1.8">
+      客户用<b>微信</b>扫这个码就直接进入咨询窗口——<b>不需要加好友、不需要通过验证</b>，
+      也不占用任何员工的个人微信。<br>
+      可以印在名片、易拉宝、朋友圈图、官网和公众号菜单里。扫码后 AI 立刻应答并做首轮筛查。
+    </div>`;
+}
+
 /* 切正式模式 = AI 开始真的对客户说话，不可撤回，必须二次确认 */
 function askSwitchMode() {
   const toLive = !healthCache || healthCache.mode !== "live";
@@ -1040,6 +1137,45 @@ function lawyerName(userid) {
   return l && l.name ? l.name : userid;
 }
 let leadView = "new";
+/* 检索/过滤/分页状态：导入一次抖音客资就是 350+ 条，没有它们列表等于不可用 */
+const leadFilter = { q: "", priority: "", source: "" };
+let leadOffset = 0, leadItems = [], leadTotal = 0;
+const LEAD_PAGE = 60;
+
+let leadSearchTimer = null;
+function debouncedLeadSearch() {
+  clearTimeout(leadSearchTimer);
+  leadSearchTimer = setTimeout(() => {
+    leadFilter.q = document.getElementById("leadQ").value.trim();
+    lastSig.leads = null;
+    loadLeads();
+  }, 300);
+}
+function toggleLeadFilter(btn) {
+  const { f, v } = btn.dataset;
+  // 同组互斥：再点一次取消
+  leadFilter[f] = leadFilter[f] === v ? "" : v;
+  document.querySelectorAll(`#leadFilters .fchip[data-f='${f}']`).forEach(b =>
+    b.classList.toggle("on", leadFilter[f] === b.dataset.v));
+  lastSig.leads = null;
+  loadLeads();
+}
+function leadQuery(offset) {
+  const p = new URLSearchParams();
+  if (leadView) p.set("status", leadView);
+  if (leadFilter.q) p.set("q", leadFilter.q);
+  if (leadFilter.priority) p.set("priority", leadFilter.priority);
+  if (leadFilter.source) p.set("source", leadFilter.source);
+  p.set("limit", LEAD_PAGE);
+  p.set("offset", offset);
+  return "/leads?" + p.toString();
+}
+/* 来源标识：让律师一眼知道这个客户从哪来、该用什么方式回访 */
+function leadSource(gid) {
+  if (gid.startsWith("dy:")) return "抖音";
+  if (gid.startsWith("kf:")) return "微信客服";
+  return "群聊";
+}
 
 function setLeadView(v) {
   leadView = v;
@@ -1048,12 +1184,12 @@ function setLeadView(v) {
   lastSig.leads = null;
   loadLeads();
 }
-async function loadLeads() {
+async function loadLeads(more = false) {
   const el = document.getElementById("leadList");
-  if (!loadedOnce.leads) el.innerHTML = skeleton();
-  let list;
+  if (!loadedOnce.leads && !more) el.innerHTML = skeleton();
+  let r;
   try {
-    list = await api("/leads" + (leadView ? "?status=" + leadView : ""));
+    r = await api(leadQuery(more ? leadOffset + LEAD_PAGE : 0));
     // 承办人姓名与改派选单需要名册；律师身份无权也无需
     if (me && me.role === "admin" && !teamCache.length) {
       try { teamCache = await api("/lawyers"); } catch (e) {}
@@ -1061,13 +1197,28 @@ async function loadLeads() {
   }
   catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadLeads"); return; }
   loadedOnce.leads = true;
+  if (more) {
+    leadOffset += LEAD_PAGE;
+    leadItems = leadItems.concat(r.items);
+  } else {
+    leadOffset = 0;
+    leadItems = r.items;
+  }
+  leadTotal = r.total;
+  const list = leadItems;
+  const hasFilter = leadFilter.q || leadFilter.priority || leadFilter.source;
+  document.getElementById("leadCount").textContent =
+    leadTotal ? `共 ${leadTotal} 条${list.length < leadTotal ? ` · 已显示 ${list.length}` : ""}` : "";
+  document.getElementById("leadMore").hidden = list.length >= leadTotal;
   const sig = leadView + JSON.stringify(list);
   if (lastSig.leads === sig) return;
   lastSig.leads = sig;
   if (!list.length) {
-    el.innerHTML = emptyState("flame",
-      leadView ? "暂无待跟进线索" : "还没有线索记录",
-      "客户在咨询中留下联系方式、或表达面谈意愿时，AI 会自动整理一份交接单放到这里，并推送给接待律师。");
+    el.innerHTML = hasFilter
+      ? emptyState("search", "没有匹配的线索", "换个关键词，或点掉上面的筛选条件再试")
+      : emptyState("flame",
+          leadView ? "暂无待跟进线索" : "还没有线索记录",
+          "客户在咨询中留下联系方式、或表达面谈意愿时，AI 会自动整理一份交接单放到这里，并推送给接待律师。");
     return;
   }
   el.innerHTML = list.map(l => {
@@ -1084,6 +1235,7 @@ async function loadLeads() {
         <div class="row">
           ${pr ? `<span class="pchip ${pr.cls}">${pr.zh}</span>`
                : `<span class="badge ${it.cls}">${it.zh}</span>`}
+          <span class="chip">${leadSource(l.group_id)}</span>
           ${l.case_type ? `<span class="chip">${esc(l.case_type)}</span>` : ""}
           ${l.urgency === "high" ? `<span class="badge warn">${esc(URGENCY[l.urgency])}</span>` : ""}
           ${l.status !== "new" ? `<span class="chip">${esc(LEAD_STATUS[l.status] || l.status)}</span>` : ""}
@@ -1107,17 +1259,43 @@ async function loadLeads() {
           background:var(--brand-tint);color:var(--brand);font-size:14px;line-height:1.6">
           开场参考：${esc(l.opening_line)}</div>` : ""}
         ${l.suggested_action ? `<div class="meta" style="margin-top:6px">建议：${esc(l.suggested_action)}</div>` : ""}
+        ${l.notes ? `<div style="margin-top:8px;padding:8px 12px;border-radius:8px;
+          background:var(--chip-bg);font-size:13px;line-height:1.6;color:var(--ink-1)">
+          ${ico("note")}${esc(l.notes)}</div>` : ""}
         <div class="row fb-row">
-          <button class="btn-text muted" onclick="openConversation('${esc(l.group_id)}')">${ico("message")}查看对话</button>
-          ${l.notified_at ? "" : `<button class="btn-text" onclick="notifyLead(${l.id})">${ico("refresh")}推送给律师</button>`}
+          <button class="btn-text muted" onclick="openConversation('${esc(l.group_id)}')">${ico("message")}对话</button>
+          <button class="btn-text muted" onclick="editNotes(${l.id})">${ico("note")}${l.notes ? "改备注" : "记备注"}</button>
+          ${l.notified_at ? "" : `<button class="btn-text" onclick="notifyLead(${l.id})">${ico("refresh")}推送</button>`}
           ${l.status === "new" ? `
-            <button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'contacted')">${ico("check")}标记已联系</button>
+            <button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'contacted')">${ico("check")}已联系</button>
             <button class="btn-text muted" onclick="setLead(${l.id},'invalid')">无效</button>`
-            : `<button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'converted')">标记已成交</button>
-               <button class="btn-text muted" onclick="setLead(${l.id},'new')">退回待跟进</button>`}
+            : `<button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'converted')">标记成交</button>
+               <button class="btn-text muted" onclick="setLead(${l.id},'new')">退回</button>`}
         </div>
       </div>`;
   }).join("");
+}
+function editNotes(id) {
+  const l = leadItems.find(x => x.id === id) || {};
+  openSheet(`<h2>跟进备注</h2>
+    <div class="meta" style="margin:6px 0 10px">打完电话记两句：聊到哪了、下一步做什么、什么时候再联系</div>
+    <textarea id="noteText" style="width:100%;min-height:120px;font-size:15px;line-height:1.7;
+      padding:12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink-1)"
+      placeholder="例：已通话，欠薪 4 万有欠条，周五来所面谈，带劳动合同">${esc(l.notes || "")}</textarea>
+    <button class="btn-primary xl" style="margin-top:12px" onclick="saveNotes(${id})">保存</button>`);
+}
+async function saveNotes(id) {
+  const text = document.getElementById("noteText").value.trim();
+  try {
+    await api(`/leads/${id}/notes`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: text }),
+    });
+    sheetDirty = false; forceCloseSheet();
+    toast("备注已保存");
+    lastSig.leads = null;
+    loadLeads();
+  } catch (e) { toast("保存失败，请重试", false); }
 }
 async function setLead(id, status) {
   try {
@@ -1140,8 +1318,8 @@ async function notifyLead(id) {
 }
 async function refreshLeadBadge() {
   try {
-    const list = await api("/leads?status=new");
-    const n = list.filter(l => l.intent !== "cold").length;
+    const r = await api("/leads?status=new&limit=200");
+    const n = r.items.filter(l => l.intent !== "cold").length;
     const b = document.getElementById("leadBadge");
     b.hidden = n === 0;
     b.textContent = n > 99 ? "99+" : n;
@@ -1311,6 +1489,37 @@ async function toggleDuty(userid, input) {
     l.on_duty = input.checked;
     toast(input.checked ? "已恢复接单" : "已暂停接新单（手上的单不受影响）");
   } catch (e) { input.checked = !input.checked; toast("操作失败，请重试", false); }
+}
+async function refreshBulkAssign() {
+  /* 有名册且有未指派的在办线索时，才亮出批量分派入口 */
+  try {
+    const m = await api("/metrics");
+    const n = m.leads_unassigned || 0;
+    const btn = document.getElementById("bulkAssignBtn");
+    btn.hidden = !(n > 0 && teamCache.some(l => l.active && l.on_duty));
+    document.getElementById("bulkAssignN").textContent = n ? `（${n} 条）` : "";
+  } catch (e) { /* 静默 */ }
+}
+function askBulkAssign() {
+  openSheet(`<h2>自动分派未指派线索？</h2>
+    <p style="font-size:15px;margin:12px 0 8px">按「专长匹配 + 在办最少」把所有未指派的
+    待跟进/已联系线索分给在班律师。</p>
+    <p class="meta" style="margin-bottom:16px">不会给律师发企微消息——分派结果直接出现在
+    各自的工作台里，避免一次性弹几百条通知。</p>
+    <button class="btn-primary xl" onclick="doBulkAssign()">开始分派</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+      onclick="closeSheet()">先不用</button>`);
+}
+async function doBulkAssign() {
+  sheetDirty = false; forceCloseSheet();
+  toast("正在分派…");
+  try {
+    const r = await api("/leads/assign-unrouted", { method: "POST" });
+    toast(r.hint || `已分派 ${r.assigned} 条`);
+    loadedOnce.team = false;
+    loadTeam(); refreshBulkAssign();
+    lastSig.leads = null;
+  } catch (e) { toast("分派失败，请重试", false); }
 }
 async function sendLogin(userid) {
   try {
@@ -1585,6 +1794,13 @@ async function loadBoard() {
          <div style="font-size:22px;font-weight:700;color:var(--brand)">${conv}%</div>
          <div class="l">成交率</div>
        </div>`;
+    const bs = m.leads_by_source || {};
+    const srcEl = document.getElementById("funnelSrc");
+    if (srcEl) {
+      const bits = [["抖音", bs.dy], ["微信客服", bs.kf], ["群聊", bs.group]]
+        .filter(([, n]) => n > 0).map(([z, n]) => `${z} ${n}`);
+      srcEl.textContent = bits.length > 1 ? "来源：" + bits.join(" · ") : "";
+    }
   }
   /* 分律师负载（管理员）：谁手上压着 P0、派单是否均衡，一眼可见 */
   const lbCard = document.getElementById("lawyerBoardCard");
@@ -1641,9 +1857,57 @@ async function loadGroups() {
       </div>`;
     return;
   }
+  renderGroups(false);
+}
+
+/* 检索 + 前端分页：导入抖音客资后会话档案有几百个，一次渲染整页会卡死手机 */
+const groupFilter = { q: "", source: "" };
+let groupShown = 0;
+const GROUP_PAGE = 40;
+let groupSearchTimer = null;
+function debouncedGroupSearch() {
+  clearTimeout(groupSearchTimer);
+  groupSearchTimer = setTimeout(() => {
+    groupFilter.q = document.getElementById("groupQ").value.trim().toLowerCase();
+    renderGroups(false);
+  }, 250);
+}
+function toggleGroupFilter(btn) {
+  groupFilter.source = groupFilter.source === btn.dataset.v ? "" : btn.dataset.v;
+  document.querySelectorAll("#groupFilters .fchip").forEach(b =>
+    b.classList.toggle("on", groupFilter.source === b.dataset.v));
+  renderGroups(false);
+}
+function groupSourceOf(g) {
+  if (g.group_id.startsWith("dy:")) return "dy";
+  if (g.group_id.startsWith("kf:") || g.kf_open_kfid) return "kf";
+  return "group";
+}
+function filteredGroups() {
+  return groupsCache.filter(g => {
+    if (groupFilter.source && groupSourceOf(g) !== groupFilter.source) return false;
+    if (groupFilter.q) {
+      const hay = `${g.name} ${g.lawyer_name} ${g.case_type} ${g.group_id}`.toLowerCase();
+      if (!hay.includes(groupFilter.q)) return false;
+    }
+    return true;
+  });
+}
+function renderGroups(more) {
+  const el = document.getElementById("groupList");
+  const rows = filteredGroups();
+  groupShown = more ? groupShown + GROUP_PAGE : GROUP_PAGE;
+  const page = rows.slice(0, groupShown);
+  document.getElementById("groupCount").textContent =
+    rows.length ? `共 ${rows.length} 个会话${page.length < rows.length ? ` · 已显示 ${page.length}` : ""}` : "";
+  document.getElementById("groupMore").hidden = page.length >= rows.length;
+  if (!rows.length) {
+    el.innerHTML = emptyState("search", "没有匹配的会话", "换个关键词，或点掉筛选条件再试");
+    return;
+  }
   /* 值一律走 data-* + 事件委托：group_id 拼进内联 onclick 的 JS 字符串
      无法安全转义（HTML 实体在事件属性里会先解码），是注入面 */
-  el.innerHTML = groupsCache.map(g => {
+  el.innerHTML = page.map(g => {
     const metaBits = [g.lawyer_name ? g.lawyer_name + "律师" : "", g.case_type, g.case_stage]
       .filter(Boolean).join(" · ");
     return `
@@ -1651,6 +1915,7 @@ async function loadGroups() {
       <div class="row" style="flex-wrap:nowrap">
         <b style="font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(g.name || g.group_id)}</b>
         ${g.kf_open_kfid ? `<span class="chip" style="flex:none">微信客服</span>`
+          : g.group_id.startsWith("dy:") ? `<span class="chip" style="flex:none">抖音</span>`
           : g.bot_webhook ? `<span class="chip" style="flex:none">群聊助手</span>` : ""}
         <span class="badge ${g.client_status === "signed" ? "ok" : "brand"}" style="flex:none">${zh(ZH.status, g.client_status)}</span>
         <label class="switch" style="margin-left:auto">
@@ -1663,11 +1928,13 @@ async function loadGroups() {
       <div class="row" style="margin-top:10px">
         ${g.kf_open_kfid
           ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("message")}微信客服会话 · 自动接入</span>`
-          : g.bot_webhook
-            ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}群内 @ 助手 · 自动接入</span>`
-            : g.robot_webhook
-              ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
-              : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
+          : g.group_id.startsWith("dy:")
+            ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("phone")}客资台账 · 电话回访</span>`
+            : g.bot_webhook
+              ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}群内 @ 助手 · 自动接入</span>`
+              : g.robot_webhook
+                ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
+                : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
         <button class="btn-text muted" style="margin-left:auto" data-act="edit" data-gid="${esc(g.group_id)}">编辑${ico("chevron")}</button>
       </div>
     </div>`;
@@ -1859,7 +2126,7 @@ async function refresh() {
     if (tab === "log") await loadLog();
     if (tab === "board") await loadBoard();
     if (tab === "groups") await loadGroups();
-    if (tab === "team") await loadTeam();
+    if (tab === "team") { await loadTeam(); refreshBulkAssign(); }
   } catch (e) { /* 401 已弹登录层 */ }
 }
 setInterval(() => {

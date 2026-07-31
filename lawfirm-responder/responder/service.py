@@ -149,15 +149,23 @@ class Pipeline:
 
         # 转化信号：客户留了联系方式/表达面谈意愿 → 立刻整理交接单推给接待人。
         # 首响只是止损，真正的业务价值在这一步。
-        self._maybe_dispatch_lead(msg, decision, group, convo)
+        lead_pushed = self._maybe_dispatch_lead(msg, decision, group, convo)
 
         # 承接类一律触发人工提醒；直接回答类也提醒律师补充。
         # 同一条消息只提醒一次（到点复评会二次经过这里，不重复打扰律师）。
         # 开场问候不惊动律师——客户只是说了句「你好」。
-        # 客服会话已由线索简报统一承载（一次咨询 = 一条交接单），不再逐条推提醒。
+        # 客服会话的**文字**消息已由线索简报统一承载（一次咨询 = 一条交接单），
+        # 不再逐条推提醒；语音/图片没有文字可归纳、不进简报，必须逐条提醒兜底，
+        # 否则客户发的语音就没人知道了。
+        # 本条消息刚触发过交接单推送的也不再提醒——同一件事不给律师发两条 DM。
         if (
             decision.category != Category.GREETING
-            and not (group.is_kf and self.settings.lead_brief_enabled)
+            and not (
+                group.is_kf
+                and self.settings.lead_brief_enabled
+                and msg.msg_type == "text"
+            )
+            and not lead_pushed
             and not self.store.has_reminder(msg.msg_id)
         ):
             reminder = escalation.build_reminder(
@@ -171,8 +179,10 @@ class Pipeline:
         self, msg: IncomingMessage, decision: Decision, group: GroupProfile,
         convo: list[dict],
     ) -> bool:
-        """转化信号或紧急情形 → 生成/更新线索简报。返回是否走了简报通道。
+        """转化信号或紧急情形 → 生成/更新线索简报。返回**本轮是否真的推送了**。
 
+        返回值供逐条提醒去重：只有交接单实际发出（而非仅入库/被节流）时才算，
+        否则群通道的费用咨询等仍需要逐条提醒兜底。
         紧急消息在客服会话里也走这条路（force 推送）：律师收到的是一张
         含背景与联系方式的交接单，而不是一句孤零零的「客户说了什么」。
         """
@@ -183,11 +193,11 @@ class Pipeline:
             return False
         try:
             # 用门控后的 sender：影子模式只入库不外发（与律师提醒口径一致）
-            lead.dispatch(
+            row = lead.dispatch(
                 self.store, group, convo, self.sender,
                 settings=self.settings, force=urgent_kf, urgent=decision.urgent,
             )
-            return True
+            return bool(row and row.get("_notified_now"))
         except Exception:
             logger.exception("lead dispatch failed: %s", msg.group_id)
             return False
