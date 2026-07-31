@@ -120,7 +120,9 @@ class Worker:
         if not s.lead_brief_enabled:
             return
         until = now - timedelta(seconds=s.lead_idle_seconds)
-        since = now - timedelta(seconds=s.lead_idle_seconds * 4)
+        # 回看 24 小时而不是 4×idle（=1 小时）：服务重启/停机超过一小时期间
+        # 安静下来的会话会被永久跳过。get_lead 幂等去重兜住重复处理。
+        since = now - timedelta(seconds=max(s.lead_idle_seconds * 4, 86400))
         for gid in self.store.idle_conversations(since, until):
             if self.store.get_lead(gid):
                 continue  # 已有线索，交由实时触发路径更新
@@ -186,12 +188,19 @@ class Worker:
                 "请尽快联系并在工作台标记「已联系」。"
             )
             ok = sender.send_direct_text(to, text)
-            cc = group.backup_userid or s.default_notify_userid
-            if cc and cc != to:
-                sender.send_direct_text(cc, f"（抄送）{text}")
+            # 抄送必须在主送成功之后：否则主送失败 → sla_nudged 不置位 →
+            # 每 10 秒的 tick 重跑 → 第二责任人一小时收 360 条「（抄送）督办」
             if ok:
+                cc = group.backup_userid or s.default_notify_userid
+                if cc and cc != to:
+                    sender.send_direct_text(cc, f"（抄送）{text}")
                 self.store.mark_lead_nudged(row["group_id"])
                 logger.info("lead SLA nudge: %s → %s", row["group_id"], to)
+            else:
+                # 发不出去也要停止重试并留痕，否则轮询会把失败放大成风暴
+                self.store.mark_lead_nudged(row["group_id"])
+                logger.error("lead SLA nudge failed, giving up: %s → %s",
+                             row["group_id"], to)
 
     # ------------------------------------------------------------ 群聊助手
     def process_bot(self, env: bot.BotEnvelope) -> None:
@@ -335,9 +344,18 @@ class Worker:
         )
 
     def _kf_servicers(self, open_kfid: str) -> list[str]:
-        """接待人列表按客服账号缓存：每个新客户会话都查一次太浪费。"""
+        """接待人列表按客服账号缓存：每个新客户会话都查一次太浪费。
+
+        只缓存非空结果——接口抖一下或后台当时还没配接待人，空列表一旦进缓存
+        就到进程重启前都不再重查，之后所有新会话都无人可推。
+        """
         if open_kfid in self._servicer_cache:
             return self._servicer_cache[open_kfid]
-        got = self.kf_client.servicer_list(open_kfid) if self.kf_client else []
-        self._servicer_cache[open_kfid] = got
+        try:
+            got = self.kf_client.servicer_list(open_kfid) if self.kf_client else []
+        except Exception:
+            logger.exception("servicer_list failed: %s", open_kfid)
+            return []
+        if got:
+            self._servicer_cache[open_kfid] = got
         return got

@@ -10,6 +10,22 @@ from datetime import datetime
 
 from responder.models import Decision, GroupProfile, IncomingMessage, Reminder
 
+
+def _escape_like(text: str) -> str:
+    """转义 LIKE 通配符。客户搜「100%赔偿」时 % 是字面量，不是「匹配任意」。"""
+    return (
+        (text or "").strip()
+        .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
+
+
+def _in_clause(column: str, values: list[str]) -> tuple[str, list]:
+    """生成 `column IN (?,?,…)`；空集合返回恒假条件，避免退化成「全放行」。"""
+    if not values:
+        return "1=0", []
+    return f"{column} IN ({','.join('?' * len(values))})", list(values)
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS groups (
     group_id TEXT PRIMARY KEY,
@@ -236,22 +252,138 @@ class Store:
                 "UPDATE groups SET ai_enabled=? WHERE group_id=?", (int(enabled), group_id)
             )
 
-    def list_groups(self) -> list[dict]:
+    def list_groups(self, lawyer_userid: str | None = None) -> list[dict]:
+        q = "SELECT * FROM groups"
+        args: tuple = ()
+        if lawyer_userid is not None:
+            q += " WHERE lawyer_userid=?"
+            args = (lawyer_userid,)
         with self._conn() as conn:
-            return [dict(r) for r in conn.execute("SELECT * FROM groups").fetchall()]
+            return [dict(r) for r in conn.execute(q, args).fetchall()]
+
+    def own_group_ids(self, userid: str) -> set[str]:
+        """某位律师名下的会话集合：承办人是他，或线索派给了他。
+
+        两条窄查询（各吃一个索引）代替「拉全部群 + 拉 2000 条线索再内存筛」——
+        这个集合在律师身份的几乎每个请求上都要算一次。
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT group_id FROM groups WHERE lawyer_userid=?"
+                " UNION SELECT group_id FROM leads WHERE assigned_userid=?",
+                (userid, userid),
+            ).fetchall()
+        return {r["group_id"] for r in rows}
+
+    # ------------------------------------------------------------ 聚合统计
+    def decision_stats(self, group_ids: list[str] | None = None) -> dict:
+        """看板口径的判断统计。SQL 聚合而非拉一万行进 Python——
+        超过一万条之后内存聚合会静默漏计（LIMIT 截断），看板从此说谎。"""
+        where, args = "", []
+        if group_ids is not None:
+            clause, extra = _in_clause("group_id", group_ids)
+            where, args = f" WHERE {clause}", extra
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT action, COUNT(*) AS n, SUM(urgent) AS urgent"
+                f" FROM decisions{where} GROUP BY action",
+                args,
+            ).fetchall()
+        by_action = {r["action"]: r["n"] for r in rows}
+        return {
+            "total": sum(by_action.values()),
+            "by_action": by_action,
+            "urgent": sum((r["urgent"] or 0) for r in rows),
+        }
+
+    def reply_stats(self, group_ids: list[str] | None = None) -> dict:
+        where, args = "", []
+        if group_ids is not None:
+            clause, extra = _in_clause("group_id", group_ids)
+            where, args = f" WHERE {clause}", extra
+        with self._conn() as conn:
+            r = conn.execute(
+                f"SELECT COUNT(*) AS total,"
+                f" SUM(CASE WHEN compliance_passed=0 THEN 1 ELSE 0 END) AS blocked,"
+                f" SUM(CASE WHEN feedback='good' THEN 1 ELSE 0 END) AS good,"
+                f" SUM(CASE WHEN feedback LIKE 'needs_fix%' THEN 1 ELSE 0 END) AS bad"
+                f" FROM replies{where}",
+                args,
+            ).fetchone()
+        return {k: (r[k] or 0) for k in ("total", "blocked", "good", "bad")}
+
+    def lead_stats(self, assigned_userid: str | None = None) -> dict:
+        where, args = "", []
+        if assigned_userid is not None:
+            where, args = " WHERE assigned_userid=?", [assigned_userid]
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT status, COUNT(*) AS n FROM leads{where} GROUP BY status", args
+            ).fetchall()
+            agg = conn.execute(
+                f"SELECT COUNT(*) AS total,"
+                f" SUM(CASE WHEN contact<>'' THEN 1 ELSE 0 END) AS with_contact,"
+                f" SUM(CASE WHEN intent='hot' THEN 1 ELSE 0 END) AS hot,"
+                f" SUM(CASE WHEN priority='P0' THEN 1 ELSE 0 END) AS p0,"
+                f" SUM(CASE WHEN group_id LIKE 'dy:%' THEN 1 ELSE 0 END) AS src_dy,"
+                f" SUM(CASE WHEN group_id LIKE 'kf:%' THEN 1 ELSE 0 END) AS src_kf,"
+                f" SUM(CASE WHEN assigned_userid='' AND status IN ('new','contacted')"
+                f"      THEN 1 ELSE 0 END) AS unassigned"
+                f" FROM leads{where}",
+                args,
+            ).fetchone()
+        total = agg["total"] or 0
+        return {
+            "total": total,
+            "by_status": {r["status"]: r["n"] for r in rows},
+            "with_contact": agg["with_contact"] or 0,
+            "hot": agg["hot"] or 0,
+            "p0": agg["p0"] or 0,
+            "unassigned": agg["unassigned"] or 0,
+            "by_source": {
+                "dy": agg["src_dy"] or 0,
+                "kf": agg["src_kf"] or 0,
+                "group": total - (agg["src_dy"] or 0) - (agg["src_kf"] or 0),
+            },
+        }
 
     # ------------------------------------------------------------ messages
     def save_message(self, m: IncomingMessage) -> bool:
         """返回是否新消息；False = msg_id 已存在（企微超时重发的重复回调）。"""
         with self._conn() as conn:
             cur = conn.execute(
-                "INSERT OR IGNORE INTO messages VALUES (?,?,?,?,?,?,?)",
+                # 显式列名：位置式 INSERT 依赖 messages 永远保持 7 列，加一列就错位
+                "INSERT OR IGNORE INTO messages"
+                " (msg_id,group_id,sender_id,sender_is_staff,content,msg_type,created_at)"
+                " VALUES (?,?,?,?,?,?,?)",
                 (
                     m.msg_id, m.group_id, m.sender_id, int(m.sender_is_staff),
                     m.content, m.msg_type, m.created_at.isoformat(),
                 ),
             )
             return cur.rowcount > 0
+
+    def upsert_message(self, m: IncomingMessage) -> bool:
+        """写入或更新消息内容（导入路径用：二次导出里补充的留资内容不该被丢弃）。
+
+        返回是否为新消息，语义与 save_message 一致，便于调用方统计新增/更新。
+        """
+        with self._conn() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM messages WHERE msg_id=?", (m.msg_id,)
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO messages"
+                " (msg_id,group_id,sender_id,sender_is_staff,content,msg_type,created_at)"
+                " VALUES (?,?,?,?,?,?,?)"
+                " ON CONFLICT(msg_id) DO UPDATE SET"
+                " content=excluded.content, msg_type=excluded.msg_type",
+                (
+                    m.msg_id, m.group_id, m.sender_id, int(m.sender_is_staff),
+                    m.content, m.msg_type, m.created_at.isoformat(),
+                ),
+            )
+            return exists is None
 
     def get_message(self, msg_id: str) -> IncomingMessage | None:
         with self._conn() as conn:
@@ -281,11 +413,16 @@ class Store:
 
         用于「聊完了但没留电话」的咨询补一份线索简报归档（冷线索也有跟进价值）。
         """
+        # 先按时间范围收窄候选群（吃 idx_messages_group_time），再对候选算 MAX。
+        # 直接对全表 GROUP BY 会随消息量线性变慢，而这个查询每 10 秒跑一次。
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT group_id, MAX(created_at) AS last_at FROM messages"
-                " GROUP BY group_id HAVING last_at BETWEEN ? AND ?",
-                (since.isoformat(), until.isoformat()),
+                " WHERE group_id IN ("
+                "   SELECT DISTINCT group_id FROM messages WHERE created_at BETWEEN ? AND ?"
+                " ) GROUP BY group_id HAVING last_at BETWEEN ? AND ?",
+                (since.isoformat(), until.isoformat(),
+                 since.isoformat(), until.isoformat()),
             ).fetchall()
         return [r["group_id"] for r in rows]
 
@@ -310,15 +447,29 @@ class Store:
                 ),
             )
 
-    def list_decisions(self, group_id: str | None = None, limit: int = 200) -> list[dict]:
+    def list_decisions(
+        self, group_id: str | None = None, limit: int = 200,
+        group_ids: list[str] | None = None,
+    ) -> list[dict]:
+        """group_ids 用于律师视角：范围过滤必须下推到 SQL。
+
+        先 LIMIT 再在内存里筛本人的群，会让忙时段律师翻到一整页空白——
+        他名下的记录被别人的记录挤出了那 200 条窗口。
+        """
         q = "SELECT * FROM decisions"
-        args: tuple = ()
+        where, args = [], []
         if group_id:
-            q += " WHERE group_id=?"
-            args = (group_id,)
+            where.append("group_id=?")
+            args.append(group_id)
+        if group_ids is not None:
+            clause, extra = _in_clause("group_id", group_ids)
+            where.append(clause)
+            args += extra
+        if where:
+            q += " WHERE " + " AND ".join(where)
         q += " ORDER BY id DESC LIMIT ?"
         with self._conn() as conn:
-            return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
+            return [dict(r) for r in conn.execute(q, (*args, limit)).fetchall()]
 
     # ------------------------------------------------------------ replies
     def save_reply(
@@ -351,23 +502,47 @@ class Store:
         with self._conn() as conn:
             conn.execute("UPDATE replies SET feedback=? WHERE id=?", (feedback, reply_id))
 
-    def list_replies(self, group_id: str | None = None, limit: int = 200) -> list[dict]:
+    def list_replies(
+        self, group_id: str | None = None, limit: int = 200,
+        group_ids: list[str] | None = None,
+    ) -> list[dict]:
         # 带上客户原话：复核一句回复是否得当，前提是能看到它在回什么
         q = (
             "SELECT r.*, m.content AS question FROM replies r"
             " LEFT JOIN messages m ON m.msg_id = r.msg_id"
         )
-        args: tuple = ()
+        where, args = [], []
         if group_id:
-            q += " WHERE r.group_id=?"
-            args = (group_id,)
+            where.append("r.group_id=?")
+            args.append(group_id)
+        if group_ids is not None:  # 律师视角：范围下推 SQL，理由同 list_decisions
+            clause, extra = _in_clause("r.group_id", group_ids)
+            where.append(clause)
+            args += extra
+        if where:
+            q += " WHERE " + " AND ".join(where)
         q += " ORDER BY r.id DESC LIMIT ?"
         with self._conn() as conn:
-            return [dict(r) for r in conn.execute(q, args + (limit,)).fetchall()]
+            return [dict(r) for r in conn.execute(q, (*args, limit)).fetchall()]
+
+    def get_reply(self, reply_id: int) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM replies WHERE id=?", (reply_id,)).fetchone()
+        return dict(row) if row else None
 
     # ------------------------------------------------------------ 线索
+    # 客户一旦留下就不该被后续会话抹掉的字段：空值一律保留旧值。
+    # 回头客隔周再问一句「在吗」，重算出来的 contact 是空的——直接覆盖等于把
+    # 上次辛苦拿到的电话删了，律师再也打不通。
+    _LEAD_STICKY = ("contact", "case_type", "summary")
+
     def upsert_lead(self, group_id: str, fields: dict) -> None:
-        """一个会话一条线索：反复更新而非追加，避免同一客户刷屏。"""
+        """一个会话一条线索：反复更新而非追加，避免同一客户刷屏。
+
+        两条保护：① 上面 _LEAD_STICKY 的字段空值不覆盖；
+        ② score/priority 取历史最高——同一个客户表达过的最强意愿不因为
+        后来一句闲聊就被降级（真要降级由人工在控制台标状态）。
+        """
         now = datetime.now().isoformat()
         # 只覆盖内容字段；status / assigned_userid 有专用方法，内容更新不得触碰
         defaults = {
@@ -378,15 +553,53 @@ class Store:
         }
         cols = list(defaults)
         vals = [fields.get(c, defaults[c]) for c in cols]
+        sets = []
+        for c in cols:
+            if c in self._LEAD_STICKY:
+                sets.append(
+                    f"{c}=CASE WHEN excluded.{c}='' OR excluded.{c} IS NULL"
+                    f" THEN leads.{c} ELSE excluded.{c} END"
+                )
+            elif c == "score":
+                sets.append("score=MAX(leads.score, excluded.score)")
+            elif c == "priority":
+                # 分数取高了，层级必须跟着走同一条线，否则卡片自相矛盾
+                sets.append(
+                    "priority=CASE WHEN excluded.score >= leads.score"
+                    " THEN excluded.priority ELSE leads.priority END"
+                )
+            elif c == "factors":
+                sets.append(
+                    "factors=CASE WHEN excluded.score >= leads.score"
+                    " THEN excluded.factors ELSE leads.factors END"
+                )
+            else:
+                sets.append(f"{c}=excluded.{c}")
         with self._conn() as conn:
             conn.execute(
                 f"""INSERT INTO leads (group_id,{','.join(cols)},created_at,updated_at)
                     VALUES ({','.join('?' * (len(cols) + 3))})
                     ON CONFLICT(group_id) DO UPDATE SET
-                    {','.join(f'{c}=excluded.{c}' for c in cols)},
+                    {','.join(sets)},
                     updated_at=excluded.updated_at""",
                 (group_id, *vals, now, now),
             )
+
+    def find_lead_by_contact(self, contact: str, exclude_group: str = "") -> dict | None:
+        """按手机号跨渠道找已有线索。
+
+        同一个客户可能先在抖音留过号（dy:138…）、后又扫码进微信客服（kf:…），
+        那是两条会话档案但同一个人——派单要粘住原律师，不能两位律师各打一遍。
+        """
+        if not contact:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM leads WHERE contact=? AND group_id<>?"
+                " AND assigned_userid<>'' ORDER BY updated_at DESC LIMIT 1",
+                (contact, exclude_group),
+            ).fetchone()
+        return dict(row) if row else None
 
     def get_lead(self, group_id: str) -> dict | None:
         with self._conn() as conn:
@@ -417,10 +630,14 @@ class Store:
         elif source == "group":  # 企微群/机器人会话：除上述两种前缀外的一切
             where.append("group_id NOT LIKE 'dy:%' AND group_id NOT LIKE 'kf:%'")
         if q:
-            # 搜索：电话直搜 contact；关键词搜摘要/案由/备注
-            like = f"%{q.strip()}%"
-            where.append("(contact LIKE ? OR summary LIKE ? OR case_type LIKE ? OR notes LIKE ?)")
-            args += [like, like, like, like]
+            # 搜索：电话直搜 contact；关键词搜摘要/案由/备注/会话名（客户姓名在群档案上）
+            like = f"%{_escape_like(q)}%"
+            where.append(
+                "(contact LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'"
+                " OR case_type LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\'"
+                " OR group_id IN (SELECT group_id FROM groups WHERE name LIKE ? ESCAPE '\\'))"
+            )
+            args += [like] * 5
         return where, args
 
     def list_leads(
@@ -486,8 +703,13 @@ class Store:
             return [
                 dict(r)
                 for r in conn.execute(
+                    # 时钟用 COALESCE(notified_at, assigned_at)：批量导入的线索
+                    # notify=False 从不写 notified_at，只认 notified_at 会让
+                    # 导入进来的 P0 永远等不到督办（文档却承诺了有兜底）
                     "SELECT * FROM leads WHERE priority='P0' AND status='new'"
-                    " AND sla_nudged=0 AND notified_at IS NOT NULL AND notified_at<=?",
+                    " AND sla_nudged=0"
+                    " AND COALESCE(notified_at, assigned_at) IS NOT NULL"
+                    " AND COALESCE(notified_at, assigned_at)<=?",
                     (notified_before.isoformat(),),
                 ).fetchall()
             ]
@@ -636,15 +858,50 @@ class Store:
             )
             return cur.lastrowid
 
-    def pending_reminders(self, to_userid: str | None = None) -> list[dict]:
+    def pending_reminders(
+        self, to_userid: str | None = None, limit: int = 200,
+    ) -> list[dict]:
         q = "SELECT * FROM reminders WHERE status IN ('pending','sent','escalated')"
-        args: tuple = ()
+        args: list = []
         if to_userid is not None:
             q += " AND to_userid=?"
-            args = (to_userid,)
-        q += " ORDER BY urgent DESC, id ASC"
+            args.append(to_userid)
+        q += " ORDER BY urgent DESC, id ASC LIMIT ?"
         with self._conn() as conn:
-            return [dict(r) for r in conn.execute(q, args).fetchall()]
+            return [dict(r) for r in conn.execute(q, (*args, limit)).fetchall()]
+
+    def get_reminder(self, reminder_id: int) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM reminders WHERE id=?", (reminder_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def overdue_urgent_reminders(self, before: datetime) -> list[dict]:
+        """升级扫描专用：只取超时未升级的加急提醒，不再把整张待办表拉出来筛。"""
+        with self._conn() as conn:
+            return [
+                dict(r) for r in conn.execute(
+                    "SELECT * FROM reminders WHERE urgent=1"
+                    " AND status IN ('pending','sent') AND created_at<=?"
+                    " ORDER BY id ASC LIMIT 100",
+                    (before.isoformat(),),
+                ).fetchall()
+            ]
+
+    def resolve_reminders_for_group(self, group_id: str) -> int:
+        """线索标记已联系/成交时，把同一会话的未决提醒一并了结。
+
+        待办与线索是同一件事的两个视图，人已经联系过了还让督办去升级
+        第二责任人，是在制造无效打扰。
+        """
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE reminders SET status='done' WHERE group_id=?"
+                " AND status IN ('pending','sent','escalated')",
+                (group_id,),
+            )
+            return cur.rowcount
 
     def set_reminder_status(self, reminder_id: int, status: str) -> None:
         with self._conn() as conn:

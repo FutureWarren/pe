@@ -233,11 +233,18 @@ def test_urgent_kf_pushes_one_brief_to_servicer(tmp_path):
 
     g = store.get_group(GID)
     assert g.lawyer_userid == "weilai" and g.backup_userid == "libackup"
-    # 客服会话统一走线索简报：一次咨询 = 一条交接单
-    assert store.pending_reminders() == []
     lead = store.get_lead(GID)
     assert lead and lead["notified_at"] and lead["urgency"] == "high"
     assert kf.sent, "群里仍应立即安抚客户"
+
+    # 只推一条 DM（交接单），不再逐条提醒——同一件事不打扰两次
+    dm = [t for t in worker.sender.direct if "客户诉求" in t[1]]
+    assert len(dm) == 1 and dm[0][0] == "weilai"
+    assert len(worker.sender.direct) == 1
+    # 但紧急提醒必须入库：600 秒未处理升级第二责任人这条链扫的就是它，
+    # 不落库＝主进线通道整体没有紧急兜底
+    todo = store.pending_reminders()
+    assert len(todo) == 1 and todo[0]["urgent"] and todo[0]["status"] == "pending"
 
 
 def test_backfills_missing_notify_target(tmp_path):

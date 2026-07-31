@@ -87,7 +87,9 @@
 1. 在试点群里添加群机器人（机器人的名字即 AI 的对外身份，如「顾问助理」——按业务决策不标注 AI）
 2. 拿到机器人 webhook key，写入群档案 `robot_webhook`
 3. 若企业具备智能机器人「接收消息回调」能力：在机器人配置里填回调 URL
-   `https://你的域名/wecom/callback`，Token / EncodingAESKey 写入 `.env`，系统自动完成 URL 验证
+   `https://你的域名/wecom/bot/callback`（注意与应用回调 `/wecom/callback` 不是同一个），
+   把机器人**独立**的 Token / EncodingAESKey 写入 `.env` 的
+   `RESPONDER_WECOM_BOT_TOKEN` / `RESPONDER_WECOM_BOT_AES_KEY`，系统自动完成 URL 验证
 4. 切 `RESPONDER_MODE=live`，AI 开始自动发言；首周全量回复走控制台人工复核
 
 **若机器人无法进入外部客户群 → 通道 B 补读**

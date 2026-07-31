@@ -9,6 +9,7 @@
 
 import hashlib
 import hmac
+import logging
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,8 @@ from pydantic import BaseModel
 
 from responder.models import GroupProfile
 from responder.store.db import Store
+
+logger = logging.getLogger(__name__)
 
 # 控制台网页（中文单页，手机友好）。页面本身公开（相当于登录页），
 # 页内所有数据请求仍走 /console/* 的令牌鉴权。
@@ -46,14 +49,26 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+_LOCALHOST = {"127.0.0.1", "::1", "localhost", "testclient"}
+# 客资表上限：抖音一次导出几百行不过几百 KB，10MB 足够宽松又能挡住误传
+_MAX_IMPORT_BYTES = 10 * 1024 * 1024
+
+
 def get_principal(
     request: Request, x_admin_token: str | None = Header(default=None)
 ) -> Principal:
-    """解析请求身份。管理员令牌未配置时视为本机开发，放行为管理员。"""
+    """解析请求身份。管理员令牌未配置时**仅本机**放行为管理员。
+
+    未配置就全放行是 fail-open：公网上任何人都能读全部客户会话原文，
+    还能调 /console/update（拉代码重启＝服务器代码执行）。
+    """
     supplied = x_admin_token or ""
     admin_token = request.app.state.pipeline.settings.admin_token
     if not admin_token:
-        return Principal(role="admin", name="本机开发")
+        host = request.client.host if request.client else ""
+        if host in _LOCALHOST:
+            return Principal(role="admin", name="本机开发")
+        raise HTTPException(401, "服务未配置访问令牌，仅允许本机访问")
     if hmac.compare_digest(supplied, admin_token):
         return Principal(role="admin", name="管理员")
     if supplied:
@@ -88,15 +103,12 @@ def get_store(request: Request) -> Store:
 
 
 def _own_group_ids(store: Store, p: Principal) -> set[str]:
-    """律师视角的会话范围：承办律师是自己，或线索派给了自己。"""
-    gids = {
-        g["group_id"] for g in store.list_groups()
-        if g.get("lawyer_userid") == p.userid
-    }
-    gids.update(
-        x["group_id"] for x in store.list_leads(limit=2000, assigned_userid=p.userid)
-    )
-    return gids
+    """律师视角的会话范围：承办律师是自己，或线索派给了自己。
+
+    走 SQL 的 UNION（两条窄查询各吃一个索引）——这个集合在律师身份下
+    几乎每个请求都要算一次，不能每次都把群表和 2000 条线索拉进内存。
+    """
+    return store.own_group_ids(p.userid)
 
 
 @router.get("/me")
@@ -113,15 +125,33 @@ def todo_queue(
     return store.pending_reminders(None if p.is_admin else p.userid)
 
 
+def _get_reminder_scoped(store: Store, p: Principal, reminder_id: int) -> dict:
+    """待办的写操作同样要判归属：否则任何律师令牌都能关掉别人的加急待办。"""
+    row = store.get_reminder(reminder_id)
+    if row is None:
+        raise HTTPException(404, "待办不存在")
+    if not p.is_admin and row.get("to_userid") != p.userid:
+        raise HTTPException(404, "待办不存在")  # 越权按不存在处理，不泄露存在性
+    return row
+
+
 @router.post("/todo/{reminder_id}/done")
-def resolve_todo(reminder_id: int, store: Store = Depends(get_store)):
+def resolve_todo(
+    reminder_id: int,
+    store: Store = Depends(get_store), p: Principal = Depends(get_principal),
+):
+    _get_reminder_scoped(store, p, reminder_id)
     store.set_reminder_status(reminder_id, "done")
     return {"ok": True}
 
 
 @router.post("/todo/{reminder_id}/reopen")
-def reopen_todo(reminder_id: int, store: Store = Depends(get_store)):
+def reopen_todo(
+    reminder_id: int,
+    store: Store = Depends(get_store), p: Principal = Depends(get_principal),
+):
     """撤销「已处理」（控制台 5 秒撤销机制的回滚接口）。"""
+    _get_reminder_scoped(store, p, reminder_id)
     store.set_reminder_status(reminder_id, "pending")
     return {"ok": True}
 
@@ -213,9 +243,14 @@ def set_lead_status(
 ):
     if body.status not in ("new", "contacted", "converted", "invalid"):
         raise HTTPException(400, "无效的线索状态")
-    _get_lead_scoped(store, p, lead_id)
+    row = _get_lead_scoped(store, p, lead_id)
     store.set_lead_status(lead_id, body.status)
-    return {"ok": True}
+    # 待办与线索是同一件事的两个视图：人已经联系过了，还让督办去升级
+    # 第二责任人纯属制造无效打扰。标记非「待跟进」时一并了结该会话的待办。
+    closed = 0
+    if body.status != "new":
+        closed = store.resolve_reminders_for_group(row["group_id"])
+    return {"ok": True, "todos_closed": closed}
 
 
 class LeadAssign(BaseModel):
@@ -242,12 +277,24 @@ def reassign_lead(
     assignment.assign(store, group, row["group_id"], law)
     sender = request.app.state.pipeline.sender
     fresh = store.get_lead(row["group_id"])
+    notified = False
     if sender:
-        sender.send_direct_text(
+        notified = sender.send_direct_text(
             law["userid"], "【改派给您】\n" + lead_mod.format_notification(fresh, group)
         )
-        store.mark_lead_notified(row["group_id"])
-    return {"ok": True, "assigned_userid": law["userid"]}
+        if notified:
+            store.mark_lead_notified(row["group_id"])
+    # 明确回报有没有真的通知到：影子模式/发送失败下静默返回 ok
+    # 会让管理员以为交接完成，实际上新负责人什么都没收到
+    return {
+        "ok": True,
+        "assigned_userid": law["userid"],
+        "notified": bool(notified),
+        "hint": "" if notified else (
+            "影子模式未推送交接单，请自行知会" if sender is None
+            else "企微推送失败，请自行知会"
+        ),
+    }
 
 
 @router.post("/leads/import")
@@ -260,19 +307,29 @@ async def import_leads(
     文件以原始字节 POST 上传（避开 multipart 依赖），notify 默认 false——
     一次导入几十条历史客资还挨个推律师是骚扰，复核后再按需单条推送。
     """
+    from starlette.concurrency import run_in_threadpool
+
     from responder import importer
 
     data = await request.body()
     if not data:
         raise HTTPException(400, "没有收到文件内容")
-    try:
+    if len(data) > _MAX_IMPORT_BYTES:
+        raise HTTPException(413, "文件过大（上限 10MB），请分批导出后再上传")
+
+    def _run() -> dict:
         table = importer.parse_table(data, filename)
-        result = importer.import_leads(
+        return importer.import_leads(
             store, table,
             settings=request.app.state.pipeline.settings,
             sender=request.app.state.pipeline.sender,
             notify=notify,
         )
+
+    try:
+        # 必须离开事件循环：几百行的解析+逐行入库是纯同步 CPU/IO，
+        # 直接在 async 端点里跑会把整个服务（含企微回调）卡住数秒
+        result = await run_in_threadpool(_run)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True, **result}
@@ -293,13 +350,19 @@ def sync_kf_servicers(
         raise HTTPException(400, "微信客服通道未配置")
     settings = pipeline.settings
     cache: dict[str, list[str]] = {}
-    changed = []
+    changed, errors = [], []
     for row in store.list_groups():
         if not row.get("kf_open_kfid") or row.get("lawyer_userid"):
             continue
         kfid = row["kf_open_kfid"]
         if kfid not in cache:
-            cache[kfid] = kf_client.servicer_list(kfid)
+            # 某个账号查失败不该让整轮回填 500 掉、把已改的一半留在中间态
+            try:
+                cache[kfid] = kf_client.servicer_list(kfid)
+            except Exception:
+                logger.exception("servicer_list failed: %s", kfid)
+                cache[kfid] = []
+                errors.append(kfid)
         target = cache[kfid][0] if cache[kfid] else settings.default_notify_userid
         if not target:
             continue
@@ -309,7 +372,7 @@ def sync_kf_servicers(
             g.backup_userid = cache[kfid][1]
         store.upsert_group(g)
         changed.append({"group_id": g.group_id, "to": target})
-    return {"ok": True, "updated": changed}
+    return {"ok": True, "updated": changed, "errors": errors}
 
 
 @router.post("/leads/{lead_id}/notify")
@@ -349,12 +412,13 @@ def decisions(
     group_id: str | None = None, limit: int = 200,
     store: Store = Depends(get_store), p: Principal = Depends(get_principal),
 ):
-    """全量判断日志，含「AI 判断为无需响应」的沉默日志，便于复盘误判。"""
-    rows = store.list_decisions(group_id, limit)
-    if not p.is_admin:
-        own = _own_group_ids(store, p)
-        rows = [r for r in rows if r["group_id"] in own]
-    return rows
+    """全量判断日志，含「AI 判断为无需响应」的沉默日志，便于复盘误判。
+
+    律师范围下推到 SQL：先 LIMIT 再内存过滤会让忙时段的律师翻到整页空白
+    （他的记录被别人的挤出了窗口），而且永远翻不到自己的历史。
+    """
+    own = None if p.is_admin else sorted(_own_group_ids(store, p))
+    return store.list_decisions(group_id, limit, group_ids=own)
 
 
 @router.get("/replies")
@@ -362,11 +426,8 @@ def replies(
     group_id: str | None = None, limit: int = 200,
     store: Store = Depends(get_store), p: Principal = Depends(get_principal),
 ):
-    rows = store.list_replies(group_id, limit)
-    if not p.is_admin:
-        own = _own_group_ids(store, p)
-        rows = [r for r in rows if r["group_id"] in own]
-    return rows
+    own = None if p.is_admin else sorted(_own_group_ids(store, p))
+    return store.list_replies(group_id, limit, group_ids=own)
 
 
 class Feedback(BaseModel):
@@ -374,19 +435,29 @@ class Feedback(BaseModel):
 
 
 @router.post("/replies/{reply_id}/feedback")
-def reply_feedback(reply_id: int, body: Feedback, store: Store = Depends(get_store)):
+def reply_feedback(
+    reply_id: int, body: Feedback,
+    store: Store = Depends(get_store), p: Principal = Depends(get_principal),
+):
     """话术反馈闭环：标记「好/需修正」，修正样本进入话术迭代库。"""
-    store.set_reply_feedback(reply_id, body.feedback)
+    fb = body.feedback.strip()
+    if fb != "good" and not fb.startswith("needs_fix"):
+        raise HTTPException(400, "反馈只能是 good 或 needs_fix[:备注]")
+    row = store.get_reply(reply_id)
+    if row is None:
+        raise HTTPException(404, "回复记录不存在")
+    if not p.is_admin and row["group_id"] not in _own_group_ids(store, p):
+        raise HTTPException(404, "回复记录不存在")
+    store.set_reply_feedback(reply_id, fb[:500])
     return {"ok": True}
 
 
 @router.get("/groups")
 def groups(store: Store = Depends(get_store), p: Principal = Depends(get_principal)):
-    rows = store.list_groups()
-    if not p.is_admin:
-        own = _own_group_ids(store, p)
-        rows = [g for g in rows if g["group_id"] in own]
-    return rows
+    if p.is_admin:
+        return store.list_groups()
+    own = _own_group_ids(store, p)
+    return [g for g in store.list_groups() if g["group_id"] in own]
 
 
 @router.put("/groups/{group_id}")
@@ -620,42 +691,27 @@ def metrics(store: Store = Depends(get_store), p: Principal = Depends(get_princi
 
     律师身份下所有数字都只统计自己名下的会话与线索；管理员额外拿到分律师负载表。
     """
-    decisions = store.list_decisions(limit=10000)
-    replies = store.list_replies(limit=10000)
-    leads = store.list_leads(limit=10000)
-    if not p.is_admin:
-        own = _own_group_ids(store, p)
-        decisions = [d for d in decisions if d["group_id"] in own]
-        replies = [r for r in replies if r["group_id"] in own]
-        leads = [x for x in leads if x.get("assigned_userid") == p.userid]
-    by_action: dict[str, int] = {}
-    for d in decisions:
-        by_action[d["action"]] = by_action.get(d["action"], 0) + 1
-    by_status: dict[str, int] = {}
-    for lead_row in leads:
-        by_status[lead_row["status"]] = by_status.get(lead_row["status"], 0) + 1
+    own = None if p.is_admin else sorted(_own_group_ids(store, p))
+    # SQL 聚合而非拉一万行进 Python：超过一万条后内存聚合会被 LIMIT 静默截断，
+    # 合规看板从此说谎（「拦截 0 次」可能只是没统计到）
+    dec = store.decision_stats(group_ids=own)
+    rep = store.reply_stats(group_ids=own)
+    lead_agg = store.lead_stats(assigned_userid=None if p.is_admin else p.userid)
     out = {
         "scope": "all" if p.is_admin else "mine",
-        "decisions_total": len(decisions),
-        "by_action": by_action,
-        "urgent_count": sum(1 for d in decisions if d["urgent"]),
-        "replies_total": len(replies),
-        "compliance_blocked": sum(1 for r in replies if not r["compliance_passed"]),
-        "feedback_good": sum(1 for r in replies if r["feedback"] == "good"),
-        "feedback_needs_fix": sum(1 for r in replies if r["feedback"].startswith("needs_fix")),
-        "leads_total": len(leads),
-        "leads_with_contact": sum(1 for x in leads if x["contact"]),
-        "leads_by_status": by_status,
-        "leads_hot": sum(1 for x in leads if x["intent"] == "hot"),
-        "leads_p0": sum(1 for x in leads if x.get("priority") == "P0"),
-        "leads_by_source": {
-            "dy": sum(1 for x in leads if x["group_id"].startswith("dy:")),
-            "kf": sum(1 for x in leads if x["group_id"].startswith("kf:")),
-            "group": sum(
-                1 for x in leads
-                if not x["group_id"].startswith(("dy:", "kf:"))
-            ),
-        },
+        "decisions_total": dec["total"],
+        "by_action": dec["by_action"],
+        "urgent_count": dec["urgent"],
+        "replies_total": rep["total"],
+        "compliance_blocked": rep["blocked"],
+        "feedback_good": rep["good"],
+        "feedback_needs_fix": rep["bad"],
+        "leads_total": lead_agg["total"],
+        "leads_with_contact": lead_agg["with_contact"],
+        "leads_by_status": lead_agg["by_status"],
+        "leads_hot": lead_agg["hot"],
+        "leads_p0": lead_agg["p0"],
+        "leads_by_source": lead_agg["by_source"],
     }
     if p.is_admin:
         load = store.lawyer_load()
@@ -670,7 +726,9 @@ def metrics(store: Store = Depends(get_store), p: Principal = Depends(get_princi
             }
             for law in store.list_lawyers()
         ]
-        out["leads_unassigned"] = sum(1 for x in leads if not x.get("assigned_userid"))
+        # 只数「在办且未指派」——把已成交/无效也算进来会让批量分派按钮
+        # 的数字虚高，点完还不消失
+        out["leads_unassigned"] = lead_agg["unassigned"]
     return out
 
 
@@ -710,12 +768,16 @@ def upsert_lawyer(
 
 
 def _login_base(request: Request) -> str:
-    """登录链接的基础地址：显式配置优先，否则按请求 Host 推断（nginx 透传）。"""
+    """登录链接的基础地址：显式配置优先，否则按请求本身推断。
+
+    协议一律沿用请求实际用的那个（nginx 反代时读 X-Forwarded-Proto）——
+    早先无条件推断 https，在 http://IP 直连部署下会签发出打不开的链接。
+    """
     configured = request.app.state.pipeline.settings.public_base_url.rstrip("/")
     if configured:
         return configured
     host = request.headers.get("host", "")
-    scheme = "http" if host.startswith(("127.", "localhost")) else "https"
+    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
     return f"{scheme}://{host}" if host else ""
 
 

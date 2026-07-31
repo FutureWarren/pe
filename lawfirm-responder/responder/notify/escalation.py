@@ -5,7 +5,8 @@
 提醒内容：客户问题原文 + AI 已回复内容 + 建议回复要点。
 """
 
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 
 from responder.config import Settings, get_settings
 from responder.gateway.sender import WeComSender
@@ -18,6 +19,8 @@ _HINTS = {
     Category.URGENT: "建议回复要点：请尽快直接联系客户，安抚并说明处理安排。",
     Category.CONTACT: "建议回复要点：客户在催回复，请尽快在群内响应。",
 }
+
+logger = logging.getLogger(__name__)
 
 _MSG_TYPE_ZH = {"voice": "语音", "image": "图片", "video": "视频", "file": "文件"}
 
@@ -79,20 +82,24 @@ def escalate_overdue(
     settings: Settings | None = None,
     now: datetime | None = None,
 ) -> list[int]:
-    """紧急提醒超时未处理 → 升级第二责任人。由定时任务调用。"""
+    """紧急提醒超时未处理 → 升级第二责任人。由定时任务调用。
+
+    只有真的送出去才算升级：无人可升或发送失败时保持原状态等下一轮，
+    否则「已升级」这个状态是假的——第二责任人根本没收到，而系统不再重试。
+    """
     settings = settings or get_settings()
     now = now or datetime.now()
     escalated: list[int] = []
-    for r in store.pending_reminders():
-        if not r["urgent"] or r["status"] == "escalated":
-            continue
-        age = (now - datetime.fromisoformat(r["created_at"])).total_seconds()
-        if age < settings.escalation_seconds:
-            continue
+    cutoff = now - timedelta(seconds=settings.escalation_seconds)
+    for r in store.overdue_urgent_reminders(cutoff):
         group = store.get_group(r["group_id"])
-        backup = group.backup_userid if group else ""
-        if backup and sender:
-            sender.send_direct_text(backup, f"【升级提醒】\n{r['summary']}")
+        # 没配第二责任人就升给全局兜底人——升级链断在「没人可升」上最没道理
+        backup = (group.backup_userid if group else "") or settings.default_notify_userid
+        if not (backup and sender):
+            continue
+        if not sender.send_direct_text(backup, f"【升级提醒】\n{r['summary']}"):
+            logger.warning("escalation send failed, will retry: reminder=%s", r["id"])
+            continue
         store.set_reminder_status(r["id"], "escalated")
         escalated.append(r["id"])
     return escalated

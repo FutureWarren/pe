@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     # P0 线索超过该时长仍未标记「已联系」→ 追加提醒并抄送第二责任人
     lead_sla_enabled: bool = True
     lead_p0_sla_seconds: int = 3600
+    # 紧急线索强推交接单的冷却时间：客户连发几条急消息，律师只该收一张单
+    lead_force_cooldown_seconds: int = 600
     # 控制台对外基础地址（生成律师登录链接用）；留空时从请求 Host 推断
     public_base_url: str = ""
     # 群聊单条回复长度上限（字符），超出按句号截断

@@ -112,6 +112,10 @@ class Pipeline:
 
         if decision.action == Action.SILENCE:
             self.store.save_decision(decision)
+            # 沉默不等于不值钱：群里客户单发一句「我电话138…你们联系我」按规则
+            # 判沉默（AI 不必接话），但那是最强的转化信号，必须进线索通道。
+            # 早退前不做这一步，这类线索就永远只躺在聊天记录里。
+            self._maybe_dispatch_lead(msg, decision, group, convo)
             return decision
 
         # 补位等待未到点：登记到点复评任务，由后台工作线程届时重跑本判断。
@@ -136,13 +140,21 @@ class Pipeline:
             if final_text is None:
                 # 第 3 次追问起：群内静默，原话术仅留档草稿，提醒已升级
                 final_text, mode = result.text, "shadow"
+            sent = True
+            if mode == "live" and self._can_send(group):
+                sent = self._send_group(group, msg.group_id, final_text)
+                if not sent:
+                    # 发送失败还按 live 记账，追问策略会误判「已经答过了」，
+                    # 客户从此拿不到首答。记为 failed，并让人工兜底。
+                    mode = "failed"
+                    decision.reasons.append("send:failed")
             self.store.save_reply(
                 msg.msg_id, msg.group_id, final_text, mode,
                 result.passed, category=decision.category.value,
             )
-            if mode == "live" and self._can_send(group):
-                self._send_group(group, msg.group_id, final_text)
-            reply_text = final_text
+            # 只有确实发出去的才算「AI 已回复」——否则提醒会让律师
+            # 误以为客户已被安抚，实际上那边一片安静
+            reply_text = final_text if sent else None
 
         # 判断日志在去重/门控修饰后入库，控制台看到的即最终裁决
         self.store.save_decision(decision)
@@ -158,20 +170,32 @@ class Pipeline:
         # 不再逐条推提醒；语音/图片没有文字可归纳、不进简报，必须逐条提醒兜底，
         # 否则客户发的语音就没人知道了。
         # 本条消息刚触发过交接单推送的也不再提醒——同一件事不给律师发两条 DM。
+        # 紧急消息例外：即使交接单已经推过，也要落一条 urgent 提醒入库——
+        # 600 秒未处理自动升级第二责任人这条链，扫的是 reminders 表。
+        # 不落库，客服通道（主进线通道）就整体没有紧急升级兜底。
+        silent_urgent = decision.urgent and (lead_pushed or group.is_kf)
         if (
             decision.category != Category.GREETING
-            and not (
-                group.is_kf
-                and self.settings.lead_brief_enabled
-                and msg.msg_type == "text"
-            )
-            and not lead_pushed
             and not self.store.has_reminder(msg.msg_id)
+            and (
+                silent_urgent
+                or (
+                    not lead_pushed
+                    and not (
+                        group.is_kf
+                        and self.settings.lead_brief_enabled
+                        and msg.msg_type == "text"
+                    )
+                )
+            )
         ):
             reminder = escalation.build_reminder(
                 msg, decision, group, reply_text, self.settings
             )
-            escalation.dispatch(reminder, self.store, self.sender)
+            # silent_urgent：只入库供升级扫描，不再推 DM（简报已经推过一条了）
+            escalation.dispatch(
+                reminder, self.store, None if silent_urgent else self.sender
+            )
 
         return decision
 
@@ -236,10 +260,11 @@ class Pipeline:
         )
         return group.bot_webhook if fresh else group.robot_webhook
 
-    def _send_group(self, group: GroupProfile, group_id: str, text: str) -> None:
+    def _send_group(self, group: GroupProfile, group_id: str, text: str) -> bool:
         """分条发送：多句内容拆成多条消息，条间隔模拟打字（见 docs/voice-guide.md）。
 
         通道优先级：微信客服会话 → 机器人 webhook（回调下发的 > 人工配置的）→ 应用群聊。
+        返回是否全部发送成功——失败要能被上层看见，不能静默吞掉。
         """
         webhook = self._reply_webhook(group)
         chunks = (
@@ -247,17 +272,27 @@ class Pipeline:
             if self.settings.split_messages
             else [text]
         )
+        ok = True
         for i, chunk in enumerate(chunks):
             if i and self.settings.split_delay_seconds > 0:
                 time.sleep(self.settings.split_delay_seconds)
-            if self._is_kf(group):
-                self.kf_client.send_text(
-                    group.kf_open_kfid, group.kf_external_userid, chunk
-                )
-            elif webhook:
-                self.sender.send_robot_text(webhook, chunk)
-            else:
-                self.sender.send_group_text(group_id, chunk)
+            try:
+                if self._is_kf(group):
+                    r = self.kf_client.send_text(
+                        group.kf_open_kfid, group.kf_external_userid, chunk
+                    )
+                elif webhook:
+                    r = self.sender.send_robot_text(webhook, chunk)
+                else:
+                    r = self.sender.send_group_text(group_id, chunk)
+            except Exception:
+                logger.exception("send failed: %s", group_id)
+                r = False
+            # 通道实现返回 None 视为成功（旧签名兼容），只有显式 False 才算失败
+            if r is False:
+                ok = False
+                break  # 首条就发不出去，后续几条只会继续失败并拖慢链路
+        return ok
 
     # ------------------------------------------------------------ 追问策略
     def _apply_followup_policy(
@@ -277,7 +312,15 @@ class Pipeline:
             return text
         if n == 1:
             decision.reasons.append("followup:second-touch")
-            return templates.second_touch(group, urgent=decision.urgent)
+            # 二次安抚是在 guard 之后替换文本的，必须自己再过一次出口闸门——
+            # 合规护栏「所有 AI 生成文本都要过 guard」不接受任何绕行
+            from responder.compliance.guard import guard
+
+            checked = guard(
+                templates.second_touch(group, urgent=decision.urgent),
+                Action.HANDOFF, templates.safe_fallback(group),
+            )
+            return checked.text
         decision.urgent = True
         decision.reasons.append("followup:suppressed-escalated")
         return None

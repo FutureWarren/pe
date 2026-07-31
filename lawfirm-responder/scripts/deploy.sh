@@ -6,7 +6,14 @@
 #   WECOM_CORP_ID=xxx WECOM_CORP_SECRET=xxx WECOM_AGENT_ID=xxx DEEPSEEK_API_KEY=xxx \
 #     bash <(curl -fsSL https://raw.githubusercontent.com/FutureWarren/pe/claude/law-firm-wechat-ai-responder-q3nttv/lawfirm-responder/scripts/deploy.sh)
 #
-# 可选环境变量：WECOM_TOKEN / WECOM_AES_KEY / ADMIN_TOKEN（不传则自动生成并打印）
+# 可选环境变量：
+#   WECOM_TOKEN / WECOM_AES_KEY / ADMIN_TOKEN（不传则自动生成并打印）
+#   WECOM_KF_SECRET             微信客服通道
+#   WECOM_BOT_TOKEN / WECOM_BOT_AES_KEY / BOT_DEFAULT_NOTIFY_USERID  群聊助手
+#   PUBLIC_BASE_URL             控制台对外地址（律师登录链接用），如 https://ai.example.com
+#   DEFAULT_NOTIFY_USERID       兜底提醒接收人
+#   KF_DEFAULT_LAWYER_NAME / KF_DEFAULT_CASE_TYPE   客服会话建档默认值
+#   ANTHROPIC_API_KEY           备用模型供应商
 
 set -euo pipefail
 
@@ -93,6 +100,11 @@ RESPONDER_WECOM_KF_SECRET=${WECOM_KF_SECRET:-}
 RESPONDER_WECOM_BOT_TOKEN=${WECOM_BOT_TOKEN:-}
 RESPONDER_WECOM_BOT_AES_KEY=${WECOM_BOT_AES_KEY:-}
 RESPONDER_BOT_DEFAULT_NOTIFY_USERID=${BOT_DEFAULT_NOTIFY_USERID:-}
+RESPONDER_DEFAULT_NOTIFY_USERID=${DEFAULT_NOTIFY_USERID:-}
+RESPONDER_KF_DEFAULT_LAWYER_NAME=${KF_DEFAULT_LAWYER_NAME:-}
+RESPONDER_KF_DEFAULT_CASE_TYPE=${KF_DEFAULT_CASE_TYPE:-}
+RESPONDER_PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 RESPONDER_API_HOST=0.0.0.0
 RESPONDER_API_PORT=80
 RESPONDER_DB_PATH=/opt/pe/lawfirm-responder/responder.db
@@ -111,9 +123,22 @@ else
   _ensure_env RESPONDER_BOT_DEFAULT_NOTIFY_USERID "${BOT_DEFAULT_NOTIFY_USERID:-}"
   # 律师登录链接的对外地址（留空则按请求 Host 推断，经 nginx 部署无需配置）
   _ensure_env RESPONDER_PUBLIC_BASE_URL "${PUBLIC_BASE_URL:-}"
-  for k in WECOM_BOT_TOKEN WECOM_BOT_AES_KEY BOT_DEFAULT_NOTIFY_USERID; do
+  _ensure_env RESPONDER_DEFAULT_NOTIFY_USERID "${DEFAULT_NOTIFY_USERID:-}"
+  _ensure_env RESPONDER_KF_DEFAULT_LAWYER_NAME "${KF_DEFAULT_LAWYER_NAME:-}"
+  _ensure_env RESPONDER_KF_DEFAULT_CASE_TYPE "${KF_DEFAULT_CASE_TYPE:-}"
+  _ensure_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}"
+  _ensure_env DEEPSEEK_API_KEY "${DEEPSEEK_API_KEY:-}"
+  # 带 RESPONDER_ 前缀的项：传入即覆盖
+  for k in WECOM_BOT_TOKEN WECOM_BOT_AES_KEY BOT_DEFAULT_NOTIFY_USERID \
+           DEFAULT_NOTIFY_USERID KF_DEFAULT_LAWYER_NAME KF_DEFAULT_CASE_TYPE \
+           PUBLIC_BASE_URL; do
     v="$(eval echo "\${$k:-}")"
     [ -n "$v" ] && sed -i "s|^RESPONDER_$k=.*|RESPONDER_$k=$v|" "$ENVFILE"
+  done
+  # 无前缀的模型 key 同理（此前重跑命令带上也不会写入）
+  for k in DEEPSEEK_API_KEY ANTHROPIC_API_KEY; do
+    v="$(eval echo "\${$k:-}")"
+    [ -n "$v" ] && sed -i "s|^$k=.*|$k=$v|" "$ENVFILE"
   done
   # 传入 WECOM_KF_SECRET 时以传入值为准（首次配置客服通道的路径）
   if [ -n "${WECOM_KF_SECRET:-}" ]; then

@@ -173,13 +173,39 @@ def format_notification(lead: dict, group: GroupProfile) -> str:
 _ORDER = {signals.COLD: 0, signals.WARM: 1, signals.HOT: 2}
 
 
-def should_notify(previous: dict | None, intent: str) -> bool:
-    """仅在「首次达到可跟进意向」或「意向升级」时通知，避免同一客户反复打扰。"""
+def _notified_within(previous: dict | None, seconds: int) -> bool:
+    if not previous or not previous.get("notified_at") or seconds <= 0:
+        return False
+    try:
+        age = (datetime.now() - datetime.fromisoformat(previous["notified_at"]))
+    except (ValueError, TypeError):
+        return False
+    return age.total_seconds() < seconds
+
+
+def should_notify(
+    previous: dict | None, intent: str, *, gap_seconds: int = 0,
+) -> bool:
+    """仅在「首次达到可跟进意向」「意向升级」或「隔了一次咨询后再来」时通知。
+
+    没有第三条时，隔周回头的老客户永远不会再惊动律师——notified_at 一旦写下
+    就是永久的，等于把回访客户静音了。以「一次咨询」为节流粒度才对。
+    """
     if intent == signals.COLD:
         return False
     if previous is None or not previous.get("notified_at"):
         return True
-    return _ORDER[intent] > _ORDER.get(previous.get("intent"), 0)
+    if _ORDER[intent] > _ORDER.get(previous.get("intent"), 0):
+        return True
+    if gap_seconds:
+        try:
+            since = (
+                datetime.now() - datetime.fromisoformat(previous["notified_at"])
+            ).total_seconds()
+        except (ValueError, TypeError):
+            return False
+        return since >= gap_seconds  # 已是另一次咨询，值得再提醒一次
+    return False
 
 
 def dispatch(
@@ -200,7 +226,13 @@ def dispatch(
         return None
     previous = store.get_lead(group.group_id)
     intent, _, _ = signals.scan(current_session(history, settings.lead_session_gap_seconds))
-    notify = force or should_notify(previous, intent)
+    # force（紧急）也要节流：客户连发五条急消息，律师不该连收五张几乎一样的
+    # 交接单（每张还烧一次模型）。刚推过就只更新入库，升级由 reminders 那条链管。
+    if force and _notified_within(previous, settings.lead_force_cooldown_seconds):
+        force = False
+    notify = force or should_notify(
+        previous, intent, gap_seconds=settings.lead_session_gap_seconds
+    )
     lead = build_and_store(
         store, group, history, settings=settings,
         summarize=notify if summarize is None else summarize,
@@ -210,7 +242,9 @@ def dispatch(
         return lead
     # 派单在通知之前：交接单要推给被派到的律师，而不是笼统的接待人。
     # 名册为空时 ensure 回落旧链路（会话承办人/全局兜底），行为与旧版完全一致。
-    to = assignment.ensure(store, group, lead, settings)
+    to, newly_assigned = assignment.ensure(store, group, lead, settings)
+    # 刚接手的律师必须拿到单子：不能因为这条线索之前通知过别人就被节流掉
+    notify = notify or newly_assigned
     if not notify:
         return lead
     lead = store.get_lead(group.group_id) or lead  # 取回含指派信息的最新版

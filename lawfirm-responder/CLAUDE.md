@@ -79,7 +79,7 @@ ruff check responder tests       # lint
 - 客户群已在企微，接入方案见 `docs/integration.md`（微信客服 / 机器人 / 会话存档 / 影子模式）。
   **已实测**：自建应用回调收不到群聊内容；微信客服是唯一免费且全自动的进线通道，为首选。
   客服会话复用群档案模型（`kf:{open_kfid}:{external_userid}`），首次进线自动建档。
-- 试点：劳动仲裁/法律纠纷群；AI 处理追问时同话术不复读（`service.Pipeline._is_repeat`），转升级提醒。
+- 试点：劳动仲裁/法律纠纷群；AI 处理追问时同话术不复读（`service.Pipeline._apply_followup_policy`，依据 `Store.count_recent_live` 的三级策略），转升级提醒。
 - 分案体系（2026-07）：筛查后的线索按 `docs/lead-routing.md` 评分（P0/P1/P2）并自动派给
   具体律师（专长+负载）；律师个人令牌只看自己名下数据（`console/api.py` 服务端强制）。
   律师名册为空时整套派单回落旧链路——该回落行为是升级兼容承诺，不得移除。

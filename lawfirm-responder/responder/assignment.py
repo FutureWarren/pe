@@ -17,7 +17,7 @@
 import logging
 
 from responder.config import Settings, get_settings
-from responder.models import GroupProfile
+from responder.models import ClientStatus, GroupProfile
 from responder.store.db import Store
 
 logger = logging.getLogger(__name__)
@@ -61,27 +61,56 @@ def pick(store: Store, case_type: str) -> dict | None:
 def ensure(
     store: Store, group: GroupProfile, lead: dict,
     settings: Settings | None = None,
-) -> str:
-    """确保线索有指派对象，返回通知目标 userid（可能为空 = 无人可通知）。
+) -> tuple[str, bool]:
+    """确保线索有指派对象。返回 (通知目标 userid, 是否本轮新指派)。
+
+    「是否新指派」供上层决定要不要强推交接单——刚接手的律师必须收到单子，
+    不能因为这条线索之前通知过就被节流掉。
 
     有名册走派单；名册为空回落旧链路（会话档案承办人 → 全局兜底）。
     """
     settings = settings or get_settings()
-    legacy = group.lawyer_userid or settings.default_notify_userid
+
+    def _legacy() -> str:
+        """回落目标必须校验在职：把单子推给一个已停用的人等于没推。"""
+        if group.lawyer_userid:
+            law = store.get_lawyer(group.lawyer_userid)
+            if law is None or law["active"]:  # 不在名册里＝人工配的固定接待人，照用
+                return group.lawyer_userid
+        return settings.default_notify_userid
+
+    # 已成交客户的服务群有固定承办律师，自动派单一律不碰——
+    # 改派会让 AI 在群里点名一个客户从没见过的人。
+    if group.client_status == ClientStatus.SIGNED and group.lawyer_userid:
+        return _legacy(), False
 
     current = lead.get("assigned_userid") or ""
     if current:
         law = store.get_lawyer(current)
         if law and law["active"]:
-            return current  # 粘性：已派且在职
+            return current, False  # 粘性：已派且在职
         logger.info("assignee %s inactive, rerouting %s", current, group.group_id)
+
+    # 跨渠道认人：同一手机号在别的通道已有承办律师就沿用他
+    # （客户先在抖音留号、后扫码进微信客服，是同一个人，不能两位律师各打一遍）
+    contact = lead.get("contact") or ""
+    twin = store.find_lead_by_contact(contact, exclude_group=lead["group_id"])
+    if twin:
+        law = store.get_lawyer(twin["assigned_userid"])
+        if law and law["active"] and law["on_duty"]:
+            assign(store, group, lead["group_id"], law)
+            logger.info("lead %s follows same-contact owner %s",
+                        lead["group_id"], law["userid"])
+            return law["userid"], True
 
     chosen = pick(store, lead.get("case_type") or group.case_type)
     if chosen is None:
-        return legacy
+        # 名册为空/无人在班：保持未指派，让管理员看板的「未指派」接住，
+        # 而不是伪装成已有归属
+        return _legacy(), False
 
     assign(store, group, lead["group_id"], chosen)
-    return chosen["userid"]
+    return chosen["userid"], True
 
 
 def assign(store: Store, group: GroupProfile, group_id: str, lawyer: dict) -> None:

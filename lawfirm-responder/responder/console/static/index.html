@@ -395,14 +395,23 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
   background: var(--card, #fff); border: 1px solid var(--line); border-radius: 10px; }
 .searchwrap .ico { width: 17px; height: 17px; color: var(--ink-2); flex: none; }
 .searchwrap input { flex: 1; border: 0; outline: 0; background: transparent;
-  min-height: 42px; font-size: 15px; color: var(--ink-1); }
+  min-height: 44px; font-size: 16px; color: var(--ink-1); }
 .chiprow { display: flex; gap: 6px; margin-top: 8px; overflow-x: auto;
   -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .chiprow::-webkit-scrollbar { display: none; }
-.fchip { flex: none; padding: 6px 12px; border-radius: 999px; font-size: 13px;
-  border: 1px solid var(--line); background: var(--card, #fff); color: var(--ink-2);
-  min-height: 32px; }
+.fchip { position: relative; flex: none; padding: 6px 12px; border-radius: 999px;
+  font-size: 13px; border: 1px solid var(--line); background: var(--card, #fff);
+  color: var(--ink-2); min-height: 34px; }
+/* 视觉尺寸保持紧凑，热区补足到易点范围（横向滚动条上的小胶囊尤其难点） */
+.fchip::after { content: ""; position: absolute; inset: -6px; }
 .fchip.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+  /* 深色下 --brand 是浅蓝，白字压上去只有约 2.2:1，选中态基本读不出来 */
+  .fchip.on { background: var(--brand-btn); border-color: var(--brand-btn); color: var(--brand-btn-ink); }
+}
+:root[data-theme=dark] .fchip.on {
+  background: var(--brand-btn); border-color: var(--brand-btn); color: var(--brand-btn-ink);
+}
 /* 优先级标识：P0 必须一眼跳出来 */
 .pchip { display:inline-flex; align-items:center; gap:4px; padding:2px 9px;
   border-radius:999px; font-size:12px; font-weight:700; letter-spacing:.02em; }
@@ -490,6 +499,7 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
     <div class="page-title">线索</div>
     <div class="seg" style="margin-bottom:10px">
       <button id="segLeadNew" class="on" onclick="setLeadView('new')">待跟进</button>
+      <button id="segLeadDoing" onclick="setLeadView('contacted')">跟进中</button>
       <button id="segLeadAll" onclick="setLeadView('')">全部</button>
     </div>
     <div class="filterbar">
@@ -677,7 +687,16 @@ async function api(path, opts = {}) {
     showLogin("登录已过期或令牌已更换，请重新输入访问令牌");
     throw new Error("401");
   }
-  if (!r.ok) throw new Error("HTTP " + r.status);
+  if (!r.ok) {
+    /* 带上服务端 detail：否则「推送失败」永远提示「检查接待人」，
+       而真实原因可能是影子模式、文件缺列、越权等完全不同的事 */
+    let detail = "";
+    try { detail = (await r.json()).detail || ""; } catch (e) {}
+    const err = new Error("HTTP " + r.status);
+    err.detail = detail;
+    err.status = r.status;
+    throw err;
+  }
   setOffline(false);
   lastSuccess = new Date();
   return r.json();
@@ -685,6 +704,13 @@ async function api(path, opts = {}) {
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function fmtLast(t) {
+  /* 跨天后只显示 22:10 会让人分不清是今天还是昨天 */
+  const now = new Date();
+  const sameDay = t.getFullYear() === now.getFullYear()
+    && t.getMonth() === now.getMonth() && t.getDate() === now.getDate();
+  return (sameDay ? "" : dayLabel(t.toISOString()) + " ") + fmtHM(t);
 }
 function fmtHM(t) {
   return String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
@@ -1044,7 +1070,7 @@ async function loadTodo() {
      （群名已是 chip、紧急已是 badge），把它挤掉正文会让律师扫不到重点。 */
   const cardHtml = r => {
     const q = r.question || (r.summary || "").split("\n").find(l => l.startsWith("客户问题："))?.slice(5) || r.summary;
-    const ai = r.ai_reply || (r.summary || "").split("\n").find(l => l.startsWith("AI 已回复："))?.slice(6) || "";
+    const ai = r.ai_reply || (r.summary || "").split("\n").find(l => l.startsWith("AI 已回复："))?.slice(7) || "";
     const tip = (r.summary || "").split("\n").find(l => l.startsWith("建议回复要点："))?.slice(7) || "";
     return `
     <div class="card ${r.urgent ? "urgent" : ""}" id="todo-${r.id}">
@@ -1058,7 +1084,7 @@ async function loadTodo() {
       ${ai ? `<div class="meta" style="border-left:2px solid var(--line);padding-left:10px;margin-top:6px">AI 已回复：${esc(ai)}</div>` : ""}
       ${tip ? `<div class="meta" style="margin-top:6px">${esc(tip)}</div>` : ""}
       <div class="row fb-row">
-        <button class="btn-text muted" onclick="openConversation('${esc(r.group_id)}')">${ico("message")}查看对话</button>
+        <button class="btn-text muted" data-act="convo" data-gid="${esc(r.group_id)}">${ico("message")}查看对话</button>
         <button class="btn-tonal" style="margin-left:auto" onclick="doneTodo(${r.id})">${ico("check")}标记已处理</button>
       </div>
     </div>`;
@@ -1180,6 +1206,7 @@ function leadSource(gid) {
 function setLeadView(v) {
   leadView = v;
   document.getElementById("segLeadNew").classList.toggle("on", v === "new");
+  document.getElementById("segLeadDoing").classList.toggle("on", v === "contacted");
   document.getElementById("segLeadAll").classList.toggle("on", v === "");
   lastSig.leads = null;
   loadLeads();
@@ -1236,6 +1263,7 @@ async function loadLeads(more = false) {
           ${pr ? `<span class="pchip ${pr.cls}">${pr.zh}</span>`
                : `<span class="badge ${it.cls}">${it.zh}</span>`}
           <span class="chip">${leadSource(l.group_id)}</span>
+          <span class="chip"><span class="tx">${esc(groupName(l.group_id))}</span></span>
           ${l.case_type ? `<span class="chip">${esc(l.case_type)}</span>` : ""}
           ${l.urgency === "high" ? `<span class="badge warn">${esc(URGENCY[l.urgency])}</span>` : ""}
           ${l.status !== "new" ? `<span class="chip">${esc(LEAD_STATUS[l.status] || l.status)}</span>` : ""}
@@ -1263,7 +1291,7 @@ async function loadLeads(more = false) {
           background:var(--chip-bg);font-size:13px;line-height:1.6;color:var(--ink-1)">
           ${ico("note")}${esc(l.notes)}</div>` : ""}
         <div class="row fb-row">
-          <button class="btn-text muted" onclick="openConversation('${esc(l.group_id)}')">${ico("message")}对话</button>
+          <button class="btn-text muted" data-act="convo" data-gid="${esc(l.group_id)}">${ico("message")}对话</button>
           <button class="btn-text muted" onclick="editNotes(${l.id})">${ico("note")}${l.notes ? "改备注" : "记备注"}</button>
           ${l.notified_at ? "" : `<button class="btn-text" onclick="notifyLead(${l.id})">${ico("refresh")}推送</button>`}
           ${l.status === "new" ? `
@@ -1279,7 +1307,7 @@ function editNotes(id) {
   const l = leadItems.find(x => x.id === id) || {};
   openSheet(`<h2>跟进备注</h2>
     <div class="meta" style="margin:6px 0 10px">打完电话记两句：聊到哪了、下一步做什么、什么时候再联系</div>
-    <textarea id="noteText" style="width:100%;min-height:120px;font-size:15px;line-height:1.7;
+    <textarea id="noteText" style="width:100%;min-height:120px;font-size:16px;line-height:1.7;
       padding:12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink-1)"
       placeholder="例：已通话，欠薪 4 万有欠条，周五来所面谈，带劳动合同">${esc(l.notes || "")}</textarea>
     <button class="btn-primary xl" style="margin-top:12px" onclick="saveNotes(${id})">保存</button>`);
@@ -1297,15 +1325,22 @@ async function saveNotes(id) {
     loadLeads();
   } catch (e) { toast("保存失败，请重试", false); }
 }
-async function setLead(id, status) {
+async function setLead(id, status, silent = false) {
+  const prev = (leadItems.find(x => x.id === id) || {}).status || "new";
   try {
-    await api(`/leads/${id}/status`, {
+    const r = await api(`/leads/${id}/status`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
-    toast(status === "converted" ? "已标记成交 🎉" : `已标记为${LEAD_STATUS[status] || status}`);
+    if (!silent) {
+      let msg = status === "converted" ? "已标记成交 🎉"
+        : `已标记为${LEAD_STATUS[status] || status}`;
+      if (r && r.todos_closed) msg += `，同时结掉 ${r.todos_closed} 条待办`;
+      /* 「无效」与「已联系」紧邻，误触会把活线索打死——给一条可撤销的退路 */
+      toast(msg, true, status === "invalid" ? () => setLead(id, prev, true) : null);
+    }
     lastSig.leads = null;
-    loadLeads(); refreshLeadBadge();
+    loadLeads(); refreshLeadBadge(); refreshTodoBadge();
   } catch (e) { toast("操作失败，请重试", false); }
 }
 async function notifyLead(id) {
@@ -1314,12 +1349,14 @@ async function notifyLead(id) {
     toast("已推送给 " + (r.to || "接待人"));
     lastSig.leads = null;
     loadLeads();
-  } catch (e) { toast("推送失败，请检查该会话是否已配置接待人", false); }
+  } catch (e) { toast(e.detail || "推送失败，请检查该会话是否已配置接待人", false); }
 }
 async function refreshLeadBadge() {
+  /* 只数「待跟进的 P0 强意愿」：角标要表达「现在必须打的电话」，
+     数全部积压（导入 359 条后永远 99+）等于没有信息 */
   try {
-    const r = await api("/leads?status=new&limit=200");
-    const n = r.items.filter(l => l.intent !== "cold").length;
+    const r = await api("/leads?status=new&priority=P0&limit=1");
+    const n = r.total || 0;
     const b = document.getElementById("leadBadge");
     b.hidden = n === 0;
     b.textContent = n > 99 ? "99+" : n;
@@ -1343,6 +1380,22 @@ async function uploadKezi(input) {
     toast(bits.join(" · "));
     lastSig.leads = null;
     loadLeads(); refreshLeadBadge();
+    /* 导完就把「下一步」摆到眼前：否则批量分派入口藏在团队 tab 里没人找得到，
+       几百条线索就一直躺着没有承办人 */
+    if (r.imported && !r.no_contact) {
+      try {
+        const m = await api("/metrics");
+        if (m.leads_unassigned > 0) {
+          if (!teamCache.length) { try { teamCache = await api("/lawyers"); } catch (e) {} }
+          if (teamCache.some(l => l.active && l.on_duty)) { askBulkAssign(); return; }
+          openSheet(`<h2>导入完成，还差一步</h2>
+            <p style="font-size:15px;margin:12px 0">这批线索有 ${m.leads_unassigned} 条还没有承办律师。
+            先到「团队」里添加律师，之后一键分派即可。</p>
+            <button class="btn-primary xl" onclick="forceCloseSheet();setTab('team')">去添加律师</button>`);
+          return;
+        }
+      } catch (e) { /* 引导失败不影响导入结果 */ }
+    }
     if (r.no_contact) {
       openSheet(`<h2>有 ${r.no_contact} 条没导进来</h2>
         <p style="font-size:15px;margin:12px 0">这些行的手机号是打码的（如 138****5678）或为空，
@@ -1351,8 +1404,7 @@ async function uploadKezi(input) {
         或确认导出时是否勾选了完整手机号。</p>`);
     }
   } catch (e) {
-    toast(String(e.message).startsWith("HTTP 400")
-      ? "文件格式不对：请确认表里有「手机号 / 电话」列" : "导入失败，请重试", false);
+    toast(e.detail || "导入失败，请重试", false);
   }
 }
 
@@ -1373,19 +1425,21 @@ async function openAssign(leadId) {
     <div class="meta" style="margin:6px 0 10px">改派会立即企微通知新负责人，并同步该会话的承办律师</div>
     ${usable.map(l => `
       <button class="btn-outline" style="width:100%;justify-content:space-between;margin-bottom:8px"
-        onclick="doAssign(${leadId},'${esc(l.userid)}')">
+        data-act="assign" data-lead="${leadId}" data-uid="${esc(l.userid)}">
         <span>${esc(l.name || l.userid)}${l.on_duty ? "" : "（停接新单）"}</span>
         <span class="meta">在办 ${l.open}${l.p0 ? " · P0×" + l.p0 : ""}</span>
       </button>`).join("")}`);
 }
 async function doAssign(leadId, userid) {
   try {
-    await api(`/leads/${leadId}/assign`, {
+    const r = await api(`/leads/${leadId}/assign`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userid }),
     });
     forceCloseSheet();
-    toast("已改派并通知 " + lawyerName(userid));
+    toast(r && r.notified
+      ? "已改派并通知 " + lawyerName(userid)
+      : `已改派给 ${lawyerName(userid)}（${(r && r.hint) || "未发送通知"}）`);
     lastSig.leads = null;
     loadLeads();
   } catch (e) { toast("改派失败，请重试", false); }
@@ -1406,13 +1460,13 @@ async function loadTeam() {
   el.innerHTML = teamCache.map(l => `
     <div class="card" style="${l.active ? "" : "opacity:.55"}">
       <div class="row" style="flex-wrap:nowrap">
-        <b style="font-size:15px">${esc(l.name || l.userid)}</b>
-        <span class="meta">${esc(l.userid)}</span>
+        <b style="font-size:15px;flex:none">${esc(l.name || l.userid)}</b>
+        <span class="meta" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(l.userid)}</span>
         ${l.role === "admin" ? `<span class="chip">管理</span>` : ""}
         ${l.active ? "" : `<span class="badge warn">已停用</span>`}
         <label class="switch" style="margin-left:auto" title="是否接收新派单">
           <input type="checkbox" ${l.on_duty ? "checked" : ""} ${l.active ? "" : "disabled"}
-            aria-label="接单开关" onchange="toggleDuty('${esc(l.userid)}', this)">
+            aria-label="接单开关" data-act="duty" data-uid="${esc(l.userid)}">
           <span></span>
         </label>
       </div>
@@ -1422,9 +1476,9 @@ async function loadTeam() {
       <div class="meta" style="margin-top:2px">在办 ${l.open} 单${l.p0 ? ` · 其中 P0 待联系 ${l.p0} 单` : ""}
         ${l.has_token ? "" : " · 尚未开通登录"}</div>
       <div class="row fb-row">
-        <button class="btn-text" onclick="sendLogin('${esc(l.userid)}')">${ico("send")}发登录链接</button>
-        <button class="btn-text muted" onclick="copyLogin('${esc(l.userid)}')">复制链接</button>
-        <button class="btn-text muted" style="margin-left:auto" onclick="editLawyer('${esc(l.userid)}')">编辑${ico("chevron")}</button>
+        <button class="btn-text" data-act="sendlogin" data-uid="${esc(l.userid)}">${ico("send")}发登录链接</button>
+        <button class="btn-text muted" data-act="copylogin" data-uid="${esc(l.userid)}">复制链接</button>
+        <button class="btn-text muted" style="margin-left:auto" data-act="editlawyer" data-uid="${esc(l.userid)}">编辑${ico("chevron")}</button>
       </div>
     </div>`).join("");
 }
@@ -1607,7 +1661,7 @@ async function loadLog() {
             <button class="btn-text muted" id="qx-${r.id}" style="display:none;min-height:40px"
                     onclick="toggleQuote(${r.id})">${isOpen ? "收起" : "展开"}</button>
             <div class="row fb-row">
-              <button class="btn-text muted" onclick="openConversation('${esc(r.group_id)}')">${ico("message")}查看对话</button>
+              <button class="btn-text muted" data-act="convo" data-gid="${esc(r.group_id)}">${ico("message")}查看对话</button>
               ${fb}
             </div>
             ${note}
@@ -1759,7 +1813,7 @@ async function loadBoard() {
   loadedOnce.board = true;
   document.getElementById("boardFoot").textContent =
     "统计口径：系统上线以来累计 · 每分钟自动更新" +
-    (lastSuccess ? ` · 最后更新 ${fmtHM(lastSuccess)}` : "");
+    (lastSuccess ? ` · 最后更新 ${fmtLast(lastSuccess)}` : "");
   const sig = JSON.stringify(m);
   if (lastSig.board === sig) return;
   lastSig.board = sig;
@@ -1809,7 +1863,7 @@ async function loadBoard() {
     document.getElementById("lawyerBoard").innerHTML =
       m.by_lawyer.map(l => `
         <div class="row" style="padding:7px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap">
-          <span style="font-size:14px;${l.active ? "" : "opacity:.5"}">${esc(l.name)}</span>
+          <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;${l.active ? "" : "opacity:.5"}">${esc(l.name)}</span>
           ${l.on_duty ? "" : `<span class="chip">停接新单</span>`}
           <span class="meta" style="margin-left:auto">在办 ${l.open}</span>
           ${l.p0 ? `<span class="pchip p0" style="margin-left:8px">P0×${l.p0}</span>` : ""}
@@ -1948,6 +2002,25 @@ document.getElementById("groupList").addEventListener("change", e => {
   const input = e.target.closest("[data-act='ai']");
   if (input) toggleAi(input.dataset.gid, input);
 });
+
+/* ============ 全站事件委托 ============
+   动态值（group_id / userid）一律走 data-* 属性，不拼进内联 onclick 的 JS 字符串：
+   esc() 做的是 HTML 实体转义，而事件属性里浏览器会先把实体解码再当 JS 执行，
+   一个带引号的群名就能越出字符串——这是存储型 XSS 的入口。 */
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const { act, gid, uid, lead } = el.dataset;
+  if (act === "convo") openConversation(gid);
+  else if (act === "assign") doAssign(Number(lead), uid);
+  else if (act === "sendlogin") sendLogin(uid);
+  else if (act === "copylogin") copyLogin(uid);
+  else if (act === "editlawyer") editLawyer(uid);
+});
+document.addEventListener("change", e => {
+  const el = e.target.closest("[data-act='duty']");
+  if (el) toggleDuty(el.dataset.uid, el);
+});
 let pendingEnableGid = null;
 async function toggleAi(gid, input) {
   const on = input.checked;
@@ -2034,18 +2107,29 @@ function editGroup(gid) {
 }
 let pendingDeleteGid = null;
 function askDeleteGroup() {
+  /* 内嵌确认条而不是覆写整个弹层：覆写会把用户刚填了一半的档案无声丢掉，
+     「取消」也回不去。照 discardBar 的模式在表单底部就地确认。 */
+  if (document.getElementById("delBar")) return;
   pendingDeleteGid = document.getElementById("f_gid").value.trim();
-  sheetDirty = false;
-  openSheet(`
-    <h2>删除该群档案？</h2>
-    <p style="font-size:15px;margin:12px 0 20px">删除后 AI 将不再关注该群；历史消息与记录会保留。此操作不可恢复。</p>
-    <button class="btn-primary xl" style="background:var(--bad)" onclick="confirmDeleteGroup()">确认删除</button>
-    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="forceCloseSheet()">取消</button>
-  `);
+  const bar = document.createElement("div");
+  bar.id = "delBar";
+  bar.style.cssText = "margin-top:14px;padding:12px 14px;border-radius:10px;" +
+    "background:var(--bad-bg,#FBEAEA)";
+  bar.innerHTML = `<div style="font-size:14px;color:var(--bad);line-height:1.6">
+      删除后 AI 不再关注该会话；历史消息与记录保留。此操作不可恢复。</div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn-text muted" style="min-height:36px"
+        onclick="document.getElementById('delBar').remove()">取消</button>
+      <button class="btn-text" style="margin-left:auto;min-height:36px;color:var(--bad)"
+        onclick="confirmDeleteGroup()">确认删除</button>
+    </div>`;
+  document.getElementById("sheetBody").appendChild(bar);
+  bar.scrollIntoView({ block: "nearest" });
 }
 async function confirmDeleteGroup() {
   const gid = pendingDeleteGid;
   pendingDeleteGid = null;
+  sheetDirty = false;
   try {
     await api(`/groups/${encodeURIComponent(gid)}`, { method: "DELETE" });
     forceCloseSheet();
@@ -2121,7 +2205,9 @@ async function refresh() {
     }
     if (tab === "todo") await loadTodo();
     else refreshTodoBadge(); // 角标跨页告警，不在待办页也保持新鲜
-    if (tab === "leads") await loadLeads();
+    // 定时刷新不重置翻页：律师翻到第 3 页正在看，60 秒后被拽回第一页
+    // 且滚动位置丢失，是纯粹的骚扰。已翻页时只刷角标。
+    if (tab === "leads" && leadOffset === 0) await loadLeads();
     else refreshLeadBadge();
     if (tab === "log") await loadLog();
     if (tab === "board") await loadBoard();

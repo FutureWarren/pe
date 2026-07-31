@@ -52,13 +52,16 @@ _ALIASES: dict[str, tuple[str, ...]] = {
 
 # 客户侧描述：进线来源与诉求。这些进客户消息，参与评分。
 _CUSTOMER_HEADERS = (
-    "搜索关键词", "最近留资记录", "商品名称", "互动场景",
+    "搜索关键词", "最近留资记录", "商品名称",
     "需求", "咨询", "备注", "描述", "内容", "问题",
 )
 # 员工侧记录：跟进状态与备注。**必须单独存为员工发言**，否则「已加微信」这种
 # 我方操作记录会被信号识别当成「客户要加微信详聊」白加 20 分，评分整体虚高。
 _STAFF_HEADERS = (
     "线索阶段", "线索标签", "最新跟进记录", "智能意向", "跟进员工", "跟进人",
+    # 互动场景是平台状态列（直播/短视频/其它），不是客户说的话。留在客户侧会让
+    # 「预约」「电话联系」这类平台样板词命中面谈/要电话信号，成批虚推进 P0。
+    "互动场景",
 )
 
 # 商品名里的方括号即案由：【婚姻家事】律师一对一30分钟免费法律咨询
@@ -263,7 +266,7 @@ def import_leads(
         # 客户侧：进线来源与诉求，单看哪一列都不够，多列拼成一句
         bits = gather(row, customer_cols)
         bits.append(f"（{source}留资，手机号 {contact}）")  # 号码进正文，评分才计「已留电话」
-        fresh = store.save_message(
+        fresh = store.upsert_message(
             IncomingMessage(
                 msg_id=f"dy-{contact}",  # 手机号去重：重复导入只更新不新增
                 group_id=group_id,
@@ -277,7 +280,7 @@ def import_leads(
         notes = gather(row, staff_cols)
         owner_name = cell(row, "owner")
         if notes:
-            store.save_message(
+            store.upsert_message(
                 IncomingMessage(
                     msg_id=f"dy-{contact}-note",
                     group_id=group_id,

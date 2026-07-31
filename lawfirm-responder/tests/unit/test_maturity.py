@@ -240,3 +240,164 @@ def test_bulk_assign_without_roster_is_graceful(tmp_path):
     client = client_for(store, pipeline, snd)
     r = client.post("/console/leads/assign-unrouted", headers=H()).json()
     assert r["assigned"] == 0 and "名册" in r["hint"]
+
+
+# ---------------------------------------------------------------- 数据完整性
+def test_repeat_customer_does_not_lose_phone_or_score(tmp_path):
+    """回头客隔周只说一句「在吗」，不能把上次辛苦拿到的电话和评分抹掉。"""
+    store, _, _, pipeline, _ = make(tmp_path)
+    store.upsert_group(GroupProfile(
+        group_id="kf:a:c9", kf_open_kfid="a", kf_external_userid="c9",
+        client_status=ClientStatus.PROSPECT,
+    ))
+    pipeline.handle(IncomingMessage(
+        msg_id="r1", group_id="kf:a:c9", sender_id="c9",
+        content="我想委托你们处理，电话17721275495"))
+    first = store.get_lead("kf:a:c9")
+    assert first["contact"] == "17721275495" and first["score"] >= 60
+
+    pipeline.handle(IncomingMessage(
+        msg_id="r2", group_id="kf:a:c9", sender_id="c9", content="在吗"))
+    again = store.get_lead("kf:a:c9")
+    assert again["contact"] == "17721275495", "电话不能被空值覆盖"
+    assert again["score"] == first["score"], "评分取历史最高，不因一句闲聊降级"
+    assert again["priority"] == first["priority"]
+
+
+def test_group_silent_phone_message_still_creates_lead(tmp_path):
+    """群里客户单发一句「我电话138…你们联系我」：AI 按规则沉默，
+    但这是最强的转化信号，必须进线索通道。"""
+    store, snd, _, pipeline, _ = make(tmp_path)
+    store.upsert_group(GroupProfile(
+        group_id="grpX", robot_webhook="rk", client_status=ClientStatus.PROSPECT,
+        lawyer_userid="wei",
+    ))
+    d = pipeline.handle(IncomingMessage(
+        msg_id="s1", group_id="grpX", sender_id="c",
+        content="13800138888 你们联系我"))
+    assert d.action.value == "silence"          # 群里不用接话
+    row = store.get_lead("grpX")
+    assert row and row["contact"] == "13800138888"   # 但线索不能漏
+
+
+def test_signed_group_keeps_its_lawyer(tmp_path):
+    """已成交客户的服务群有固定承办律师，自动派单一律不碰——
+    改派会让 AI 在群里点名一个客户从没见过的人。"""
+    store, snd, _, pipeline, _ = make(tmp_path)
+    store.upsert_lawyer("other", {"name": "另一位", "specialties": "劳动仲裁",
+                                  "role": "lawyer", "on_duty": True, "active": True})
+    store.upsert_group(GroupProfile(
+        group_id="signed1", client_status=ClientStatus.SIGNED,
+        lawyer_userid="mr.Li", lawyer_name="李", case_type="劳动仲裁",
+        robot_webhook="rk",
+    ))
+    pipeline.handle(IncomingMessage(
+        msg_id="g1", group_id="signed1", sender_id="c",
+        content="我想委托你们，电话17721275495"))
+    g = store.get_group("signed1")
+    assert (g.lawyer_userid, g.lawyer_name) == ("mr.Li", "李")
+
+
+def test_send_failure_is_not_counted_as_replied(tmp_path):
+    """发送失败还按 live 记账，追问策略会误判「已经答过了」，客户永远拿不到首答。"""
+    store, snd, _, pipeline, _ = make(tmp_path)
+
+    class Dead:
+        def send_robot_text(self, w, t):
+            return False
+
+        def send_group_text(self, c, t):
+            return False
+
+        def send_direct_text(self, u, t):
+            return True
+
+    pipeline._sender = Dead()
+    store.upsert_group(GroupProfile(
+        group_id="grpF", robot_webhook="rk", client_status=ClientStatus.PROSPECT,
+        lawyer_userid="wei",
+    ))
+    d = pipeline.handle(IncomingMessage(
+        msg_id="f1", group_id="grpF", sender_id="c", mentioned_bot=True,
+        content="拖欠工资多久可以申请劳动仲裁？"))
+    assert "send:failed" in d.reasons
+    rows = store.list_replies("grpF")
+    assert rows and rows[0]["mode"] == "failed"
+    assert store.count_recent_live("grpF", d.category.value, 3600) == 0
+
+
+# ---------------------------------------------------------------- 越权
+def _lawyer_token(store, uid="wei", tok="tok-wei"):
+    import hashlib
+
+    store.upsert_lawyer(uid, {"name": uid, "role": "lawyer",
+                              "on_duty": True, "active": True})
+    store.set_lawyer_token_hash(uid, hashlib.sha256(tok.encode()).hexdigest())
+    return tok
+
+
+def test_lawyer_cannot_close_others_todo(tmp_path):
+    from responder.models import Reminder
+
+    store, snd, _, pipeline, _ = make(tmp_path)
+    tok = _lawyer_token(store)
+    rid = store.save_reminder(Reminder(
+        msg_id="x", group_id="g", to_userid="someone-else", summary="s"))
+    client = client_for(store, pipeline, snd)
+    assert client.post(f"/console/todo/{rid}/done", headers=H(tok)).status_code == 404
+    assert client.post(f"/console/todo/{rid}/reopen", headers=H(tok)).status_code == 404
+    # 自己的可以关
+    mine = store.save_reminder(Reminder(
+        msg_id="y", group_id="g", to_userid="wei", summary="s"))
+    assert client.post(f"/console/todo/{mine}/done", headers=H(tok)).status_code == 200
+
+
+def test_lawyer_cannot_rate_others_reply(tmp_path):
+    store, snd, _, pipeline, _ = make(tmp_path)
+    tok = _lawyer_token(store)
+    store.upsert_group(GroupProfile(group_id="gz", lawyer_userid="zhang"))
+    rid = store.save_reply("m1", "gz", "text", "live", True, category="general_law")
+    client = client_for(store, pipeline, snd)
+    r = client.post(f"/console/replies/{rid}/feedback",
+                    json={"feedback": "good"}, headers=H(tok))
+    assert r.status_code == 404
+
+
+def test_feedback_value_is_validated(tmp_path):
+    store, snd, _, pipeline, _ = make(tmp_path)
+    store.upsert_group(GroupProfile(group_id="gz"))
+    rid = store.save_reply("m1", "gz", "text", "live", True, category="general_law")
+    client = client_for(store, pipeline, snd)
+    assert client.post(f"/console/replies/{rid}/feedback",
+                       json={"feedback": "随便写"}, headers=H()).status_code == 400
+
+
+# ---------------------------------------------------------------- 待办联动
+def test_marking_contacted_closes_related_todos(tmp_path):
+    """人已经联系过了，督办还去升级第二责任人纯属制造无效打扰。"""
+    from responder.models import Reminder
+
+    store, snd, _, pipeline, _ = make(tmp_path)
+    seed_leads(store)
+    row = store.list_leads(limit=1)[0]
+    store.save_reminder(Reminder(
+        msg_id="t1", group_id=row["group_id"], to_userid="wei",
+        urgent=True, summary="s"))
+    client = client_for(store, pipeline, snd)
+    r = client.post(f"/console/leads/{row['id']}/status",
+                    json={"status": "contacted"}, headers=H()).json()
+    assert r["todos_closed"] == 1
+    assert store.pending_reminders() == []
+
+
+def test_search_escapes_like_wildcards(tmp_path):
+    """搜「100%」时 % 是字面量，不是「匹配任意」。"""
+    store, snd, _, pipeline, _ = make(tmp_path)
+    store.upsert_group(GroupProfile(group_id="g%1"))
+    store.upsert_lead("g%1", {"intent": "hot", "contact": "13900000001",
+                              "summary": "承诺100%胜诉的对方"})
+    store.upsert_group(GroupProfile(group_id="g2"))
+    store.upsert_lead("g2", {"intent": "hot", "contact": "13900000002",
+                             "summary": "普通咨询"})
+    client = client_for(store, pipeline, snd)
+    assert client.get("/console/leads?q=100%25", headers=H()).json()["total"] == 1

@@ -131,8 +131,11 @@ def test_customer_and_staff_columns_are_separated():
     """员工跟进记录必须与客户诉求分开——混在一起会让「已加微信」虚增评分。"""
     cust = set(importer.detect_customer_columns(HEADERS))
     staff = set(importer.detect_staff_columns(HEADERS))
-    assert {11, 12, 13, 16} <= cust        # 关键词/留资记录/商品/互动场景
+    assert {11, 12, 13} <= cust            # 搜索关键词/最近留资记录/商品名称
     assert {3, 4, 5, 6, 7} <= staff        # 阶段/标签/跟进记录/意向/跟进员工
+    # 互动场景（直播/短视频）是平台状态列，不是客户的话——留在客户侧会让
+    # 平台样板词命中面谈/要电话信号，成批虚推进 P0
+    assert 16 in staff and 16 not in cust
     assert not (cust & staff) and 1 not in cust
 
 
