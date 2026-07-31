@@ -933,6 +933,12 @@ function openStatusPanel() {
           onclick="openKfQr()">${ico("phone")}获取客户进线二维码</button>` : ""}
       </div>
       <div class="srow"><div class="k">待处理队列</div><div class="v">${esc(qTxt)}</div></div>
+      <div class="srow admin-only"><div class="k">程序版本</div>
+        <div class="v" id="verLine">${h.commit ? esc(h.commit) : "—"}</div>
+        <button class="btn-outline" style="margin-top:8px" onclick="askUpdate()">
+          ${ico("refresh")}升级到最新版
+        </button>
+      </div>
     </div>
     <div class="eyebrow">使用说明</div>
     <div class="status-rows">
@@ -1012,6 +1018,48 @@ async function doSwitchMode(mode) {
     refresh();
   } catch (e) { toast("操作失败，请重试", false); }
 }
+
+/* 升级到最新版：服务器自己去仓库拉代码并重启。
+   做成按钮是因为运维通道可能不通（网络策略变更过一次），
+   有了它，所里自己在浏览器上点一下就能升级，不必等任何人。 */
+function askUpdate() {
+  openSheet(`
+    <h2>升级到最新版？</h2>
+    <p style="font-size:15px;margin:12px 0 8px">服务器会拉取最新程序并重启，
+      整个过程约 <b>半分钟</b>。期间客户发来的消息会排队，不会丢。</p>
+    <p style="font-size:13px;color:var(--ink-2);margin-bottom:20px">
+      当前版本 ${esc((healthCache && healthCache.commit) || "未知")}</p>
+    <button class="btn-primary xl" onclick="doUpdate()">确认升级</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+      onclick="closeSheet()">暂不升级</button>
+  `);
+}
+async function doUpdate() {
+  const before = (healthCache && healthCache.commit) || "";
+  try {
+    const r = await api("/update", { method: "POST" });
+    if (r.ok === false) { toast(r.error || "升级未启动", false); return; }
+  } catch (e) { toast("升级未能启动，请重试", false); return; }
+  forceCloseSheet();
+  toast("正在升级，请稍候……");
+  /* 重启期间请求必然失败，所以只看「版本号变了」这一个信号，失败一律当作还没起来 */
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      const h = await (await fetch("/health")).json();
+      if (h.commit && h.commit !== before) {
+        healthCache = h; paintCapsule();
+        const el = document.getElementById("verLine");
+        if (el) el.textContent = h.commit;
+        toast(`已升级到 ${h.commit}`);
+        lastSig.log = null; refresh();
+        return;
+      }
+    } catch (e) { /* 重启中，继续等 */ }
+  }
+  toast("升级仍在进行，稍后刷新页面查看", false);
+}
+
 function setOffline(off) {
   if (off === offline) { if (off) updateBanner(); return; }
   offline = off;
