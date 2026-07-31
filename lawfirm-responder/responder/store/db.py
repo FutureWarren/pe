@@ -399,10 +399,15 @@ class Store:
         )
 
     def recent_messages(self, group_id: str, limit: int = 10) -> list[dict]:
-        """最近 N 条群消息，按时间正序（注入 LLM 上下文用）。"""
+        """最近 N 条群消息，按时间正序（注入 LLM 上下文用）。
+
+        msg_type 必须带出来：进线事件占位（msg_type='event'）与真实发言长得一样
+        （content 都可能为空），少了这一列就分不清「客户第一次进来」和「老客户回访」。
+        """
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT sender_id, sender_is_staff, content, created_at FROM messages"
+                "SELECT sender_id, sender_is_staff, content, msg_type, created_at"
+                " FROM messages"
                 " WHERE group_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (group_id, limit),
             ).fetchall()
@@ -497,6 +502,21 @@ class Store:
                 (group_id, category, cutoff),
             ).fetchone()
             return row["n"]
+
+    def has_greeting(self, group_id: str) -> bool:
+        """这通对话是否已经发过开场白（进线问候或引导型开场）。
+
+        一通对话只该有一次自我介绍。客户扫码进来被问候过、接着把情况打出来，
+        若规则判不出那是不是法律问题而再回一遍「请您说说什么情况」，
+        就是当着客户的面复读——这个查询就是用来拦住第二次的。
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM replies WHERE group_id=? AND category='greeting'"
+                " AND mode='live' LIMIT 1",
+                (group_id,),
+            ).fetchone()
+        return row is not None
 
     def set_reply_feedback(self, reply_id: int, feedback: str) -> None:
         with self._conn() as conn:

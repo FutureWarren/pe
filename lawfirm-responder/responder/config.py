@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     # 客服会话首次出现时自动建档，用于话术点名；留空则话术说「承办律师」
     kf_default_lawyer_name: str = ""
     kf_default_case_type: str = ""
+    # 客户扫码进入客服会话即主动打招呼（不等他先开口）。
+    # 空窗口是最大的流失点：客户点进来看到一片空白，很多人直接就退了。
+    kf_welcome_on_enter: bool = True
+
+    # 律所线下地址：邀约到所面谈的话术里用。留空则只约时间不报地址。
+    office_address: str = "上海市松江区九峰路88号平高广场11楼"
+    office_name: str = "上海松沪律师事务所"
+    # 客户聊到第几条还没留联系方式时，主动开口要电话 + 邀约到所面谈。
+    # 太早显得急着推销，太晚客户已经走了；默认第 3 条客户消息。
+    ask_contact_after_messages: int = 3
 
     # LLM 供应商：deepseek | anthropic | auto（auto = 谁的 key 在就用谁，deepseek 优先）
     # 业务决策 2026-07：默认 DeepSeek（成本考虑）；Anthropic 路径保留可随时切回

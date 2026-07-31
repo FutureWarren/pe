@@ -15,6 +15,7 @@ import zlib
 from datetime import datetime
 
 from responder.compliance.disclaimer import DISCLAIMER
+from responder.config import Settings, get_settings
 from responder.models import Category, ClientStatus, GroupProfile
 
 
@@ -26,6 +27,16 @@ def _case(group: GroupProfile) -> str:
     return f"您{group.case_type}案件" if group.case_type else "您的案件"
 
 
+def _in_group(group: GroupProfile) -> str:
+    """答复发生在哪儿。
+
+    群聊里说「在群里回您」是自然的；一对一客服窗口（微信客服/抖音私信）根本没有群，
+    对着私聊窗口说「我在群里回您」，客户会以为要被拉进某个群，或者干脆看不懂。
+    客服会话已经是主进线通道，这个词必须跟着渠道走。
+    """
+    return "" if group.is_kf else "在群里"
+
+
 def _pick(variants: list[str], seed: str) -> str:
     """按 seed 稳定选取变体：同一 seed 永远同一条。"""
     return variants[zlib.crc32(seed.encode()) % len(variants)]
@@ -34,11 +45,11 @@ def _pick(variants: list[str], seed: str) -> str:
 # ---------------------------------------------------------------- ② 承接类
 # 语感依据见 docs/voice-guide.md：先接住，再给预期；短句；不打公文腔。
 def handoff_case_status(group: GroupProfile, seed: str = "") -> str:
-    L, C = _lawyer(group), _case(group)
+    L, C, G = _lawyer(group), _case(group), _in_group(group)
     variants = [
-        f"收到，{C}的最新进展我帮您问下{L}哈，一有消息马上在群里说。",
+        f"收到，{C}的最新进展我帮您问下{L}哈，一有消息马上{G}回您。",
         f"看到您消息了。具体进展得{L}那边确认，我已经跟{L}说了，回头就答复您。",
-        f"收到您的消息，这个我帮您催一下{L}，他核实了就在群里回您。",
+        f"收到您的消息，这个我帮您催一下{L}，他核实了就{G}回您。",
     ]
     return _pick(variants, seed)
 
@@ -136,10 +147,10 @@ def safe_fallback(group: GroupProfile) -> str:
 
 def second_touch(group: GroupProfile, urgent: bool = False) -> str:
     """客户追问同一件事时的二次安抚：不复读，升级姿态。"""
-    L = _lawyer(group)
+    L, G = _lawyer(group), _in_group(group)
     if urgent:
         return f"实在抱歉让您久等了，我刚又加急催了{L}，也跟所里其他同事说了，一定尽快回您。"
-    return f"抱歉让您久等了，我刚又跟{L}那边催了一下，一有回复马上在群里说。"
+    return f"抱歉让您久等了，我刚又跟{L}那边催了一下，一有回复马上{G}告诉您。"
 
 
 HANDOFF_BY_CATEGORY = {
@@ -178,7 +189,37 @@ CTA_PROSPECT = [
     "每个人情况不太一样，方便的话可以约个时间，跟律师细聊下您的情况。",
     "您这个情况具体怎么处理最稳妥，还是当面跟律师过一遍比较清楚，方便的话约个时间。",
 ]
-CTA_MARKERS = ("约个时间", "再给您细说")
+# 索要联系方式的识别标记：三个变体都含「手机号」，一个词即可覆盖。
+# 与 CTA_MARKERS 分开是因为两者的复读容忍度不同——泛泛的「约个时间」可以隔一阵再来一次，
+# 「留个电话」在同一通对话里问第二遍就变成催单了。
+ASK_CONTACT_MARKERS = ("手机号",)
+CTA_MARKERS = ("约个时间", "再给您细说") + ASK_CONTACT_MARKERS
+
+
+def ask_contact(
+    group: GroupProfile, seed: str = "", settings: Settings | None = None
+) -> str:
+    """聊到一定程度仍未留联系方式时，主动要电话 + 邀约到所面谈。
+
+    这是首轮筛查的收口动作：线上能说的是一般性框架，真要把事办了必须落到
+    「谁来跟进、怎么找到他」。不开口要，八成客户聊完就走了。
+
+    语气按真人来：先给「为什么要电话」的理由（律师回电更省事），再给一个
+    可选项（也可以直接来所里），不逼客户二选一。地址报全，让人觉得是实体所。
+    """
+    settings = settings or get_settings()
+    L = _lawyer(group)
+    addr = settings.office_address
+    where = f"{settings.office_name}（{addr}）" if addr else settings.office_name
+    variants = [
+        f"这样，您留个手机号吧，我安排{L}直接给您回个电话，比打字说得清楚。\n"
+        f"要是您方便过来，也欢迎来所里坐坐、当面聊：{where}，来之前跟我说一声就行。",
+        f"您方便留个手机号吗？我转给{L}，让他电话里跟您细说，比在这儿打字快。\n"
+        f"或者您得空来所里也行，我们在{where}，喝杯茶把材料一起看看。",
+        f"要不这样，您把手机号发我，{L}那边直接联系您。\n"
+        f"当面聊也可以，地址是{where}，您定个时间我这边给您安排。",
+    ]
+    return _pick(variants, seed)
 
 
 def answer_scaffold(
@@ -211,7 +252,7 @@ def answer_without_llm(
     """未接入模型时直接回答路径的确定性降级：不编造法律内容，转为承接。"""
     text = (
         f"收到您的咨询。这个为了给您说准确，我已转达{_lawyer(group)}，"
-        f"他看到会在群里给您解答。"
+        f"他看到会{_in_group(group)}给您解答。"
     )
     if include_cta and group.client_status == ClientStatus.PROSPECT:
         text += "方便的话也可以约个时间，跟律师细聊下您的情况。"

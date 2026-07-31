@@ -85,6 +85,15 @@ ruff check responder tests       # lint
   律师名册为空时整套派单回落旧链路——该回落行为是升级兼容承诺，不得移除。
 - AI 身份：普通销售顾问，不明示 AI（全量留痕是该决策的合规兜底，留痕逻辑不得削弱）。
 - 免责句式默认关闭（见上）。
+- 一对一进线的两个收口动作（2026-07，依据抖音后台漏斗 进私 416 → 开口 90 → 留资 50）：
+  ① **进线即问候**：客户扫码/私信进来触发 enter_session 事件就先打招呼，不等他开口
+  （`worker._kf_welcome`，按 msg_id 幂等，回访客户不再自我介绍）。
+  一通对话只许有一次开场白，第二次一律改走承接（`service._avoid_repeat_greeting`）。
+  ② **聊够了主动要电话 + 邀约到所**：默认第 3 条客户发言后，且通篇未出现联系方式、
+  未成交客户、接管窗口内没问过（`service._should_ask_contact` → `templates.ask_contact`）。
+  阈值 `ask_contact_after_messages` 与所址 `office_address` 走配置，改动须人工确认。
+- 渠道措辞：「在群里」只对群聊说。客服/私信是一对一窗口，没有群，
+  模板一律经 `templates._in_group(group)`，prompt 经 `is_one_on_one` 告知模型当前场合。
 
 ## 待定决策（动工相关功能前先确认）
 

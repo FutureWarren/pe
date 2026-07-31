@@ -20,9 +20,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from responder import lead
+from responder.compliance.guard import guard
 from responder.gateway import bot, wecom_kf
-from responder.models import ClientStatus, GroupProfile, IncomingMessage
+from responder.models import Action, ClientStatus, GroupProfile, IncomingMessage
 from responder.notify import escalation
+from responder.reply import templates
 
 logger = logging.getLogger(__name__)
 
@@ -280,14 +282,24 @@ class Worker:
 
     def _handle_kf_message(self, raw: dict) -> None:
         origin = raw.get("origin")
-        if origin == wecom_kf.ORIGIN_SYSTEM:
-            return  # 系统推送（欢迎语等）不进判断
         open_kfid = raw.get("open_kfid", "")
         external_userid = raw.get("external_userid", "")
         if not open_kfid or not external_userid:
             return
         # 一个「客服账号 × 客户」= 一个会话档案，复用群档案的全部能力（开关/律师/留痕）
         group_id = f"kf:{open_kfid}:{external_userid}"
+
+        # 客户扫码进入会话：主动打招呼，不等他先开口。
+        # 空窗口是最大的流失点——客户点进来看到一片空白，很多人当场就退了。
+        if raw.get("msgtype") == "event":
+            event = (raw.get("event") or {}).get("event_type", "")
+            if event in wecom_kf.ENTER_EVENTS:
+                self._ensure_kf_profile(group_id, open_kfid, external_userid)
+                self._kf_welcome(group_id, open_kfid, external_userid,
+                                 raw.get("msgid") or "")
+            return
+        if origin == wecom_kf.ORIGIN_SYSTEM:
+            return  # 系统推送（企微自带欢迎语等）不进判断
         self._ensure_kf_profile(group_id, open_kfid, external_userid)
 
         is_staff = origin == wecom_kf.ORIGIN_SERVICER or bool(raw.get("servicer_userid"))
@@ -305,6 +317,42 @@ class Worker:
         if not self.store.save_message(msg):
             return  # 重复投递
         self.pipeline.handle(msg)
+
+    def _kf_welcome(
+        self, group_id: str, open_kfid: str, external_userid: str, msg_id: str
+    ) -> None:
+        """客户进入客服会话时的主动问候。
+
+        只在「这个会话此前没说过话」时发：老客户第二次点进来再被介绍一遍
+        律所全称会很怪，而且他上一轮的上下文还在。
+        """
+        s = self.pipeline.settings
+        if not s.kf_welcome_on_enter:
+            return
+        # 幂等：企微可能重复推同一个事件，msg_id 入库即去重
+        marker = f"kf-enter-{msg_id}" if msg_id else f"kf-enter-{group_id}"
+        if not self.store.save_message(IncomingMessage(
+            msg_id=marker, group_id=group_id, sender_id=external_userid,
+            sender_is_staff=False, content="", msg_type="event",
+        )):
+            return
+        # 已有真实对话（事件占位不算）→ 是回访，不再自我介绍一遍
+        if any(m.get("msg_type") != "event"
+               for m in self.store.recent_messages(group_id, 50)):
+            return
+        group = self.store.get_group(group_id)
+        if group is None or not group.ai_enabled:
+            return
+        client = self.pipeline.kf_client  # 受模式门控：影子模式不外发
+        if client is None:
+            return
+        text = templates.greeting_opener(group, seed=marker)
+        result = guard(text, Action.ANSWER, templates.safe_fallback(group))
+        client.send_text(open_kfid, external_userid, result.text)
+        self.store.save_reply(
+            marker, group_id, result.text, "live", result.passed, category="greeting",
+        )
+        logger.info("kf welcome sent: %s", group_id)
 
     def _ensure_kf_profile(self, group_id: str, open_kfid: str, external_userid: str) -> None:
         """客服会话首次出现时自动建档——员工零操作即可让 AI 上岗。

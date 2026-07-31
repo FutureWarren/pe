@@ -27,6 +27,10 @@ ORIGIN_CUSTOMER = 3  # 客户发的
 ORIGIN_SYSTEM = 4  # 系统推送（欢迎语/事件等）
 ORIGIN_SERVICER = 5  # 接待人员（真人客服/律师）发的 → 触发人工接管
 
+# 客户扫码/点链接进入会话的事件类型。企微在不同版本里用过这几个名字，
+# 全都认——认漏一个的后果是客户进来后对着空窗口，没人打招呼。
+ENTER_EVENTS = ("enter_session", "user_enter_session", "enter_chat")
+
 
 class KfClient:
     """微信客服 API 客户端。sync 在任何模式下都要工作（收），send 由管道按模式门控（发）。"""

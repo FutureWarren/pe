@@ -144,6 +144,7 @@ def refine(
     *,
     history_text: str = "",
     case_type: str = "",
+    is_one_on_one: bool = False,
     timeout: float = 15.0,
     settings: Settings | None = None,
 ) -> Refined | None:
@@ -151,7 +152,7 @@ def refine(
     provider = resolve(settings)
     if provider is None:
         return None
-    user = prompts.classify_user_prompt(content, history_text, case_type)
+    user = prompts.classify_user_prompt(content, history_text, case_type, is_one_on_one)
     try:
         if provider.name == "deepseek":
             text = _chat_deepseek(
@@ -240,6 +241,7 @@ def generate_answer_body(
     case_stage: str = "",
     history_text: str = "",
     is_night: bool = False,
+    is_one_on_one: bool = False,
     max_tokens: int = 500,
     timeout: float = 15.0,
     settings: Settings | None = None,
@@ -252,7 +254,8 @@ def generate_answer_body(
     if provider is None:
         return None
     user = prompts.answer_user_prompt(
-        question, case_type, client_status_label, case_stage, history_text, is_night
+        question, case_type, client_status_label, case_stage, history_text,
+        is_night, is_one_on_one,
     )
     try:
         if provider.name == "deepseek":

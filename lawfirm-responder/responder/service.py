@@ -13,7 +13,14 @@ from responder.config import Settings, get_settings
 from responder.engine import llm, rules, signals
 from responder.engine.decision import decide, wait_seconds
 from responder.gateway.sender import WeComSender
-from responder.models import Action, Category, Decision, GroupProfile, IncomingMessage
+from responder.models import (
+    Action,
+    Category,
+    ClientStatus,
+    Decision,
+    GroupProfile,
+    IncomingMessage,
+)
 from responder.notify import escalation
 from responder.reply import sanitize, templates
 from responder.reply.generator import generate
@@ -64,6 +71,7 @@ class Pipeline:
                 msg.content,
                 history_text=_history_text(history),
                 case_type=group.case_type,
+                is_one_on_one=group.is_kf,
                 timeout=self.settings.llm_timeout_seconds,
                 settings=self.settings,
             )
@@ -109,6 +117,7 @@ class Pipeline:
             settings=self.settings,
             classification=self._classify(msg, group, history),
         )
+        self._avoid_repeat_greeting(decision)
 
         if decision.action == Action.SILENCE:
             self.store.save_decision(decision)
@@ -129,14 +138,18 @@ class Pipeline:
                 msg.created_at + timedelta(seconds=required + 1),
             )
 
+        want_contact = self._should_ask_contact(group, decision, convo)
         result = generate(
             msg, decision, group, history=history, settings=self.settings,
             include_cta=not self._recent_cta(msg.group_id),
+            ask_contact=want_contact,
         )
         reply_text = None
         if result:
             mode = "live" if (self.settings.mode == "live" and decision.should_speak) else "shadow"
-            final_text = self._apply_followup_policy(msg, decision, group, result.text, mode)
+            final_text = self._apply_followup_policy(
+                msg, decision, group, result.text, mode, ask_contact=want_contact,
+            )
             if final_text is None:
                 # 第 3 次追问起：群内静默，原话术仅留档草稿，提醒已升级
                 final_text, mode = result.text, "shadow"
@@ -199,6 +212,26 @@ class Pipeline:
 
         return decision
 
+    def _avoid_repeat_greeting(self, decision: Decision) -> None:
+        """一通对话只允许一次开场白，第二次改走承接。就地修改 decision。
+
+        客户扫码进来时已被问候过一次，接着他把自己的事打出来——这类陈述句
+        （「公司拖欠我三个月工资，还把我辞退了」）没有问号，规则判不出是不是
+        法律问题，模型复核又可能超时/未配置，就会退回开场白，等于当着客户的面
+        问他刚说完的事。宁可回一句「收到，我转给律师」：是废话，但不冒犯。
+
+        「收下联系方式」那套话术走的也是 GREETING，但它是应答不是自我介绍，不受此限。
+        """
+        if decision.category != Category.GREETING or decision.action == Action.SILENCE:
+            return
+        if "kf:contact-ack" in decision.reasons:
+            return
+        if not self.store.has_greeting(decision.group_id):
+            return
+        decision.action = Action.HANDOFF
+        decision.category = Category.OTHER
+        decision.reasons.append("greeting:already-sent")
+
     def _maybe_dispatch_lead(
         self, msg: IncomingMessage, decision: Decision, group: GroupProfile,
         convo: list[dict],
@@ -228,15 +261,53 @@ class Pipeline:
 
     def _recent_cta(self, group_id: str) -> bool:
         """接管时间窗内该群是否已发过带面谈引导/收尾语的回复——有则本次不再带（防套路感）。"""
-        for r in self.store.list_replies(group_id, limit=6):
+        return self._recent_marker(group_id, templates.CTA_MARKERS)
+
+    def _recent_marker(self, group_id: str, markers: tuple[str, ...], limit: int = 6) -> bool:
+        """接管时间窗内最近几条实发回复里是否出现过某类话术标记。"""
+        for r in self.store.list_replies(group_id, limit=limit):
             if r["mode"] != "live":
                 continue
             age = (datetime.now() - datetime.fromisoformat(r["created_at"])).total_seconds()
             if age >= self.settings.takeover_seconds:
                 break
-            if any(m in r["text"] for m in templates.CTA_MARKERS):
+            if any(m in r["text"] for m in markers):
                 return True
         return False
+
+    def _should_ask_contact(
+        self, group: GroupProfile, decision: Decision, convo: list[dict]
+    ) -> bool:
+        """这一轮该不该开口要电话 + 邀约到所面谈。
+
+        首轮筛查的收口动作：线上只能给一般性框架，真要把事办了必须落到
+        「谁跟进、怎么找到他」。抖音后台数据摆在那儿——90 个开口的人里只有 50 个留资，
+        不主动开口要，剩下那四成聊完就走了。
+
+        五个前提缺一不可：
+          1. 未成交客户（已委托的客户电话我们本来就有，再问一遍很怪）；
+          2. 聊够了（默认第 3 条客户发言）——太早像推销，太晚人已经走了；
+          3. 通篇还没出现过联系方式（客户自己留了就不必再要）；
+          4. 不是开场白那一轮（刚打上照面就问电话，人只会退出去）；
+          5. 接管时间窗内没问过（同一通对话问第二遍就成了催单）。
+        """
+        threshold = self.settings.ask_contact_after_messages
+        if threshold <= 0 or group.client_status != ClientStatus.PROSPECT:
+            return False
+        if decision.category == Category.GREETING:
+            return False
+        # 事件占位（进线事件）不是发言，不计入「聊了几句」
+        spoken = [
+            m for m in convo
+            if not m.get("sender_is_staff")
+            and m.get("msg_type") != "event"
+            and (m.get("content") or "").strip()
+        ]
+        if len(spoken) < threshold:
+            return False
+        if signals.scan(convo)[1]:
+            return False
+        return not self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
 
     # ------------------------------------------------------------ 发送
     def _is_kf(self, group: GroupProfile) -> bool:
@@ -297,7 +368,7 @@ class Pipeline:
     # ------------------------------------------------------------ 追问策略
     def _apply_followup_policy(
         self, msg: IncomingMessage, decision: Decision, group: GroupProfile,
-        text: str, mode: str,
+        text: str, mode: str, *, ask_contact: bool = False,
     ) -> str | None:
         """返回实际要发的文本；None 表示本次群内静默（仅升级提醒）。
 
@@ -312,14 +383,18 @@ class Pipeline:
             return text
         if n == 1:
             decision.reasons.append("followup:second-touch")
+            # 二次安抚整段替换原文，generate() 拼好的索要联系方式也一并被丢掉了，
+            # 得在这儿补回来——客户第二次追问同一件事，正是最该把他接到电话上的时候。
+            body = templates.second_touch(group, urgent=decision.urgent)
+            if ask_contact:
+                body += "\n" + templates.ask_contact(
+                    group, seed=msg.msg_id, settings=self.settings
+                )
             # 二次安抚是在 guard 之后替换文本的，必须自己再过一次出口闸门——
             # 合规护栏「所有 AI 生成文本都要过 guard」不接受任何绕行
             from responder.compliance.guard import guard
 
-            checked = guard(
-                templates.second_touch(group, urgent=decision.urgent),
-                Action.HANDOFF, templates.safe_fallback(group),
-            )
+            checked = guard(body, Action.HANDOFF, templates.safe_fallback(group))
             return checked.text
         decision.urgent = True
         decision.reasons.append("followup:suppressed-escalated")

@@ -42,6 +42,7 @@ def _llm_answer_body(
         case_stage=group.case_stage,
         history_text=prompts.format_history(history),
         is_night=now.hour >= 22 or now.hour < 6,
+        is_one_on_one=group.is_kf,
         max_tokens=settings.llm_max_tokens_answer,
         timeout=settings.llm_timeout_seconds,
         settings=settings,
@@ -60,12 +61,16 @@ def generate(
     history: list[dict] | None = None,
     require_disclaimer: bool | None = None,
     include_cta: bool = True,
+    ask_contact: bool = False,
     settings: Settings | None = None,
     now: datetime | None = None,
 ) -> GuardResult | None:
     """按判断结果生成回复文本并过合规闸门。SILENCE 返回 None。
 
     require_disclaimer 缺省时读取运行配置（当前业务决策默认关闭）。
+    ask_contact=True 时在正文后追加「留个电话 / 欢迎到所面谈」的收口话术，
+    并顶掉泛泛的面谈引导（两者同时出现会变成两段意思重复的收尾）。
+    由管道判定时机（见 service.Pipeline._should_ask_contact）。
     """
     if decision.action == Action.SILENCE:
         return None
@@ -78,7 +83,15 @@ def generate(
 
     fallback = templates.safe_fallback(group)
 
-    # 客服开场引导：确定性话术，不含法律实质内容，不进模型
+    def _close(text: str) -> str:
+        """收口：需要时把索要联系方式的话术接在正文之后（整体再过闸门）。"""
+        if not ask_contact:
+            return text
+        decision.reasons.append("cta:ask-contact")
+        return text + "\n" + templates.ask_contact(group, seed=msg.msg_id, settings=settings)
+
+    # 客服开场引导：确定性话术，不含法律实质内容，不进模型。
+    # 开场白不接索要电话——刚打上照面就问电话，客户只会退出去。
     if decision.category == Category.GREETING:
         text = templates.greeting_opener(
             group, seed=msg.msg_id, contact_left="kf:contact-ack" in decision.reasons
@@ -86,7 +99,7 @@ def generate(
         return guard(text, Action.ANSWER, fallback)
 
     if decision.action == Action.HANDOFF:
-        text = templates.build_handoff(decision.category, group, seed=msg.msg_id)
+        text = _close(templates.build_handoff(decision.category, group, seed=msg.msg_id))
         return guard(text, Action.HANDOFF, fallback)
 
     # ANSWER：优先 Claude 生成一般性框架；失败/示弱时确定性降级为承接式回答
@@ -96,12 +109,16 @@ def generate(
             group, body,
             include_disclaimer=require_disclaimer,
             opening=templates.answer_opening(msg.content, now),
-            include_cta=include_cta,
+            include_cta=include_cta and not ask_contact,
             seed=msg.msg_id,
         )
     else:
         decision.reasons.append("answer:fallback-no-llm")
         text = templates.answer_without_llm(
-            group, include_disclaimer=require_disclaimer, include_cta=include_cta
+            group,
+            include_disclaimer=require_disclaimer,
+            include_cta=include_cta and not ask_contact,
         )
-    return guard(text, Action.ANSWER, fallback, require_disclaimer=require_disclaimer)
+    return guard(
+        _close(text), Action.ANSWER, fallback, require_disclaimer=require_disclaimer
+    )

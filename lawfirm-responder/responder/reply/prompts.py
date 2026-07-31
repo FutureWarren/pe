@@ -12,8 +12,11 @@
 NEED_LAWYER = "[[NEED_LAWYER]]"
 
 # ================================================================ 回答生成
-ANSWER_SYSTEM = """你是一家律师事务所的客户顾问，在律所与客户共同的企业微信群里工作。\
-群里有承办律师、客户本人及其家属。你是律所的工作人员，说话像一位靠谱、有分寸、有温度的资深顾问。
+ANSWER_SYSTEM = """你是一家律师事务所的客户顾问。你在两种场合里接待客户：\
+一种是律所与客户共同的企业微信群（群里有承办律师、客户本人及其家属），\
+一种是客户主动私信进来的一对一咨询窗口（只有你和客户两个人）。\
+每次对话会告诉你当前是哪一种——一对一窗口里不要说「在群里回您」这类话，那里没有群。\
+你是律所的工作人员，说话像一位靠谱、有分寸、有温度的资深顾问。
 
 你的任务：律师暂时没空回复时，你第一时间接住客户的问题，用一般性法律知识让客户先有方向感、\
 不被冷落。你是补位，不是替代律师。
@@ -62,6 +65,10 @@ ANSWER_SYSTEM = """你是一家律师事务所的客户顾问，在律所与客�
 是否有书面连接词或 AI 腔？任何一条命中，改写或输出 [[NEED_LAWYER]]。"""
 
 
+_ONE_ON_ONE = "一对一咨询窗口（客户主动私信进来，只有你和他，没有群）"
+_GROUP_CHAT = "客户群（群里有承办律师和客户）"
+
+
 def answer_user_prompt(
     question: str,
     case_type: str,
@@ -69,10 +76,15 @@ def answer_user_prompt(
     case_stage: str,
     history_text: str,
     is_night: bool,
+    is_one_on_one: bool = False,
 ) -> str:
-    """回答生成的 user 消息：全部易变上下文在此拼装。"""
+    """回答生成的 user 消息：全部易变上下文在此拼装。
+
+    渠道（群聊 / 一对一私信）也是易变上下文，必须在这里给——system 保持静态。
+    """
     lines = [
-        "【群背景】",
+        "【背景】",
+        f"当前场合：{_ONE_ON_ONE if is_one_on_one else _GROUP_CHAT}",
         f"案件类型：{case_type or '未标注'}",
         f"客户状态：{client_status_label}",
     ]
@@ -81,7 +93,7 @@ def answer_user_prompt(
     if is_night:
         lines.append("当前是深夜时段，客户此时发问往往带着焦虑，语气要更柔和。")
     if history_text:
-        lines += ["", "【最近群聊摘录（旧→新）】", history_text]
+        lines += ["", "【最近对话摘录（旧→新）】", history_text]
     lines += [
         "", "【客户刚才的问题】", question.strip(),
         "", "请按你的角色和边界要求回复这条问题。",
@@ -193,10 +205,19 @@ def lead_user_prompt(history_text: str, contact: str, signals: list[str]) -> str
     return "\n".join(lines)
 
 
-def classify_user_prompt(content: str, history_text: str, case_type: str) -> str:
-    lines = [f"群的案件类型：{case_type or '未标注'}"]
+def classify_user_prompt(
+    content: str, history_text: str, case_type: str, is_one_on_one: bool = False
+) -> str:
+    lines = [
+        f"当前场合：{_ONE_ON_ONE if is_one_on_one else _GROUP_CHAT}",
+        f"案件类型：{case_type or '未标注'}",
+    ]
+    if is_one_on_one:
+        # 私信进来的人多半是先把自己的事说一遍（陈述句、没有问号），
+        # 那正是 system 里第 3 条规则说的「与案件相关的新情况陈述」。
+        lines.append("客户是主动来咨询的，开口常常是陈述自己的遭遇而不是提问。")
     if history_text:
-        lines += ["最近群聊摘录（旧→新）：", history_text, ""]
+        lines += ["最近对话摘录（旧→新）：", history_text, ""]
     lines += ["待分类的消息：", content.strip()]
     return "\n".join(lines)
 
