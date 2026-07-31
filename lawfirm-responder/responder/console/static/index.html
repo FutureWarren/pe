@@ -1819,7 +1819,7 @@ async function loadBoard() {
   lastSig.board = sig;
   const st = m.leads_by_status || {};
   t.innerHTML = `
-    <div class="tile"><div class="n" style="color:var(--bad)">${m.leads_hot || 0}</div><div class="l">高意向线索</div></div>
+    <div class="tile"><div class="n" style="color:var(--bad)">${m.leads_p0 || 0}</div><div class="l">P0 强意愿</div></div>
     <div class="tile"><div class="n">${m.leads_with_contact || 0}</div><div class="l">留下联系方式</div></div>
     <div class="tile"><div class="n">${m.decisions_total}</div><div class="l">消息判断总数</div></div>
     <div class="tile"><div class="n">${m.replies_total}</div><div class="l">AI 回复条数</div></div>
@@ -1836,9 +1836,12 @@ async function loadBoard() {
     ["已联系", st.contacted || 0, "var(--warn)"],
     ["已成交", st.converted || 0, "var(--ok)"],
   ];
+  if (st.invalid) funnel.push(["无效", st.invalid, "var(--ink-2)"]);
   const fEl = document.getElementById("funnel");
   if (fEl) {
-    const conv = m.leads_total ? Math.round((st.converted || 0) / m.leads_total * 100) : 0;
+    /* 分母排除无效线索：空号/骚扰不是「没转化成功」，是根本不该进分母 */
+    const valid = (m.leads_total || 0) - (st.invalid || 0);
+    const conv = valid > 0 ? Math.round((st.converted || 0) / valid * 100) : 0;
     fEl.innerHTML = funnel.map(([label, n, c]) =>
       `<div style="flex:1;text-align:center">
          <div style="font-size:22px;font-weight:700;color:${c}">${n}</div>
