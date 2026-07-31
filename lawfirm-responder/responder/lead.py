@@ -12,6 +12,7 @@
 
 import json
 import logging
+import re
 from datetime import datetime
 
 from responder import assignment
@@ -47,6 +48,20 @@ def current_session(history: list[dict], gap_seconds: int) -> list[dict]:
             break
         out.insert(0, m)
     return out
+
+
+_NO_CONTACT_CLAIM = re.compile(r"(未|没有?|无)(提供|留下?|告知)?.{0,4}(联系方式|电话|手机)")
+
+
+def _drop_contradicting_facts(facts: list[str], contact: str) -> list[str]:
+    """删掉与确定性事实相矛盾的模型要点。
+
+    正则已经从对话里抠出手机号，卡片却并排显示「未提供联系方式」——律师会
+    当场不信任这张单子。事实层面能判定的，不让模型说了算。
+    """
+    if not contact:
+        return facts
+    return [f for f in facts if not _NO_CONTACT_CLAIM.search(f)]
 
 
 def _fallback_summary(history: list[dict]) -> str:
@@ -92,7 +107,9 @@ def build_and_store(
         fields = {
             "summary": brief.summary,
             "case_type": brief.case_type or group.case_type,
-            "key_facts": json.dumps(brief.key_facts, ensure_ascii=False),
+            "key_facts": json.dumps(
+                _drop_contradicting_facts(brief.key_facts, contact), ensure_ascii=False
+            ),
             "urgency": brief.urgency,
             "suggested_action": brief.suggested_action,
             "opening_line": brief.opening_line,

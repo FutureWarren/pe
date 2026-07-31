@@ -401,3 +401,14 @@ def test_search_escapes_like_wildcards(tmp_path):
                              "summary": "普通咨询"})
     client = client_for(store, pipeline, snd)
     assert client.get("/console/leads?q=100%25", headers=H()).json()["total"] == 1
+
+
+def test_model_claim_contradicting_extracted_phone_is_dropped():
+    """卡片并排显示「未提供联系方式」和一个手机号，律师会当场不信这张单。"""
+    from responder.lead import _drop_contradicting_facts
+
+    facts = ["拖欠工资 4 万", "客户未提供联系方式", "昨日被辞退"]
+    assert _drop_contradicting_facts(facts, "17721275495") == [
+        "拖欠工资 4 万", "昨日被辞退"]
+    # 真没号时照原样保留——那条要点是有效信息
+    assert _drop_contradicting_facts(facts, "") == facts
