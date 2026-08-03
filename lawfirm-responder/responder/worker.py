@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 
 from responder import lead
 from responder.compliance.guard import guard
-from responder.gateway import bot, wecom_kf
+from responder.gateway import bot, douyin, wecom_kf
 from responder.models import Action, ClientStatus, GroupProfile, IncomingMessage
 from responder.notify import escalation
 from responder.reply import templates
@@ -39,11 +39,12 @@ class KfSyncJob:
 
 class Worker:
     def __init__(self, pipeline, store, sender=None, poll_seconds: float = 10.0,
-                 kf_client=None):
+                 kf_client=None, douyin_client=None):
         self.pipeline = pipeline
         self.store = store
         self.sender = sender
         self.kf_client = kf_client
+        self.douyin_client = douyin_client
         self.poll_seconds = poll_seconds
         self.q: queue.Queue = queue.Queue()
         self._stop = threading.Event()
@@ -87,6 +88,8 @@ class Worker:
             self.process_kf(item)
         elif isinstance(item, bot.BotEnvelope):
             self.process_bot(item)
+        elif isinstance(item, douyin.DouyinEnvelope):
+            self.process_douyin(item)
         else:
             self._process_new(item)
 
@@ -353,6 +356,89 @@ class Worker:
             marker, group_id, result.text, "live", result.passed, category="greeting",
         )
         logger.info("kf welcome sent: %s", group_id)
+
+    # ------------------------------------------------------------ 抖音私信
+    def process_douyin(self, env: douyin.DouyinEnvelope) -> None:
+        """抖音私信回调：建档 → 进线问候 / 进判断管道。
+
+        与微信客服的差异全在发送侧（配额、24 小时窗口，见 service._douyin_budget），
+        收这一侧完全同构，因此直接复用同一条判断与话术管道。
+        """
+        s = self.pipeline.settings
+        if not s.douyin_enabled or not env.open_id:
+            return
+        group_id = env.group_id
+        self._ensure_douyin_profile(group_id, env)
+        if env.is_enter:
+            self._douyin_welcome(group_id, env)
+            return
+        if env.msg is None:
+            return
+        if not self.store.save_message(env.msg):
+            return  # 重复投递
+        self.pipeline.handle(env.msg)
+
+    def _ensure_douyin_profile(self, group_id: str, env: douyin.DouyinEnvelope) -> None:
+        """抖音会话首次出现时自动建档。
+
+        抖音侧查不到「接待人」（那是微信客服才有的概念），提醒接收人只能取配置：
+        专用项 → 全局兜底。取不到就没人收线索简报，等于白接一条通道。
+        """
+        s = self.pipeline.settings
+        if self.store.get_group(group_id) is not None:
+            return
+        who = env.nickname or f"用户{env.open_id[-6:]}"
+        self.store.upsert_group(
+            GroupProfile(
+                group_id=group_id,
+                name=f"抖音私信 · {who}",
+                client_status=ClientStatus.PROSPECT,  # 私信进线一律按新咨询
+                case_type=s.kf_default_case_type,
+                lawyer_name=s.kf_default_lawyer_name,
+                lawyer_userid=s.douyin_default_notify_userid or s.default_notify_userid,
+                ai_enabled=s.douyin_enabled,
+                douyin_open_id=env.open_id,
+            )
+        )
+
+    def _douyin_welcome(self, group_id: str, env: douyin.DouyinEnvelope) -> None:
+        """客户点进私信会话页时的主动问候。
+
+        平台要求收到该事件后 30 秒内响应，所以这里走确定性模板、绝不进模型——
+        LLM 一次要十几秒，赶上超时这条通道的问候能力就等于没有。
+
+        ⚠️ 平台只允许「回复」：客户还没开过口时，发送接口会拒。因此这里发出去
+        与否取决于抖音侧对进会话事件的放行规则，失败按预期处理、不视为故障。
+        """
+        s = self.pipeline.settings
+        if not s.douyin_welcome_on_enter:
+            return
+        # 幂等：同一会话只问候一次，事件重复推送不刷屏
+        marker = f"dy-enter-{env.open_id}-{env.conversation_short_id or 'x'}"
+        if not self.store.save_message(IncomingMessage(
+            msg_id=marker, group_id=group_id, sender_id=env.open_id,
+            sender_is_staff=False, content="", msg_type="event",
+        )):
+            return
+        if any(m.get("msg_type") != "event"
+               for m in self.store.recent_messages(group_id, 50)):
+            return  # 老客户回访，上下文还在，不再自我介绍
+        if self.store.has_greeting(group_id):
+            return
+        group = self.store.get_group(group_id)
+        if group is None or not group.ai_enabled:
+            return
+        client = self.pipeline.douyin_client  # 受模式门控：影子模式不外发
+        if client is None:
+            return
+        text = templates.greeting_opener(group, seed=marker)
+        result = guard(text, Action.ANSWER, templates.safe_fallback(group))
+        ok = client.send_text(env.open_id, result.text)
+        self.store.save_reply(
+            marker, group_id, result.text, "live" if ok else "failed",
+            result.passed, category="greeting", parts=1 if ok else 0,
+        )
+        logger.info("douyin welcome %s: %s", "sent" if ok else "rejected", group_id)
 
     def _ensure_kf_profile(self, group_id: str, open_kfid: str, external_userid: str) -> None:
         """客服会话首次出现时自动建档——员工零操作即可让 AI 上岗。

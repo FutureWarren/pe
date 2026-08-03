@@ -912,9 +912,12 @@ function openStatusPanel() {
   const llmTxt = h.llm && h.llm !== "rules-only"
     ? "AI 引擎正常" : "规则模式——AI 引擎未接入，当前按预设规则运行";
   const qTxt = h.queued ? `${h.queued} 条` : "畅通";
-  const kfTxt = h.kf
-    ? "微信客服已接入——客户咨询会自动进入，无需任何人操作"
-    : "微信客服未接入——当前只处理群内 @ 消息";
+  /* 通道是并列的多条进线口，逐条报状态——只说「已接入/未接入」看不出缺哪条 */
+  const chans = [
+    h.kf ? "微信客服 ✓（扫码、腾讯地图「联系商家」都走这条）" : "微信客服 ✗ 未接入",
+    h.douyin ? "抖音私信 ✓" : "抖音私信 ✗ 未接入（需开放平台权限过审）",
+  ];
+  const kfTxt = chans.join("；");
   openSheet(`
     <h2><span class="gold-tag"></span>系统状态</h2>
     <div class="status-rows">

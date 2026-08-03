@@ -11,6 +11,7 @@ from responder.console.api import router as console_router
 from responder.console.api import ui_router
 from responder.engine import llm
 from responder.gateway.callback import router as callback_router
+from responder.gateway.douyin import DouyinClient
 from responder.gateway.sender import WeComSender
 from responder.gateway.wecom_kf import KfClient
 from responder.service import Pipeline
@@ -28,9 +29,13 @@ def create_app() -> FastAPI:
     sender = WeComSender(settings)
     # 客服 client 在任何模式下都要能「收」（拉消息），「发」同样由 Pipeline 门控
     kf_client = KfClient(settings) if settings.wecom_kf_secret else None
-    pipeline = Pipeline(store, sender, settings, kf_client=kf_client)
+    # 抖音私信：凭据齐备才构建。收由回调驱动（无需轮询），发同样受模式门控。
+    dy_client = DouyinClient(settings) if settings.douyin_client_key else None
+    pipeline = Pipeline(store, sender, settings, kf_client=kf_client,
+                        douyin_client=dy_client)
     worker = Worker(pipeline, store, sender,
-                    poll_seconds=settings.worker_poll_seconds, kf_client=kf_client)
+                    poll_seconds=settings.worker_poll_seconds, kf_client=kf_client,
+                    douyin_client=dy_client)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -57,6 +62,7 @@ def create_app() -> FastAPI:
             "commit": ops.current_commit(settings.update_repo_dir),
             "llm": f"{provider.name}:{provider.model}" if provider else "rules-only",
             "kf": bool(kf_client and kf_client.available()),
+            "douyin": bool(dy_client and dy_client.available()),
             "queued": worker.qsize(),
         }
 

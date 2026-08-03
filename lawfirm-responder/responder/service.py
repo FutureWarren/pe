@@ -34,11 +34,13 @@ REFINE_CONFIDENCE = 0.7
 
 class Pipeline:
     def __init__(self, store: Store, sender: WeComSender | None = None,
-                 settings: Settings | None = None, kf_client=None):
+                 settings: Settings | None = None, kf_client=None,
+                 douyin_client=None):
         self.store = store
         self.settings = settings or get_settings()
         self._sender = sender
         self._kf_client = kf_client
+        self._douyin_client = douyin_client
 
     # 发送通道按模式实时门控：影子模式一律不出声。
     # 用属性而非构造期固化，是为了支持控制台运行时切换模式（无需重启服务）。
@@ -50,6 +52,11 @@ class Pipeline:
     def kf_client(self):
         """「发」受模式门控；「收」用 worker 持有的原始 client，不受此限。"""
         return self._kf_client if self.settings.mode == "live" else None
+
+    @property
+    def douyin_client(self):
+        """同 kf_client：影子模式只入库草稿，绝不对客户发言。"""
+        return self._douyin_client if self.settings.mode == "live" else None
 
     # ------------------------------------------------------------ 分类
     def _classify(self, msg: IncomingMessage, group: GroupProfile, history: list[dict]) -> tuple:
@@ -153,9 +160,9 @@ class Pipeline:
             if final_text is None:
                 # 第 3 次追问起：群内静默，原话术仅留档草稿，提醒已升级
                 final_text, mode = result.text, "shadow"
-            sent = True
+            sent, parts = True, 1
             if mode == "live" and self._can_send(group):
-                sent = self._send_group(group, msg.group_id, final_text)
+                sent, parts = self._send_group(group, msg.group_id, final_text)
                 if not sent:
                     # 发送失败还按 live 记账，追问策略会误判「已经答过了」，
                     # 客户从此拿不到首答。记为 failed，并让人工兜底。
@@ -163,7 +170,7 @@ class Pipeline:
                     decision.reasons.append("send:failed")
             self.store.save_reply(
                 msg.msg_id, msg.group_id, final_text, mode,
-                result.passed, category=decision.category.value,
+                result.passed, category=decision.category.value, parts=parts,
             )
             # 只有确实发出去的才算「AI 已回复」——否则提醒会让律师
             # 误以为客户已被安抚，实际上那边一片安静
@@ -314,7 +321,28 @@ class Pipeline:
         return bool(group.kf_open_kfid and group.kf_external_userid)
 
     def _can_send(self, group: GroupProfile) -> bool:
+        if group.is_douyin:
+            return bool(self.douyin_client)
         return bool(self.kf_client) if self._is_kf(group) else bool(self.sender)
+
+    def _douyin_budget(self, group_id: str) -> int:
+        """抖音本轮还能发几条平台消息。0 = 一条都不能发。
+
+        两条平台硬限制合成一个数（见 gateway/douyin.py 顶部注释）：
+          ① 客户最后一次发言起 24 小时内才允许回复，超时接口直接拒；
+          ② 该窗口内、客户下次开口之前，最多 6 条。
+
+        算准这个数是这条通道能不能长期活着的关键：超发不是「多发了一条」，
+        是接口报错 + 应用被平台标记。宁可少说一句，也不要把通道打死。
+        """
+        s = self.settings
+        last = self.store.last_customer_message_at(group_id)
+        if last is None:
+            return 0  # 客户没开过口 → 平台不允许我们主动发起
+        if (datetime.now() - last).total_seconds() > s.douyin_reply_window_seconds:
+            return 0
+        used = self.store.sent_parts_since(group_id, last)
+        return max(0, s.douyin_max_parts_per_window - used)
 
     def _reply_webhook(self, group: GroupProfile) -> str:
         """群聊回复地址。
@@ -331,24 +359,39 @@ class Pipeline:
         )
         return group.bot_webhook if fresh else group.robot_webhook
 
-    def _send_group(self, group: GroupProfile, group_id: str, text: str) -> bool:
+    def _send_group(
+        self, group: GroupProfile, group_id: str, text: str
+    ) -> tuple[bool, int]:
         """分条发送：多句内容拆成多条消息，条间隔模拟打字（见 docs/voice-guide.md）。
 
-        通道优先级：微信客服会话 → 机器人 webhook（回调下发的 > 人工配置的）→ 应用群聊。
-        返回是否全部发送成功——失败要能被上层看见，不能静默吞掉。
+        通道优先级：抖音私信 → 微信客服会话 → 机器人 webhook（回调下发的 > 人工配置的）
+        → 应用群聊。
+
+        返回 (是否全部发送成功, 实际发出的条数)。条数要往上传：抖音按条限额，
+        记不准就算不准剩余配额（见 _douyin_budget）。
         """
         webhook = self._reply_webhook(group)
+        max_parts = self.settings.split_max_parts
+        if group.is_douyin:
+            # 抖音先按配额收敛，再按话术拆条——顺序反了会拆出发不出去的尾巴
+            budget = self._douyin_budget(group_id)
+            if budget <= 0:
+                logger.warning("douyin quota exhausted, skip send: %s", group_id)
+                return False, 0
+            max_parts = min(max_parts, self.settings.douyin_split_max_parts, budget)
         chunks = (
-            sanitize.split_messages(text, self.settings.split_max_parts)
+            sanitize.split_messages(text, max_parts)
             if self.settings.split_messages
             else [text]
         )
-        ok = True
+        ok, sent = True, 0
         for i, chunk in enumerate(chunks):
             if i and self.settings.split_delay_seconds > 0:
                 time.sleep(self.settings.split_delay_seconds)
             try:
-                if self._is_kf(group):
+                if group.is_douyin:
+                    r = self.douyin_client.send_text(group.douyin_open_id, chunk)
+                elif self._is_kf(group):
                     r = self.kf_client.send_text(
                         group.kf_open_kfid, group.kf_external_userid, chunk
                     )
@@ -363,7 +406,8 @@ class Pipeline:
             if r is False:
                 ok = False
                 break  # 首条就发不出去，后续几条只会继续失败并拖慢链路
-        return ok
+            sent += 1
+        return ok, sent
 
     # ------------------------------------------------------------ 追问策略
     def _apply_followup_policy(

@@ -568,6 +568,32 @@ def _bot_diag(s, store: Store) -> dict:
     }
 
 
+def _douyin_diag(s, store: Store) -> dict:
+    """抖音私信自检。
+
+    这条通道有个别处没有的静默失败：客户超过 24 小时没说话、或本轮配额打满时，
+    发送接口会直接拒。真正要暴露的是「有几个会话已经发不出去了」——
+    只看凭据配没配，看不出这个。
+    """
+    convos = [g for g in store.list_groups() if g.get("douyin_open_id")]
+    configured = bool(s.douyin_client_key and s.douyin_client_secret)
+    return {
+        "configured": configured,
+        "enabled": s.douyin_enabled,
+        "signed_callback": bool(s.douyin_callback_token),
+        "conversations": len(convos),
+        "hint": (
+            "未配置抖音应用凭据（open.douyin.com 权限过审后回填，见 docs/douyin.md）"
+            if not configured
+            else "回调未配校验 Token：任何人都能伪造客户消息灌进来，公网部署必须配"
+            if not s.douyin_callback_token
+            else "还没收到过任何抖音私信（确认回调地址已在开发者后台配好并通过验证）"
+            if not convos
+            else ""
+        ),
+    }
+
+
 @router.get("/diagnostics")
 def diagnostics(request: Request, _: Principal = Depends(require_admin)):
     """远程自检：模型连通性、微信客服通道与客服账号列表。
@@ -613,6 +639,7 @@ def diagnostics(request: Request, _: Principal = Depends(require_admin)):
         },
         "kf": kf,
         "bot": _bot_diag(s, store),
+        "douyin": _douyin_diag(s, store),
         "notify": {
             "ok": not orphan,
             "groups_without_target": orphan[:10],

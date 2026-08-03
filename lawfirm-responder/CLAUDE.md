@@ -94,6 +94,13 @@ ruff check responder tests       # lint
   阈值 `ask_contact_after_messages` 与所址 `office_address` 走配置，改动须人工确认。
 - 渠道措辞：「在群里」只对群聊说。客服/私信是一对一窗口，没有群，
   模板一律经 `templates._in_group(group)`，prompt 经 `is_one_on_one` 告知模型当前场合。
+- 抖音企业号私信（2026-08，见 `docs/douyin.md`）：用户 first pass 多在抖音而非微信
+  （微信要先扫码，多一个动作）。判断层与微信客服同构（`is_kf` 对抖音会话亦为真），
+  差异全部收在发送层。**平台硬限制写死在代码里，不得放宽**：只能回复不能主动发起、
+  客户发言后 24 小时窗口、窗口内最多 6 条（按分条后的真实条数算，
+  `replies.parts` + `Store.sent_parts_since`）、进会话事件 30 秒内响应。
+  超发的代价不是少发一条，是应用被平台标记，故 `service._douyin_budget` 宁可少说一句。
+  发送 endpoint 因文档站不可达而做成配置项，由 `scripts/douyin_smoke.py --probe` 校正。
 
 ## 待定决策（动工相关功能前先确认）
 

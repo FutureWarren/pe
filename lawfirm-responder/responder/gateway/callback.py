@@ -6,13 +6,16 @@
   [待定] 客户群消息的最终获取方式取决于律所侧企微配置（会话存档 or 群机器人）。
 """
 
+import json
 import logging
+import time
 import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from responder.config import get_settings
-from responder.gateway import bot
+from responder.gateway import bot, douyin
 from responder.gateway.wecom_crypto import WeComCrypto
 from responder.models import IncomingMessage
 from responder.service import Pipeline
@@ -155,6 +158,44 @@ async def receive_bot(
             elif env.msg is not None:
                 pipeline.handle(env.msg)
     return Response(content="success", media_type="text/plain")
+
+
+@router.post("/douyin/callback")
+async def receive_douyin(request: Request, pipeline: Pipeline = Depends(get_pipeline)):
+    """抖音企业号私信回调。
+
+    与企微的两点不同，决定了这里不能照抄上面的写法：
+      1. 报文是 JSON，签名放在 **HTTP 头**（X-Douyin-Signature），不在查询串里；
+      2. 配置回调地址时平台先发一个挑战包，必须原样回显 challenge 才算配置成功——
+         这一步不通，后面什么都收不到。
+
+    未配置校验 Token 时不做签名校验（本机联调用）。生产必须配，
+    否则任何人都能往这个地址灌消息，让 AI 对着伪造的客户说话。
+    """
+    s = pipeline.settings
+    body = await request.body()
+    if s.douyin_callback_token and not douyin.verify_signature(
+        s.douyin_callback_token, request.headers, body
+    ):
+        return Response(status_code=403)
+    try:
+        payload = json.loads(body or b"{}")
+    except ValueError:
+        return Response(status_code=400)
+    if not isinstance(payload, dict):
+        return Response(status_code=400)
+
+    env = douyin.parse(payload, fallback_msg_id=f"dy-{int(time.time() * 1000)}")
+    if env is not None and env.challenge is not None:
+        return JSONResponse({"challenge": env.challenge})
+    if env is not None and s.douyin_enabled:
+        worker = getattr(request.app.state, "worker", None)
+        if worker is not None and s.callback_async:
+            worker.submit(env)
+        elif worker is not None:
+            worker.process_douyin(env)
+    # 抖音同样按超时重推，任何情况下都要立刻回 200
+    return JSONResponse({"err_no": 0, "err_msg": "success"})
 
 
 @router.post("/ingest")

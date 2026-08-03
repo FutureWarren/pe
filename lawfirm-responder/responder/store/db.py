@@ -138,8 +138,12 @@ _ADDED_COLUMNS = {
         "bot_webhook_at": "TEXT",
         "kf_open_kfid": "TEXT DEFAULT ''",
         "kf_external_userid": "TEXT DEFAULT ''",
+        # 抖音私信会话的对方标识（open_id）
+        "douyin_open_id": "TEXT DEFAULT ''",
     },
-    "replies": {"category": "TEXT DEFAULT ''"},
+    # parts：这条回复实际拆成了几条平台消息。抖音按**条**限额（同一窗口最多 6 条），
+    # 一行 replies 可能对应 3 条真实消息，不记下来就算不准配额。
+    "replies": {"category": "TEXT DEFAULT ''", "parts": "INTEGER DEFAULT 1"},
     # 待办卡片要把「客户问的什么」当主角展示，不能让控制台去解析摘要文本
     "reminders": {"question": "TEXT DEFAULT ''", "ai_reply": "TEXT DEFAULT ''"},
     # 分案系统：指派对象 + 优先级评分（factors 是评分依据清单，控制台与推送共用）
@@ -211,8 +215,9 @@ class Store:
             conn.execute(
                 """INSERT INTO groups (group_id,name,client_status,case_type,case_stage,
                    lawyer_name,lawyer_userid,backup_userid,ai_enabled,robot_webhook,
-                   bot_webhook,bot_webhook_at,kf_open_kfid,kf_external_userid)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   bot_webhook,bot_webhook_at,kf_open_kfid,kf_external_userid,
+                   douyin_open_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(group_id) DO UPDATE SET
                    name=excluded.name, client_status=excluded.client_status,
                    case_type=excluded.case_type, case_stage=excluded.case_stage,
@@ -222,13 +227,14 @@ class Store:
                    bot_webhook=excluded.bot_webhook,
                    bot_webhook_at=excluded.bot_webhook_at,
                    kf_open_kfid=excluded.kf_open_kfid,
-                   kf_external_userid=excluded.kf_external_userid""",
+                   kf_external_userid=excluded.kf_external_userid,
+                   douyin_open_id=excluded.douyin_open_id""",
                 (
                     g.group_id, g.name, g.client_status.value, g.case_type, g.case_stage,
                     g.lawyer_name, g.lawyer_userid, g.backup_userid, int(g.ai_enabled),
                     g.robot_webhook, g.bot_webhook,
                     g.bot_webhook_at.isoformat() if g.bot_webhook_at else None,
-                    g.kf_open_kfid, g.kf_external_userid,
+                    g.kf_open_kfid, g.kf_external_userid, g.douyin_open_id,
                 ),
             )
 
@@ -479,16 +485,47 @@ class Store:
     # ------------------------------------------------------------ replies
     def save_reply(
         self, msg_id: str, group_id: str, text: str, mode: str, passed: bool,
-        category: str = "",
+        category: str = "", parts: int = 1,
     ) -> int:
         with self._conn() as conn:
             cur = conn.execute(
-                "INSERT INTO replies (msg_id,group_id,text,mode,category,"
-                "compliance_passed,created_at) VALUES (?,?,?,?,?,?,?)",
-                (msg_id, group_id, text, mode, category, int(passed),
+                "INSERT INTO replies (msg_id,group_id,text,mode,category,parts,"
+                "compliance_passed,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (msg_id, group_id, text, mode, category, max(1, parts), int(passed),
                  datetime.now().isoformat()),
             )
             return cur.lastrowid
+
+    def last_customer_message_at(self, group_id: str) -> datetime | None:
+        """该会话最后一条**客户**发言的时间。
+
+        抖音只允许在客户发言后的 24 小时内回复，超时接口直接拒——发送前必须按这个
+        时间算窗口，而不是按「我们上次说话」算。
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(created_at) AS t FROM messages"
+                " WHERE group_id=? AND sender_is_staff=0 AND msg_type!='event'",
+                (group_id,),
+            ).fetchone()
+        return datetime.fromisoformat(row["t"]) if row and row["t"] else None
+
+    def sent_parts_since(self, group_id: str, since: datetime) -> int:
+        """自 since 起该会话实际发出的**平台消息条数**（分条后的，不是回复条数）。
+
+        抖音的 6 条限额算的是真实消息数，我们一条回复可能拆成 2~3 条，
+        按 replies 行数算会低估一倍以上，等发现时配额已经打满了。
+
+        mode='failed' 也要计入：那是「发了一半失败」，前半截平台已经收下并计了数。
+        只数 live 会漏掉这部分，越是发送不稳的时候漏得越多。影子模式不外发，不计。
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(parts), 0) AS n FROM replies"
+                " WHERE group_id=? AND mode!='shadow' AND created_at>=?",
+                (group_id, since.isoformat()),
+            ).fetchone()
+        return int(row["n"] or 0)
 
     def count_recent_live(self, group_id: str, category: str, since_seconds: int) -> int:
         """时间窗内该群同一问题类别已实际发出的回复数（追问去重/二次安抚用）。"""

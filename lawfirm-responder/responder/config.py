@@ -47,6 +47,30 @@ class Settings(BaseSettings):
     # 空窗口是最大的流失点：客户点进来看到一片空白，很多人直接就退了。
     kf_welcome_on_enter: bool = True
 
+    # ---- 抖音企业号私信（open.douyin.com 开发者后台申请，需蓝V认证企业号）
+    # 业务依据：用户 first pass 多在抖音而非微信（微信要先扫码，多一个动作）。
+    douyin_enabled: bool = True
+    douyin_client_key: str = ""
+    douyin_client_secret: str = ""
+    # 回调签名校验的 Token 与消息加密 Key（在开发者后台配置回调地址时设定）。
+    # aes_key 留空 = 平台推明文 JSON，不做解密。
+    douyin_callback_token: str = ""
+    douyin_encoding_aes_key: str = ""
+    # 发送私信的接口地址。抖音文档站在部署环境不可达，故做成配置项：
+    # 凭据到手后跑 scripts/douyin_smoke.py 校正，不必改代码重新部署。
+    douyin_send_url: str = "https://open.douyin.com/im/send/msg/"
+    # 平台硬限制，不是我们的策略，**不要往大了调**：
+    # 用户发言后 24 小时内才允许回复；同一窗口内用户下次开口前最多 6 条。
+    douyin_reply_window_seconds: int = 86400
+    douyin_max_parts_per_window: int = 6
+    # 分条发送在抖音要收敛：一条回复拆 3 条，两轮就打满配额，
+    # 真正要紧的话（要电话、邀约到所）反而发不出去。
+    douyin_split_max_parts: int = 2
+    # 客户进入私信会话页即打招呼（平台要求 30 秒内响应，故走确定性模板不进模型）
+    douyin_welcome_on_enter: bool = True
+    # 抖音会话建档后线索简报的默认接收人（抖音侧没有「接待人」可查）
+    douyin_default_notify_userid: str = ""
+
     # 律所线下地址：邀约到所面谈的话术里用。留空则只约时间不报地址。
     office_address: str = "上海市松江区九峰路88号平高广场11楼"
     office_name: str = "上海松沪律师事务所"

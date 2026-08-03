@@ -52,12 +52,23 @@ class GroupProfile(BaseModel):
     # 微信客服会话（一对一）：两者齐备时回复走客服通道，优先于机器人/群聊
     kf_open_kfid: str = ""  # 客服账号 ID
     kf_external_userid: str = ""  # 客户的外部联系人 ID
+    # 抖音企业号私信会话：对方的 open_id。与微信客服同属「一对一」，
+    # 但发送侧受平台配额限制（24 小时窗口 / 6 条），见 gateway/douyin.py
+    douyin_open_id: str = ""
+
+    @property
+    def is_douyin(self) -> bool:
+        return bool(self.douyin_open_id)
 
     @property
     def is_kf(self) -> bool:
         """一对一客服会话。与群聊的关键差异：AI 是第一响应人而非补位者，
-        故不等待、不对开场白沉默（见 engine/decision.py）。"""
-        return bool(self.kf_open_kfid and self.kf_external_userid)
+        故不等待、不对开场白沉默（见 engine/decision.py）。
+
+        抖音私信在判断层与微信客服完全同构（都是客户主动找上门的一对一窗口），
+        故一并归入 is_kf——差异只在「怎么把字发出去」，那在发送层处理。
+        """
+        return bool(self.kf_open_kfid and self.kf_external_userid) or self.is_douyin
 
 
 class IncomingMessage(BaseModel):
