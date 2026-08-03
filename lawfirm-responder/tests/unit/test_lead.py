@@ -193,3 +193,38 @@ def test_fallback_summary_uses_client_words(tmp_path):
     lead = lead_mod.build_and_store(store, group, history)
     assert lead["summary"] == "公司拖欠我三个月工资一直不发"
     assert json.loads(lead["key_facts"]) == []  # 无模型时不臆造事实
+
+
+def test_brief_ends_with_a_tappable_link_not_a_dead_end():
+    """交接单末尾要给可点的深链，不是一句「请去控制台看」。
+
+    原文案是死路：律师得开浏览器、找地址、登录、翻列表、找到人，五步，
+    所以他不会做。带 group_id 的深链让他一步直达那通对话。
+    """
+    from responder.config import Settings
+    from responder.lead import format_notification
+    from responder.models import GroupProfile
+
+    g = GroupProfile(group_id="kf:wk1:wmAbc", name="微信客服 · 客户Abc")
+    row = {"priority": "P0", "case_type": "劳动仲裁", "urgency": "high",
+           "summary": "被拖欠三个月工资", "contact": "13812345678",
+           "key_facts": "[]", "factors": "[]", "intent": "hot"}
+
+    text = format_notification(row, g, Settings(public_base_url="https://ai.example.com"))
+    assert "https://ai.example.com/ui#g=kf%3Awk1%3AwmAbc" in text, "冒号必须转义，否则链接断在中间"
+    assert "见控制台" not in text
+
+
+def test_brief_falls_back_when_no_public_url():
+    """没配对外地址（本机开发/域名未定）时退回原文案，不给半截链接。"""
+    from responder.config import Settings
+    from responder.lead import format_notification
+    from responder.models import GroupProfile
+
+    g = GroupProfile(group_id="g1", name="劳动仲裁咨询群")
+    row = {"priority": "P1", "case_type": "劳动仲裁", "urgency": "medium",
+           "summary": "咨询仲裁流程", "contact": "", "key_facts": "[]",
+           "factors": "[]", "intent": "warm"}
+    text = format_notification(row, g, Settings(public_base_url=""))
+    assert "http" not in text
+    assert "劳动仲裁咨询群" in text

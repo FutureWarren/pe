@@ -14,6 +14,7 @@ import json
 import logging
 import re
 from datetime import datetime
+from urllib.parse import quote
 
 from responder import assignment
 from responder.config import Settings, get_settings
@@ -144,7 +145,9 @@ def build_and_store(
     return store.get_lead(group.group_id)
 
 
-def format_notification(lead: dict, group: GroupProfile) -> str:
+def format_notification(
+    lead: dict, group: GroupProfile, settings: Settings | None = None
+) -> str:
     """推给律师的交接单文本（企微单聊）。
 
     首行即优先级与时限预期——律师扫一眼就知道这单该排在手头哪个位置；
@@ -183,7 +186,15 @@ def format_notification(lead: dict, group: GroupProfile) -> str:
         lines += ["", f"建议动作：{lead['suggested_action']}"]
     if lead.get("opening_line"):
         lines.append(f"开场参考：「{lead['opening_line']}」")
-    lines += ["", f"完整对话见控制台 · 会话「{group.name or group.group_id}」"]
+    # 末尾这一行原来是句死路：「完整对话见控制台」——律师得开浏览器、找地址、
+    # 登录、翻列表、找到人，五步，所以他不会做。改成可点的深链，一步直达。
+    # public_base_url 没配时退回原文案（本机开发/未定域名）。
+    base = (settings or get_settings()).public_base_url.rstrip("/")
+    if base:
+        gid = quote(group.group_id, safe="")
+        lines += ["", f"看完整对话：{base}/ui#g={gid}"]
+    else:
+        lines += ["", f"完整对话见控制台 · 会话「{group.name or group.group_id}」"]
     return "\n".join(lines)
 
 
@@ -266,7 +277,7 @@ def dispatch(
         return lead
     lead = store.get_lead(group.group_id) or lead  # 取回含指派信息的最新版
     if sender and to:
-        if sender.send_direct_text(to, format_notification(lead, group)):
+        if sender.send_direct_text(to, format_notification(lead, group, settings)):
             store.mark_lead_notified(group.group_id)
             # 瞬态标记（不入库）：告诉调用方「这一轮真的推送了」。
             # service 据此跳过同一条消息的逐条提醒——律师不该为一件事收到两条 DM。

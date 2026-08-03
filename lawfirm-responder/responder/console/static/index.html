@@ -665,10 +665,15 @@ function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} _mem[k] 
 function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} delete _mem[k]; }
 
 let token = lsGet("admin_token") || "";
-/* 律师登录链接把令牌放在 # 片段（不进服务器日志）：进页即收取并抹掉地址栏痕迹 */
-if (location.hash.startsWith("#t=")) {
-  token = decodeURIComponent(location.hash.slice(3));
+/* 深链参数：t=登录令牌（不进服务器日志故走 # 片段）、g=直接打开的会话。
+   交接单里那条「看完整对话」就靠 g —— 律师点一下直达，不用登录翻找。 */
+const _hash = new URLSearchParams(location.hash.slice(1));
+const deepLinkGroup = _hash.get("g") || "";
+if (_hash.get("t")) {
+  token = decodeURIComponent(_hash.get("t"));
   lsSet("admin_token", token);
+}
+if (location.hash) {
   try { history.replaceState(null, "", location.pathname); } catch (e) {}
 }
 let me = null; // /console/me 的结果：{role, userid, name}
@@ -2307,6 +2312,10 @@ setInterval(() => {
   try {
     await whoami();
     refresh();
+    /* 交接单里的「看完整对话」链接：进页直接把那通对话摊开。
+       律师原本要「开浏览器→找地址→登录→翻列表→找到人」五步，现在一步。
+       深链优先于新手引导——他是带着目的点进来的，不该被教程挡住。 */
+    if (deepLinkGroup) { openConversation(deepLinkGroup); return; }
     if (!lsGet("help_seen")) {
       lsSet("help_seen", "1");
       setTimeout(openStatusPanel, 400);
