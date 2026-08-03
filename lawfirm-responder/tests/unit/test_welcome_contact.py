@@ -168,7 +168,8 @@ def test_greeting_never_repeated_in_one_conversation(tmp_path):
     assert len(kf.sent) == 2
     reply = kf.sent[1][2]
     assert "比如" not in reply, "第二句不该又是开场白"
-    assert "魏律师" in reply  # 改走承接话术
+    assert "律师" in reply  # 改走承接话术
+    assert "魏律师" not in reply, "一对一进线不点名具体律师（谁接单由分案引擎后定）"
     reasons = [d["reasons"] for d in store.list_decisions(GID)]
     assert any("greeting:already-sent" in r for r in reasons)
 
@@ -401,3 +402,25 @@ def test_winback_can_be_disabled(tmp_path):
     _idle(store, GID, 3600)
     worker.tick()
     assert len(kf.sent) == n
+
+
+def test_intake_never_names_a_specific_lawyer(tmp_path):
+    """一对一进线的对话里不出现具体律师姓名。
+
+    业务决策 2026-08：谁接这单由分案引擎按专长与负载算出来，
+    客服会话建档时的 lawyer_name 只是配置默认值。说「魏律师会给您回电话」
+    而实际派给了别人，客户等的就是个不会来的电话。
+    """
+    _, kf = _chat(tmp_path, THREE + ["帮我催一下", "我的案子到哪一步了"])
+    text = kf.texts()
+    assert text, "应有回复"
+    assert "魏律师" not in text
+    assert "律师" in text  # 但仍然说「律师」，不是含糊过去
+
+
+def test_group_chat_still_names_the_lawyer():
+    """群聊里的律师名是人工维护的真名，律师本人也在群里，点名不能抹掉。"""
+    from responder.reply.templates import handoff_generic
+
+    g = GroupProfile(group_id="g1", lawyer_name="魏")
+    assert "魏律师" in handoff_generic(g, seed="a")

@@ -100,6 +100,13 @@ ruff check responder tests       # lint
   后者多出的是所址，属新信息不算催单，故两者用不同标记判重
   （`ASK_CONTACT_MARKERS` / `OFFICE_INVITE_MARKERS`）。
   三档**只在一对一进线窗口生效**：群聊里承办律师本人在场，AI 追着要电话越界。
+- 对客称呼（2026-08，律所方要求）：**一对一进线的对话里不点名具体律师**
+  （`templates._lawyer` 对 `is_kf` 一律返回「律师」）。不是措辞偏好——
+  谁接这单由分案引擎按专长与负载算出（`docs/lead-routing.md`），而客服/私信
+  建档时的 `lawyer_name` 只是 `kf_default_lawyer_name` 这个配置默认值，
+  两者常常不是同一个人；说「魏律师会给您回电话」而实际派给别人，
+  客户等的是个不会来的电话。群聊相反：那里的名字人工维护且律师本人在场，
+  点名是对的，不得一刀切抹掉。
 - 渠道措辞：「在群里」只对群聊说。客服/私信是一对一窗口，没有群，
   模板一律经 `templates._in_group(group)`，prompt 经 `is_one_on_one` 告知模型当前场合。
 - 抖音企业号私信（2026-08，见 `docs/douyin.md`）：用户 first pass 多在抖音而非微信

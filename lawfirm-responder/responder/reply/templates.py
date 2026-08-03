@@ -20,6 +20,21 @@ from responder.models import Category, ClientStatus, GroupProfile
 
 
 def _lawyer(group: GroupProfile) -> str:
+    """对客户话术里怎么称呼「那位律师」。
+
+    只有已委托客户才点名。业务决策 2026-08：新咨询一律不说具体是谁——
+
+      1. **可能说错人**：谁接这单是分案引擎按专长与负载算出来的
+         （见 docs/lead-routing.md），而客服/私信会话建档时填的 lawyer_name
+         只是一个配置默认值（`kf_default_lawyer_name`）。AI 说「魏律师会给您
+         回电话」、实际派给了别人，客户等的就是个不会来的电话。
+      2. **不该提前承诺人**：咨询阶段还没有「承办律师」这回事。
+
+    群聊相反：那里的 lawyer_name 是人工维护的真名，律师本人也在群里，
+    点名才显得「这是我的案子、有人在管」，不能一刀切抹掉。
+    """
+    if group.is_kf:
+        return "律师"
     return f"{group.lawyer_name}律师" if group.lawyer_name else "承办律师"
 
 
