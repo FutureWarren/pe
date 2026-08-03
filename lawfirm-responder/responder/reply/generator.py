@@ -104,9 +104,14 @@ def generate(
     # 客服开场引导：确定性话术，不含法律实质内容，不进模型。
     # 开场白不接索要电话——刚打上照面就问电话，客户只会退出去。
     if decision.category == Category.GREETING:
-        text = templates.greeting_opener(
-            group, seed=msg.msg_id, contact_left="kf:contact-ack" in decision.reasons
-        )
+        if "greeting:again" in decision.reasons:
+            # 老客户回来打招呼：接住并问近况，不把律所全称再报一遍
+            text = templates.greeting_again(group, seed=msg.msg_id)
+        else:
+            text = templates.greeting_opener(
+                group, seed=msg.msg_id,
+                contact_left="kf:contact-ack" in decision.reasons,
+            )
         return guard(text, Action.ANSWER, fallback)
 
     if decision.action == Action.HANDOFF:

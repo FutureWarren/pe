@@ -423,17 +423,27 @@ class Worker:
             sender_is_staff=False, content="", msg_type="event",
         )):
             return
-        # 已有真实对话（事件占位不算）→ 是回访，不再自我介绍一遍
-        if any(m.get("msg_type") != "event"
-               for m in self.store.recent_messages(group_id, 50)):
-            return
         group = self.store.get_group(group_id)
         if group is None or not group.ai_enabled:
             return
         client = self.pipeline.kf_client  # 受模式门控：影子模式不外发
         if client is None:
             return
-        text = templates.greeting_opener(group, seed=marker)
+        # 已有真实对话（事件占位不算）→ 是回访：不再自我介绍一遍，
+        # 但也不能一声不吭。老客户点进来对着空窗口，跟新客户一样会走。
+        history = self.store.recent_messages(group_id, 50)
+        returning = any(m.get("msg_type") != "event" for m in history)
+        if returning:
+            # 刚聊完又点回来的不用打招呼——那不是回访，是同一次对话
+            last = self.store.last_message_at_in(group_id)
+            gap = (datetime.now() - last).total_seconds() if last else 1e9
+            if gap < s.lead_session_gap_seconds:
+                return
+        text = (
+            templates.greeting_again(group, seed=marker)
+            if returning
+            else templates.greeting_opener(group, seed=marker)
+        )
         result = guard(text, Action.ANSWER, templates.safe_fallback(group))
         client.send_text(open_kfid, external_userid, result.text)
         self.store.save_reply(

@@ -519,6 +519,20 @@ class Store:
             row = conn.execute("SELECT MAX(created_at) AS t FROM messages").fetchone()
         return datetime.fromisoformat(row["t"]) if row and row["t"] else None
 
+    def last_message_at_in(self, group_id: str) -> datetime | None:
+        """该会话最后一条真实消息的时间（事件占位不算）。
+
+        用来分辨「回访」和「同一次对话」：刚聊完又点回会话页的人不需要再被
+        打一次招呼，隔了几小时再来的才算回访。
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(created_at) AS t FROM messages"
+                " WHERE group_id=? AND msg_type!='event'",
+                (group_id,),
+            ).fetchone()
+        return datetime.fromisoformat(row["t"]) if row and row["t"] else None
+
     def last_customer_message_at(self, group_id: str) -> datetime | None:
         """该会话最后一条**客户**发言的时间。
 

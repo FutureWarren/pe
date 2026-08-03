@@ -486,3 +486,76 @@ def test_handoff_state_round_trips(tmp_path):
     store.set_handoff(GID, "")
     g = store.get_group(GID)
     assert g.handoff_userid == "" and g.handoff_at is None
+
+
+# ---------------------------------------------------------------- 回访客户
+def test_returning_customer_saying_hello_gets_a_greeting_not_a_handoff(tmp_path):
+    """老客户回来说一句「你好」，不能回「我帮您转给律师确认下」。
+
+    线上实测踩到的：这通对话以前发过开场白，「一通对话只许一次开场白」
+    就把它降级成了承接——可客户什么都还没说，转什么？
+    """
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("m1", "公司拖欠我三个月工资，还把我辞退了")],
+         "next_cursor": "c1", "has_more": 0},
+        {"msg_list": [kf_msg("m2", "你好")], "next_cursor": "c2", "has_more": 0},
+    ])
+    run(worker)
+    run(worker, token="tk2")
+
+    last = kf.sent[-1][2]
+    assert "转给" not in last, "光打招呼没内容可转，不该回承接"
+    assert "我在的" in last or "您说" in last or "看到您消息了" in last
+    assert "上海松沪律师事务所" not in last, "老客户不用把律所全称再报一遍"
+    reasons = [d["reasons"] for d in store.list_decisions(GID)]
+    assert any("greeting:again" in r for r in reasons)
+
+
+def test_returning_customer_with_real_content_still_handed_off(tmp_path):
+    """但客户真说了事，仍然走承接——这条规则本身是对的，只是之前一刀切了。"""
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("m1", "公司拖欠我三个月工资")],
+         "next_cursor": "c1", "has_more": 0},
+        {"msg_list": [kf_msg("m2", "我老公昨天被拘留了")],
+         "next_cursor": "c2", "has_more": 0},
+    ])
+    run(worker)
+    run(worker, token="tk2")
+    assert "律师" in kf.sent[-1][2]
+
+
+def test_returning_visitor_gets_short_regreeting_on_enter(tmp_path):
+    """隔了一段时间再点进来的老客户：不重新自我介绍，但也不能一声不吭。
+
+    对着空窗口，老客户和新客户一样会走。
+    """
+    from datetime import datetime, timedelta
+
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("m1", "拖欠工资多久可以申请劳动仲裁？")],
+         "next_cursor": "c1", "has_more": 0},
+        {"msg_list": [kf_event("e9")], "next_cursor": "c2", "has_more": 0},
+    ])
+    run(worker)
+    n = len(kf.sent)
+    # 把上一轮对话推到很久以前 → 这次点进来算「回访」
+    old = (datetime.now() - timedelta(hours=8)).isoformat()
+    with store._conn() as conn:
+        conn.execute("UPDATE messages SET created_at=? WHERE group_id=?", (old, GID))
+    run(worker, token="tk2")
+
+    assert len(kf.sent) == n + 1, "回访也要有人招呼一声"
+    assert "上海松沪律师事务所" not in kf.sent[-1][2], "不重新自我介绍"
+
+
+def test_reentering_right_after_talking_stays_quiet(tmp_path):
+    """刚聊完又点回会话页——那不是回访，是同一次对话，别再打招呼。"""
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("m1", "拖欠工资多久可以申请劳动仲裁？")],
+         "next_cursor": "c1", "has_more": 0},
+        {"msg_list": [kf_event("e9")], "next_cursor": "c2", "has_more": 0},
+    ])
+    run(worker)
+    n = len(kf.sent)
+    run(worker, token="tk2")
+    assert len(kf.sent) == n

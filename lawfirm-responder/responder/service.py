@@ -124,7 +124,7 @@ class Pipeline:
             settings=self.settings,
             classification=self._classify(msg, group, history),
         )
-        self._avoid_repeat_greeting(decision)
+        self._avoid_repeat_greeting(decision, msg)
 
         if decision.action == Action.SILENCE:
             self.store.save_decision(decision)
@@ -232,7 +232,7 @@ class Pipeline:
 
         return decision
 
-    def _avoid_repeat_greeting(self, decision: Decision) -> None:
+    def _avoid_repeat_greeting(self, decision: Decision, msg: IncomingMessage) -> None:
         """一通对话只允许一次开场白，第二次改走承接。就地修改 decision。
 
         客户扫码进来时已被问候过一次，接着他把自己的事打出来——这类陈述句
@@ -247,6 +247,11 @@ class Pipeline:
         if "kf:contact-ack" in decision.reasons:
             return
         if not self.store.has_greeting(decision.group_id):
+            return
+        # 光打了个招呼、没说事的（回访客户最常见的第一句）：改走「再次问候」。
+        # 降级成承接在这里是句废话——「我帮您转给律师」，转什么？他什么都没说。
+        if rules.is_bare_greeting(msg.content):
+            decision.reasons.append("greeting:again")
             return
         decision.action = Action.HANDOFF
         decision.category = Category.OTHER
@@ -440,6 +445,11 @@ class Pipeline:
         判据：接管时间窗内，同一群同一问题类别已实际发出过几条回复。
         """
         if mode != "live":
+            return text
+        # 问候不适用追问去重：打招呼不是「又问了一遍同一个问题」。
+        # 套上去会变成对一句「你好」回「抱歉让您久等了，我刚又催了一下」——
+        # 催什么？他还没问呢。
+        if decision.category == Category.GREETING:
             return text
         n = self.store.count_recent_live(
             msg.group_id, decision.category.value, self.settings.takeover_seconds

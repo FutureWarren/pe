@@ -154,6 +154,24 @@ def greeting_opener(group: GroupProfile, seed: str = "", contact_left: bool = Fa
     return _pick(variants, seed)
 
 
+def greeting_again(group: GroupProfile, seed: str = "") -> str:
+    """回访客户的再次问候：短，不重新自我介绍。
+
+    这条补的是一个真实踩过的坑：老客户隔几天回来说一句「你好」，
+    因为「一通对话只许一次开场白」而被降级成承接，于是 AI 回了
+    「我帮您转给律师确认下」——转什么？他什么都还没说。
+
+    对已经认识我们的人，正确的反应是接住并问一句近况，
+    而不是把律所全称再报一遍（他上次就听过了），也不是答非所问。
+    """
+    variants = [
+        "您好，我在的。\n是上次那件事有新情况，还是有别的想问？",
+        "您好，看到您消息了。\n您这边是有新的进展，还是别的事想咨询？",
+        "在的，您说。\n是接着上次那事，还是有别的想问的？",
+    ]
+    return _pick(variants, seed)
+
+
 def safe_fallback(group: GroupProfile) -> str:
     """合规拦截后的兜底回复：只承接，不含任何实质内容。固定文本，不走变体。"""
     L = _lawyer(group)

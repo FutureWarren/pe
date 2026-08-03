@@ -130,6 +130,23 @@ _PRESENCE = re.compile(PRESENCE_PATTERN)
 def is_presence_check(text: str) -> bool:
     """纯「在吗」式探问（未点名任何律师）。"""
     return bool(_PRESENCE.match((text or "").strip()))
+
+
+# 光打招呼、没说事。回访客户最常见的第一句就是这个。
+_BARE_HELLO = re.compile(
+    r"^(你好|您好|哈喽|哈啰|嗨|hi|hello|在吗|在么|在不在|有人吗|有人在吗|早上好|上午好|中午好|下午好|晚上好)[\s,，。.!！?？~～、]*$",
+    re.I,
+)
+
+
+def is_bare_greeting(text: str) -> bool:
+    """只是打了个招呼，没有任何可承接的内容。
+
+    区分它有实际意义：客户把案情打出来时「我帮您转给律师」是正常承接；
+    但对一句「你好」说同样的话，等于「转什么？他什么都没说」——
+    这种时候该回一句招呼，不是回一句承接。
+    """
+    return bool(_BARE_HELLO.match((text or "").strip()))
 _GENERAL_TOPIC = re.compile(GENERAL_TOPIC)
 _QUESTION = re.compile(QUESTION_HINT)
 
