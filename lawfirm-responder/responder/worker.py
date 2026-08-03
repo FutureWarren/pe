@@ -51,6 +51,8 @@ class Worker:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._servicer_cache: dict[str, list[str]] = {}
+        # 启动后先隔一个间隔再查更新：刚重启完不该立刻又想着升级
+        self._last_update_check = datetime.now()
 
     # ------------------------------------------------------------ 生命周期
     def start(self) -> None:
@@ -117,6 +119,33 @@ class Worker:
         self._sweep_idle_leads(now)
         self._sweep_lead_sla(now)
         self._sweep_winback(now)
+        self._maybe_auto_update(now)
+
+    def _maybe_auto_update(self, now: datetime) -> None:
+        """定时看远端分支有没有新版，有就自己拉下来重启。
+
+        「忙」的判定有两层，都是为了别在重启时把消息弄丢：
+          1. 队列里还有活没干完——那些是内存态，重启即丢；
+          2. 客户刚说过话——他大概率还在等回复，这会儿重启等于当面挂电话。
+        升级晚一轮（默认五分钟）没有任何代价，掉一条客户消息有。
+        """
+        s = self.pipeline.settings
+        interval = max(60, s.auto_update_interval_seconds)
+        if (now - self._last_update_check).total_seconds() < interval:
+            return
+        self._last_update_check = now
+        busy = self.qsize() > 0
+        if not busy and s.auto_update_quiet_seconds > 0:
+            last = self.store.last_message_at()
+            busy = bool(
+                last and (now - last).total_seconds() < s.auto_update_quiet_seconds
+            )
+        try:
+            from responder import ops
+
+            ops.auto_update_tick(s, busy=busy)
+        except Exception:
+            logger.exception("auto update check failed")
 
     def _sweep_winback(self, now: datetime) -> None:
         """挽留：会话静默且仍未留联系方式 → 补发一条，一通对话只发一次。

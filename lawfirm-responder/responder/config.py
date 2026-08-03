@@ -172,6 +172,14 @@ class Settings(BaseSettings):
     # 只允许拉取下方写死的仓库目录与分支，不接受任何外部输入，
     # 因此权限边界等同于「持有 admin_token 者可部署本仓库的新提交」。
     self_update_enabled: bool = True
+    # 自动升级：服务器自己定时看远端分支有没有新提交，有就拉下来重启。
+    # 存在的理由很实在——运维侧不一定够得着这台服务器（网络策略/没有 SSH），
+    # 但服务器自己够得着 GitHub。关掉则回到「人工点按钮」。
+    auto_update_enabled: bool = True
+    auto_update_interval_seconds: int = 300
+    # 客户刚说过话就不重启：重启会丢掉内存队列里没处理完的消息。
+    # 升级晚五分钟没关系，客户的消息掉了有关系。
+    auto_update_quiet_seconds: int = 120
     update_repo_dir: str = "/opt/pe"
     update_branch: str = "claude/law-firm-wechat-ai-responder-q3nttv"
     update_pip: str = "/opt/pe-venv/bin/pip"

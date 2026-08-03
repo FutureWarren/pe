@@ -513,6 +513,12 @@ class Store:
             )
             return cur.lastrowid
 
+    def last_message_at(self) -> datetime | None:
+        """全库最后一条消息的时间。自动升级用来判断「现在忙不忙」。"""
+        with self._conn() as conn:
+            row = conn.execute("SELECT MAX(created_at) AS t FROM messages").fetchone()
+        return datetime.fromisoformat(row["t"]) if row and row["t"] else None
+
     def last_customer_message_at(self, group_id: str) -> datetime | None:
         """该会话最后一条**客户**发言的时间。
 

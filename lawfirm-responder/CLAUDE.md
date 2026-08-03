@@ -117,6 +117,11 @@ ruff check responder tests       # lint
   超发的代价不是少发一条，是应用被平台标记，故 `service._douyin_budget` 宁可少说一句。
   发送 endpoint 因文档站不可达而做成配置项，由 `scripts/douyin_smoke.py --probe` 校正。
 
+- 自动升级（2026-08）：服务器每 5 分钟自查远端分支有无新提交，有则自行拉取重启
+  （`ops.auto_update_tick`，worker.tick 调度）。原因是运维侧未必够得着这台服务器，
+  但服务器够得着 GitHub。**推送即上线**，因此 push 前必须 pytest + verify 全绿——
+  没有人工点按钮这一道闸了。重启会丢内存队列，故队列非空或客户 2 分钟内说过话时跳过。
+
 ## 待定决策（动工相关功能前先确认）
 
 提醒升级链路参数、案管系统对接、数据留存时长/脱敏策略、智能机器人回调能力是否开通。
