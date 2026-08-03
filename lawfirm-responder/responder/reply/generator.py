@@ -62,6 +62,7 @@ def generate(
     require_disclaimer: bool | None = None,
     include_cta: bool = True,
     ask_contact: bool = False,
+    next_step: bool = False,
     settings: Settings | None = None,
     now: datetime | None = None,
 ) -> GuardResult | None:
@@ -84,11 +85,21 @@ def generate(
     fallback = templates.safe_fallback(group)
 
     def _close(text: str) -> str:
-        """收口：需要时把索要联系方式的话术接在正文之后（整体再过闸门）。"""
-        if not ask_contact:
-            return text
-        decision.reasons.append("cta:ask-contact")
-        return text + "\n" + templates.ask_contact(group, seed=msg.msg_id, settings=settings)
+        """收口：把下一步引导接在正文之后（整体再过闸门）。
+
+        两档，互斥：ask_contact 是完整邀约（留电话 + 到所面谈），
+        next_step 是轻推一句。都不带的回复等于死胡同——客户看完只能干等，
+        这是转化上最贵的沉默（业务决策 2026-08）。
+        """
+        if ask_contact:
+            decision.reasons.append("cta:ask-contact")
+            return text + "\n" + templates.ask_contact(
+                group, seed=msg.msg_id, settings=settings
+            )
+        if next_step:
+            decision.reasons.append("cta:next-step")
+            return text + "\n" + templates.next_step(group, seed=msg.msg_id)
+        return text
 
     # 客服开场引导：确定性话术，不含法律实质内容，不进模型。
     # 开场白不接索要电话——刚打上照面就问电话，客户只会退出去。
@@ -109,7 +120,7 @@ def generate(
             group, body,
             include_disclaimer=require_disclaimer,
             opening=templates.answer_opening(msg.content, now),
-            include_cta=include_cta and not ask_contact,
+            include_cta=include_cta and not (ask_contact or next_step),
             seed=msg.msg_id,
         )
     else:
@@ -117,7 +128,7 @@ def generate(
         text = templates.answer_without_llm(
             group,
             include_disclaimer=require_disclaimer,
-            include_cta=include_cta and not ask_contact,
+            include_cta=include_cta and not (ask_contact or next_step),
         )
     return guard(
         _close(text), Action.ANSWER, fallback, require_disclaimer=require_disclaimer

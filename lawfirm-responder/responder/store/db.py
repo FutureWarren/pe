@@ -540,6 +540,16 @@ class Store:
             ).fetchone()
             return row["n"]
 
+    def has_reply_category(self, group_id: str, category: str) -> bool:
+        """这通对话是否已经实发过某一类回复。用于「一通对话只做一次」的动作。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM replies WHERE group_id=? AND category=?"
+                " AND mode='live' LIMIT 1",
+                (group_id, category),
+            ).fetchone()
+        return row is not None
+
     def has_greeting(self, group_id: str) -> bool:
         """这通对话是否已经发过开场白（进线问候或引导型开场）。
 
@@ -547,13 +557,7 @@ class Store:
         若规则判不出那是不是法律问题而再回一遍「请您说说什么情况」，
         就是当着客户的面复读——这个查询就是用来拦住第二次的。
         """
-        with self._conn() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM replies WHERE group_id=? AND category='greeting'"
-                " AND mode='live' LIMIT 1",
-                (group_id,),
-            ).fetchone()
-        return row is not None
+        return self.has_reply_category(group_id, "greeting")
 
     def set_reply_feedback(self, reply_id: int, feedback: str) -> None:
         with self._conn() as conn:

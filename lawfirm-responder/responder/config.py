@@ -75,8 +75,16 @@ class Settings(BaseSettings):
     office_address: str = "上海市松江区九峰路88号平高广场11楼"
     office_name: str = "上海松沪律师事务所"
     # 客户聊到第几条还没留联系方式时，主动开口要电话 + 邀约到所面谈。
-    # 太早显得急着推销，太晚客户已经走了；默认第 3 条客户消息。
-    ask_contact_after_messages: int = 3
+    # 业务决策 2026-08：主动要电话是提高变现率的正当动作，阈值从 3 下调到 2 ——
+    # 抖音漏斗显示开口的人里四成聊完就走，等到第 3 条往往已经错过。
+    ask_contact_after_messages: int = 2
+    # 承接类回复（「我帮您问下律师」）默认没有下一步，客户看完就没事干了。
+    # 业务决策 2026-08：每条回复都要留一个下一步，哪怕只是轻轻推一句。
+    handoff_next_step: bool = True
+    # 挽留：会话静默这么久且仍未留联系方式 → 补发一条（一通对话只发一次）。
+    # 对标抖音「自动挽留」（其官方数据：留资率 +7.4%）。0 或关闭则不发。
+    winback_enabled: bool = True
+    winback_idle_seconds: int = 1800
 
     # LLM 供应商：deepseek | anthropic | auto（auto = 谁的 key 在就用谁，deepseek 优先）
     # 业务决策 2026-07：默认 DeepSeek（成本考虑）；Anthropic 路径保留可随时切回

@@ -222,8 +222,12 @@ def test_ask_contact_after_threshold(tmp_path):
 
 
 def test_ask_contact_not_before_threshold(tmp_path):
-    """才聊两句就问电话像推销——不问。"""
-    _, kf = _chat(tmp_path, THREE[:2])
+    """还没聊够就问电话像推销——不问。
+
+    阈值 2026-08 从 3 下调到 2（主动要电话是提高变现率的正当动作），
+    故这里用 1 条消息验证「未达阈值不问」。
+    """
+    _, kf = _chat(tmp_path, THREE[:1])
     assert "手机号" not in kf.texts()
 
 
@@ -269,3 +273,131 @@ def test_ask_contact_falls_back_without_address(tmp_path):
     text = kf.texts()
     assert "手机号" in text
     assert "（）" not in text and "()" not in text
+
+
+# ---------------------------------------------------------------- 下一步引导
+def test_handoff_reply_always_has_a_next_step(tmp_path):
+    """承接话术不能是死胡同。
+
+    业务决策 2026-08：「我帮您问下律师，请您稍等」说完客户只能干等，
+    很多人就这么走了。每条回复都要留一个下一步动作。
+    """
+    _, kf = _chat(tmp_path, ["我的案子现在到哪一步了？"])
+    text = kf.texts()
+    assert "手机号" in text, "承接类回复必须带下一步引导"
+
+
+def test_next_step_yields_to_full_ask_contact(tmp_path):
+    """轻推与完整邀约互斥，不叠着发（同一条里不会问两遍电话）。"""
+    _, kf = _chat(tmp_path, THREE)
+    # 完整邀约含地址，轻推不含；两者同时出现会变成一条里问两遍
+    for _, _, t in kf.sent:
+        if ADDRESS in t:
+            assert t.count("手机号") == 1
+
+
+def test_no_next_step_in_group_chat(tmp_path):
+    """群聊里承办律师本人在场，AI 再追着要电话既多余又越界。"""
+    from responder.models import IncomingMessage
+
+    store, kf, worker = make_env(tmp_path, [])
+    store.upsert_group(GroupProfile(
+        group_id="g-plain", client_status=ClientStatus.PROSPECT,
+        lawyer_name="魏", robot_webhook="rk-1",
+    ))
+    worker.pipeline.handle(IncomingMessage(
+        msg_id="g1", group_id="g-plain", sender_id="u1",
+        content="我的案子现在到哪一步了？"))
+    drafts = "\n".join(r["text"] for r in store.list_replies("g-plain"))
+    assert "手机号" not in drafts
+
+
+def test_next_step_skipped_once_contact_known(tmp_path):
+    """客户已经留了电话就不再推——再问就成了没在听。"""
+    _, kf = _chat(tmp_path, [
+        "我电话13812345678，你们联系我",
+        "我的案子现在到哪一步了？",
+    ])
+    assert kf.texts().count("手机号") == 0
+
+
+# ---------------------------------------------------------------- 挽留
+def _idle(store, group_id, seconds):
+    """把该会话的全部消息往前挪，制造「静默了这么久」的状态。"""
+    from datetime import datetime, timedelta
+
+    cutoff = (datetime.now() - timedelta(seconds=seconds)).isoformat()
+    with store._conn() as conn:
+        conn.execute("UPDATE messages SET created_at=? WHERE group_id=?",
+                     (cutoff, group_id))
+        conn.execute("UPDATE replies SET created_at=? WHERE group_id=?",
+                     (cutoff, group_id))
+
+
+def test_winback_after_idle_without_contact(tmp_path):
+    """聊完没留电话、会话静默 → 补一条挽留（此前完全没有这一环）。"""
+    store, kf, worker = make_env(tmp_path, [{
+        "msg_list": [kf_msg("m1", "公司拖欠我三个月工资，还把我辞退了")],
+        "next_cursor": "c1", "has_more": 0,
+    }])
+    run(worker)
+    n = len(kf.sent)
+    _idle(store, GID, 3600)
+    worker.tick()
+
+    assert len(kf.sent) > n, "静默后应补一条挽留"
+    last = kf.sent[-1][2]
+    assert "手机号" in last and ADDRESS in last
+
+
+def test_winback_sent_only_once(tmp_path):
+    """挽留只发一次，第二次就成了骚扰。"""
+    store, kf, worker = make_env(tmp_path, [{
+        "msg_list": [kf_msg("m1", "公司拖欠我三个月工资")],
+        "next_cursor": "c1", "has_more": 0,
+    }])
+    run(worker)
+    _idle(store, GID, 3600)
+    worker.tick()
+    n = len(kf.sent)
+    _idle(store, GID, 7200)
+    worker.tick()
+    assert len(kf.sent) == n
+
+
+def test_winback_skipped_when_contact_left(tmp_path):
+    """已经留了电话就没什么好挽的。"""
+    store, kf, worker = make_env(tmp_path, [{
+        "msg_list": [kf_msg("m1", "我电话13812345678，你们联系我")],
+        "next_cursor": "c1", "has_more": 0,
+    }])
+    run(worker)
+    n = len(kf.sent)
+    _idle(store, GID, 3600)
+    worker.tick()
+    assert len(kf.sent) == n
+
+
+def test_winback_for_silent_visitor_gives_an_example(tmp_path):
+    """进来被问候后一句没说的人，卡在「不知道怎么开口」——要再给一次例句。"""
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_event("e1")], "next_cursor": "c1", "has_more": 0},
+    ])
+    run(worker)
+    _idle(store, GID, 3600)
+    worker.tick()
+
+    assert len(kf.sent) == 2
+    assert "比如" in kf.sent[-1][2], "没开过口的人要给例句，不是直接要电话"
+
+
+def test_winback_can_be_disabled(tmp_path):
+    store, kf, worker = make_env(tmp_path, [{
+        "msg_list": [kf_msg("m1", "公司拖欠我三个月工资")],
+        "next_cursor": "c1", "has_more": 0,
+    }], winback_enabled=False)
+    run(worker)
+    n = len(kf.sent)
+    _idle(store, GID, 3600)
+    worker.tick()
+    assert len(kf.sent) == n

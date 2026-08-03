@@ -92,6 +92,14 @@ ruff check responder tests       # lint
   ② **聊够了主动要电话 + 邀约到所**：默认第 3 条客户发言后，且通篇未出现联系方式、
   未成交客户、接管窗口内没问过（`service._should_ask_contact` → `templates.ask_contact`）。
   阈值 `ask_contact_after_messages` 与所址 `office_address` 走配置，改动须人工确认。
+  ③ **每条回复都要有下一步**（业务决策 2026-08，律所方明确要求）：承接话术
+  「我帮您问下律师，请您稍等」是死胡同，客户看完只能干等，很多人就这么走了。
+  三档推进依次升级、互不复读：轻推（`templates.next_step`，承接回复后缀）→
+  完整邀约（`ask_contact`，含所址与面谈邀请）→ 静默挽留
+  （`worker._sweep_winback`，一通对话只发一次）。轻推不阻断完整邀约——
+  后者多出的是所址，属新信息不算催单，故两者用不同标记判重
+  （`ASK_CONTACT_MARKERS` / `OFFICE_INVITE_MARKERS`）。
+  三档**只在一对一进线窗口生效**：群聊里承办律师本人在场，AI 追着要电话越界。
 - 渠道措辞：「在群里」只对群聊说。客服/私信是一对一窗口，没有群，
   模板一律经 `templates._in_group(group)`，prompt 经 `is_one_on_one` 告知模型当前场合。
 - 抖音企业号私信（2026-08，见 `docs/douyin.md`）：用户 first pass 多在抖音而非微信

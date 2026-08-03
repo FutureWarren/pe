@@ -156,8 +156,12 @@ def test_duplicate_msgid_processed_once(tmp_path):
     store, kf, worker = make_env(tmp_path, [batch, dict(batch)])
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
     n = len(kf.sent)
+    assert n >= 1
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
-    assert len(kf.sent) == n == 1
+    # 数「条数」会随分条策略变化（承接话术现在会带一句下一步引导），
+    # 这里要断言的是「没有被处理第二遍」，所以比对前后是否新增
+    assert len(kf.sent) == n
+    assert len(store.list_replies(GID)) == 1
 
 
 def test_shadow_mode_drafts_only(tmp_path):
@@ -181,10 +185,11 @@ def test_ai_disabled_profile_stays_silent(tmp_path):
          "next_cursor": "c2", "has_more": 0},
     ])
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
-    assert len(kf.sent) == 1
+    n = len(kf.sent)
+    assert n >= 1
     store.set_group_ai(GID, False)
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
-    assert len(kf.sent) == 1  # 未新增
+    assert len(kf.sent) == n  # 未新增
 
 
 def test_no_wait_gate_in_kf(tmp_path):

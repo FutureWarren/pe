@@ -146,10 +146,23 @@ class Pipeline:
             )
 
         want_contact = self._should_ask_contact(group, decision, convo)
+        # 承接类回复本身是死胡同（「我帮您问下律师，请您稍等」说完客户只能干等）。
+        # 完整邀约还不到时候的，至少轻推一句，别让对话停在没有下一步的地方。
+        # 只对一对一窗口做：群聊里承办律师本人在场，「请您稍等」的下一步就是
+        # 律师自己会在群里回话，再让 AI 追着要电话既多余又越界。
+        want_next_step = (
+            not want_contact
+            and self.settings.handoff_next_step
+            and decision.action == Action.HANDOFF
+            and group.is_kf
+            and group.client_status == ClientStatus.PROSPECT
+            and not signals.scan(convo)[1]
+            and not self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
+        )
         result = generate(
             msg, decision, group, history=history, settings=self.settings,
             include_cta=not self._recent_cta(msg.group_id),
-            ask_contact=want_contact,
+            ask_contact=want_contact, next_step=want_next_step,
         )
         reply_text = None
         if result:
@@ -291,15 +304,23 @@ class Pipeline:
         「谁跟进、怎么找到他」。抖音后台数据摆在那儿——90 个开口的人里只有 50 个留资，
         不主动开口要，剩下那四成聊完就走了。
 
-        五个前提缺一不可：
-          1. 未成交客户（已委托的客户电话我们本来就有，再问一遍很怪）；
-          2. 聊够了（默认第 3 条客户发言）——太早像推销，太晚人已经走了；
-          3. 通篇还没出现过联系方式（客户自己留了就不必再要）；
-          4. 不是开场白那一轮（刚打上照面就问电话，人只会退出去）；
-          5. 接管时间窗内没问过（同一通对话问第二遍就成了催单）。
+        六个前提缺一不可：
+          1. 一对一进线窗口（客服/抖音私信）——群聊里承办律师本人在场，
+             AI 再追着要电话既多余又越界；何况新咨询本来就全从一对一进来；
+          2. 未成交客户（已委托的客户电话我们本来就有，再问一遍很怪）；
+          3. 聊够了（默认第 2 条客户发言）——太早像推销，太晚人已经走了；
+          4. 通篇还没出现过联系方式（客户自己留了就不必再要）；
+          5. 不是开场白那一轮（刚打上照面就问电话，人只会退出去）；
+          6. 接管时间窗内没做过完整邀约（同一通对话邀第二遍就成了催单）。
+
+        注意第 6 条比的是**邀约**标记而不是「手机号」：承接回复里的轻推
+        （「留个手机号也行」）不该挡住这一步——完整邀约多出的是所址和面谈邀请，
+        是新信息，属于正常升级。
         """
         threshold = self.settings.ask_contact_after_messages
-        if threshold <= 0 or group.client_status != ClientStatus.PROSPECT:
+        if threshold <= 0 or not group.is_kf:
+            return False
+        if group.client_status != ClientStatus.PROSPECT:
             return False
         if decision.category == Category.GREETING:
             return False
@@ -314,7 +335,7 @@ class Pipeline:
             return False
         if signals.scan(convo)[1]:
             return False
-        return not self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
+        return not self._recent_marker(group.group_id, templates.OFFICE_INVITE_MARKERS)
 
     # ------------------------------------------------------------ 发送
     def _is_kf(self, group: GroupProfile) -> bool:

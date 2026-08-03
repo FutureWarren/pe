@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 
 from responder import lead
 from responder.compliance.guard import guard
+from responder.engine import signals
 from responder.gateway import bot, douyin, wecom_kf
 from responder.models import Action, ClientStatus, GroupProfile, IncomingMessage
 from responder.notify import escalation
@@ -115,6 +116,60 @@ class Worker:
             logger.exception("escalate_overdue failed")
         self._sweep_idle_leads(now)
         self._sweep_lead_sla(now)
+        self._sweep_winback(now)
+
+    def _sweep_winback(self, now: datetime) -> None:
+        """挽留：会话静默且仍未留联系方式 → 补发一条，一通对话只发一次。
+
+        业务决策 2026-08：回完消息就没有下一步是转化上最贵的沉默。
+        抖音「自动挽留」官方数据留资率 +7.4%，微信侧此前完全没有这一环——
+        聊完没留电话的人就这么走了，连一次挽回都没有。
+
+        只对一对一会话（客服/抖音私信）做。群聊里律师本人在场，
+        AI 单方面追着客户要电话既越界又尴尬。
+        """
+        s = self.pipeline.settings
+        if not s.winback_enabled or s.winback_idle_seconds <= 0:
+            return
+        until = now - timedelta(seconds=s.winback_idle_seconds)
+        # 与线索补位同样的回看窗口：停机期间安静下来的会话不能被永久跳过
+        since = now - timedelta(seconds=max(s.winback_idle_seconds * 4, 86400))
+        for gid in self.store.idle_conversations(since, until):
+            try:
+                self._winback_one(gid)
+            except Exception:
+                logger.exception("winback failed: %s", gid)
+
+    def _winback_one(self, group_id: str) -> None:
+        s = self.pipeline.settings
+        if self.store.has_reply_category(group_id, "winback"):
+            return  # 只挽留一次，第二次就成了骚扰
+        group = self.store.get_group(group_id)
+        if group is None or not group.ai_enabled or not group.is_kf:
+            return
+        if group.client_status != ClientStatus.PROSPECT:
+            return
+        convo = self.store.recent_messages(group_id, s.lead_history_window)
+        if signals.scan(convo)[1]:
+            return  # 已经留了联系方式，没什么好挽的
+        # 说过话的人已经把情况讲清楚了，直接收口；一句没说的还卡在「不知道怎么开口」
+        spoke = any(
+            not m.get("sender_is_staff")
+            and m.get("msg_type") != "event"
+            and (m.get("content") or "").strip()
+            for m in convo
+        )
+        if not self.pipeline._can_send(group):
+            return
+        marker = f"winback-{group_id}"
+        text = templates.winback(group, spoke, seed=marker, settings=s)
+        result = guard(text, Action.ANSWER, templates.safe_fallback(group))
+        sent, parts = self.pipeline._send_group(group, group_id, result.text)
+        self.store.save_reply(
+            marker, group_id, result.text, "live" if sent else "failed",
+            result.passed, category="winback", parts=parts,
+        )
+        logger.info("winback %s: %s", "sent" if sent else "failed", group_id)
 
     def _sweep_idle_leads(self, now: datetime) -> None:
         """对话安静下来后补一份线索简报——聊完没留电话的咨询同样有跟进价值。

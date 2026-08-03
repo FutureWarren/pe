@@ -193,6 +193,10 @@ CTA_PROSPECT = [
 # 与 CTA_MARKERS 分开是因为两者的复读容忍度不同——泛泛的「约个时间」可以隔一阵再来一次，
 # 「留个电话」在同一通对话里问第二遍就变成催单了。
 ASK_CONTACT_MARKERS = ("手机号",)
+# 邀约到所的标记。与上面分开，是因为两档推进的复读容忍度不同：
+# 轻推（「留个手机号也行」）之后再来一次完整邀约，多出的是所址和面谈邀请，
+# 属于正常升级、不是催单；但完整邀约本身在同一通对话里只该出现一次。
+OFFICE_INVITE_MARKERS = ("来所里", "当面聊")
 CTA_MARKERS = ("约个时间", "再给您细说") + ASK_CONTACT_MARKERS
 
 
@@ -218,6 +222,57 @@ def ask_contact(
         f"或者您得空来所里也行，我们在{where}，喝杯茶把材料一起看看。",
         f"要不这样，您把手机号发我，{L}那边直接联系您。\n"
         f"当面聊也可以，地址是{where}，您定个时间我这边给您安排。",
+    ]
+    return _pick(variants, seed)
+
+
+def next_step(group: GroupProfile, seed: str = "") -> str:
+    """承接类回复的下一步引导（轻推一句）。
+
+    业务决策 2026-08：承接话术本身是个死胡同——「我帮您问下律师，请您稍等」
+    说完客户就没事干了，只能干等，很多人就这么走了。每条回复都要留一个
+    下一步动作。这里只轻推（给个理由 + 一句话），完整的邀约留给 ask_contact，
+    两者互斥，不叠着发。
+    """
+    L = _lawyer(group)
+    variants = [
+        f"要是急，您留个手机号，我让{L}直接给您打过来。",
+        f"您方便的话留个手机号，{L}回头电话里跟您说，比在这儿等着强。",
+        f"留个手机号也行，{L}一有空就给您回电话。",
+    ]
+    return _pick(variants, seed)
+
+
+def winback(
+    group: GroupProfile, spoke: bool, seed: str = "", settings: Settings | None = None
+) -> str:
+    """会话静默且仍未留联系方式时的挽留。一通对话只发一次。
+
+    分两种人，话术不能混：
+      - 没开过口的：他卡在「不知道怎么说」，要再给一次例句，降低开口门槛；
+      - 聊过但没留电话的：情况已经说清楚了，直接收口要电话 + 邀约到所。
+    """
+    settings = settings or get_settings()
+    L = _lawyer(group)
+    if not spoke:
+        variants = [
+            "您好，刚才的消息可能没看到。\n"
+            "您遇到的是什么事？简单说个大概就行，"
+            "比如「对方借钱不还，有转账记录」，我帮您看看该怎么处理。",
+            "您好，我还在的。\n"
+            "您把情况说两句就行，怎么想的就怎么说，"
+            "比如「公司欠我三个月工资」这样，我先帮您理一理。",
+        ]
+        return _pick(variants, seed)
+    addr = settings.office_address
+    where = f"{settings.office_name}（{addr}）" if addr else settings.office_name
+    variants = [
+        f"您的情况我这边大致了解了。\n"
+        f"要不留个手机号，我安排{L}给您回个电话，比打字说得清楚。"
+        f"您方便的话来所里当面聊也行，我们在{where}。",
+        f"刚才说的我都记下了。\n"
+        f"您留个手机号吧，{L}那边直接联系您；或者得空来所里坐坐也行，"
+        f"地址是{where}。",
     ]
     return _pick(variants, seed)
 
