@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # 抖音会话建档后线索简报的默认接收人（抖音侧没有「接待人」可查）
     douyin_default_notify_userid: str = ""
 
+    # ---- 会话转接（见 docs/kf-handoff.md）
+    # 转接后律师迟迟不接手 → 把客户收回给 AI。转接引入的最坏情况是
+    # 「客户被交给一个不看企微的律师」，那比 AI 一直陪着更糟，必须有这个兜底。
+    handoff_reclaim_seconds: int = 1800
+
     # 律所线下地址：邀约到所面谈的话术里用。留空则只约时间不报地址。
     office_address: str = "上海市松江区九峰路88号平高广场11楼"
     office_name: str = "上海松沪律师事务所"

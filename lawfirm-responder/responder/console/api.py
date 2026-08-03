@@ -594,6 +594,60 @@ def _douyin_diag(s, store: Store) -> dict:
     }
 
 
+@router.get("/kf/handoff-probe")
+def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
+    """会话转接就绪自检（只读，不改任何东西）。
+
+    做成控制台端点而不是命令行脚本，是因为企微 API 受可信 IP 限制、只有服务器
+    调得通，而律所侧没有 SSH。点一下按钮即可，返回结果直接贴给开发看。
+
+    最要紧的一项是**名册与接待人的差集**：律师不在客服账号的接待人列表里，
+    转接接口会直接失败，而它失败的时机恰恰是 P0 线索来的那一刻。
+    """
+    store: Store = request.app.state.store
+    s = request.app.state.pipeline.settings
+    client = getattr(request.app.state.pipeline, "_kf_client", None)
+    if client is None or not client.available():
+        return {"ready": False, "error": "微信客服未配置（RESPONDER_WECOM_KF_SECRET）"}
+
+    accounts = client.account_list()
+    if not accounts:
+        return {"ready": False, "error": "取不到客服账号：检查 Secret 与企微可信 IP"}
+
+    roster = {law["userid"] for law in store.list_lawyers(active_only=True)
+              if law.get("userid")}
+    names = {law["userid"]: law.get("name", "") for law in store.list_lawyers()}
+    out, ready = [], bool(roster)
+    for a in accounts:
+        kfid = a.get("open_kfid", "")
+        raw = client.servicer_raw(kfid)
+        servicers = {x["userid"] for x in (raw.get("servicer_list") or [])
+                     if x.get("userid")}
+        missing = sorted(roster - servicers)
+        if missing:
+            ready = False
+        out.append({
+            "open_kfid": kfid,
+            "name": a.get("name", ""),
+            "servicers": sorted(servicers),
+            "missing": [{"userid": u, "name": names.get(u, "")} for u in missing],
+            "raw": raw if not servicers else None,  # 取不到接待人时才回原始返回
+        })
+    return {
+        "ready": ready,
+        "accounts": out,
+        "roster_size": len(roster),
+        "reclaim_seconds": s.handoff_reclaim_seconds,
+        "hint": (
+            "律师名册为空：先在「团队」页添加律师，转接才有对象"
+            if not roster
+            else "有律师不是接待人，转接会失败——到企微后台把他们加进「接待人员」"
+            if not ready
+            else "名册全员都是接待人，转接的前置条件已满足"
+        ),
+    }
+
+
 @router.get("/diagnostics")
 def diagnostics(request: Request, _: Principal = Depends(require_admin)):
     """远程自检：模型连通性、微信客服通道与客服账号列表。

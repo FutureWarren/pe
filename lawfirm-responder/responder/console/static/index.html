@@ -936,6 +936,13 @@ function openStatusPanel() {
           onclick="openKfQr()">${ico("phone")}获取客户进线二维码</button>` : ""}
       </div>
       <div class="srow"><div class="k">待处理队列</div><div class="v">${esc(qTxt)}</div></div>
+      ${h.kf ? `<div class="srow admin-only"><div class="k">会话转接</div>
+        <div class="v">把客户直接交给律师在原窗口接着聊，不用打电话</div>
+        <button class="btn-outline" style="margin-top:8px" onclick="checkHandoff()">
+          ${ico("users")}检查转接是否就绪
+        </button>
+        <div id="hoResult" class="meta" style="margin-top:8px"></div>
+      </div>` : ""}
       <div class="srow admin-only"><div class="k">程序版本</div>
         <div class="v" id="verLine">${h.commit ? esc(h.commit) : "—"}</div>
         <button class="btn-outline" style="margin-top:8px" onclick="askUpdate()">
@@ -1020,6 +1027,28 @@ async function doSwitchMode(mode) {
     await loadHealth();
     refresh();
   } catch (e) { toast("操作失败，请重试", false); }
+}
+
+/* 转接就绪自检。最容易静默失败的是「律师不是客服账号的接待人」——
+   那会让转接在 P0 线索来的那一刻才失败，所以要能提前一键查出来。 */
+async function checkHandoff() {
+  const el = document.getElementById("hoResult");
+  el.textContent = "检查中……";
+  let r;
+  try { r = await api("/kf/handoff-probe"); }
+  catch (e) { el.textContent = "检查失败，请重试"; return; }
+  if (r.error) { el.innerHTML = `<b style="color:var(--danger)">${esc(r.error)}</b>`; return; }
+  const lines = [
+    `${r.ready ? "✅" : "⚠️"} ${esc(r.hint)}`,
+    `律师名册 ${r.roster_size} 位`,
+  ];
+  for (const a of r.accounts) {
+    lines.push(`「${esc(a.name || a.open_kfid)}」接待人 ${a.servicers.length} 位`);
+    if (a.missing.length) {
+      lines.push(`　❌ 不是接待人：${a.missing.map(m => esc(m.name || m.userid)).join("、")}`);
+    }
+  }
+  el.innerHTML = lines.join("<br>");
 }
 
 /* 升级到最新版：服务器自己去仓库拉代码并重启。

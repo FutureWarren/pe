@@ -140,6 +140,11 @@ _ADDED_COLUMNS = {
         "kf_external_userid": "TEXT DEFAULT ''",
         # 抖音私信会话的对方标识（open_id）
         "douyin_open_id": "TEXT DEFAULT ''",
+        # 会话已转给哪位律师人工接待（见 docs/kf-handoff.md）。
+        # 转接发生在律师「发言之前」，靠发言触发的 human-takeover 兜不住，
+        # 必须显式记状态，否则 AI 会抢在律师前面回话。
+        "handoff_userid": "TEXT DEFAULT ''",
+        "handoff_at": "TEXT",
     },
     # parts：这条回复实际拆成了几条平台消息。抖音按**条**限额（同一窗口最多 6 条），
     # 一行 replies 可能对应 3 条真实消息，不记下来就算不准配额。
@@ -216,8 +221,8 @@ class Store:
                 """INSERT INTO groups (group_id,name,client_status,case_type,case_stage,
                    lawyer_name,lawyer_userid,backup_userid,ai_enabled,robot_webhook,
                    bot_webhook,bot_webhook_at,kf_open_kfid,kf_external_userid,
-                   douyin_open_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   douyin_open_id,handoff_userid,handoff_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(group_id) DO UPDATE SET
                    name=excluded.name, client_status=excluded.client_status,
                    case_type=excluded.case_type, case_stage=excluded.case_stage,
@@ -228,13 +233,17 @@ class Store:
                    bot_webhook_at=excluded.bot_webhook_at,
                    kf_open_kfid=excluded.kf_open_kfid,
                    kf_external_userid=excluded.kf_external_userid,
-                   douyin_open_id=excluded.douyin_open_id""",
+                   douyin_open_id=excluded.douyin_open_id,
+                   handoff_userid=excluded.handoff_userid,
+                   handoff_at=excluded.handoff_at""",
                 (
                     g.group_id, g.name, g.client_status.value, g.case_type, g.case_stage,
                     g.lawyer_name, g.lawyer_userid, g.backup_userid, int(g.ai_enabled),
                     g.robot_webhook, g.bot_webhook,
                     g.bot_webhook_at.isoformat() if g.bot_webhook_at else None,
                     g.kf_open_kfid, g.kf_external_userid, g.douyin_open_id,
+                    g.handoff_userid,
+                    g.handoff_at.isoformat() if g.handoff_at else None,
                 ),
             )
 
@@ -246,6 +255,14 @@ class Store:
         d = dict(row)
         d["ai_enabled"] = bool(d["ai_enabled"])
         return GroupProfile(**d)
+
+    def set_handoff(self, group_id: str, userid: str) -> None:
+        """标记会话已转给该律师人工接待（userid 为空 = 收回给 AI）。"""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE groups SET handoff_userid=?, handoff_at=? WHERE group_id=?",
+                (userid, datetime.now().isoformat() if userid else None, group_id),
+            )
 
     def delete_group(self, group_id: str) -> None:
         """仅删档案；该群的消息/判断/回复留痕保持不动。"""

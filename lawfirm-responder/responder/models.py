@@ -55,6 +55,9 @@ class GroupProfile(BaseModel):
     # 抖音企业号私信会话：对方的 open_id。与微信客服同属「一对一」，
     # 但发送侧受平台配额限制（24 小时窗口 / 6 条），见 gateway/douyin.py
     douyin_open_id: str = ""
+    # 会话已转人工接待：接手的律师 userid 与转接时刻（见 docs/kf-handoff.md）
+    handoff_userid: str = ""
+    handoff_at: datetime | None = None
 
     @property
     def is_douyin(self) -> bool:

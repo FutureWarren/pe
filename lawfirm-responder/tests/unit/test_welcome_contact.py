@@ -424,3 +424,65 @@ def test_group_chat_still_names_the_lawyer():
 
     g = GroupProfile(group_id="g1", lawyer_name="魏")
     assert "魏律师" in handoff_generic(g, seed="a")
+
+
+# ---------------------------------------------------------------- 会话转接
+def test_ai_silent_after_handoff(tmp_path):
+    """转接给律师后 AI 必须闭嘴。
+
+    现有的 gate:human-takeover 靠律师**发言**触发，而转接发生在律师说第一句话
+    之前——少了这道门，客户会看到两个「人」同时在回他。
+    """
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("m1", "公司拖欠我三个月工资")],
+         "next_cursor": "c1", "has_more": 0},
+        {"msg_list": [kf_msg("m2", "那我该准备什么材料")],
+         "next_cursor": "c2", "has_more": 0},
+    ])
+    run(worker)
+    n = len(kf.sent)
+    store.set_handoff(GID, "wei")
+    run(worker, token="tk2")
+
+    assert len(kf.sent) == n, "已转人工后 AI 不应再发言"
+    reasons = [d["reasons"] for d in store.list_decisions(GID)]
+    assert any("gate:handed-off" in r for r in reasons)
+
+
+def test_ai_reclaims_when_lawyer_never_picks_up(tmp_path):
+    """律师迟迟不接手 → AI 收回来继续兜着。
+
+    客户被转给一个不看企微的律师、晾在那儿没人理，比 AI 一直陪着更糟。
+    """
+    from datetime import datetime, timedelta
+
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("m1", "公司拖欠我三个月工资")],
+         "next_cursor": "c1", "has_more": 0},
+        {"msg_list": [kf_msg("m2", "还有人在吗")],
+         "next_cursor": "c2", "has_more": 0},
+    ], handoff_reclaim_seconds=600)
+    run(worker)
+    n = len(kf.sent)
+    store.set_handoff(GID, "wei")
+    # 把转接时刻推到很久以前：律师一直没接手
+    stale = (datetime.now() - timedelta(seconds=3600)).isoformat()
+    with store._conn() as conn:
+        conn.execute("UPDATE groups SET handoff_at=? WHERE group_id=?", (stale, GID))
+    run(worker, token="tk2")
+
+    assert len(kf.sent) > n, "超时未接手应由 AI 收回，不能把客户晾着"
+    reasons = [d["reasons"] for d in store.list_decisions(GID)]
+    assert any("handoff:reclaimed" in r for r in reasons)
+
+
+def test_handoff_state_round_trips(tmp_path):
+    store, _, _ = make_env(tmp_path, [])
+    store.upsert_group(GroupProfile(
+        group_id=GID, kf_open_kfid=OPEN_KFID, kf_external_userid=EXT_USER))
+    store.set_handoff(GID, "wei")
+    g = store.get_group(GID)
+    assert g.handoff_userid == "wei" and g.handoff_at is not None
+    store.set_handoff(GID, "")
+    g = store.get_group(GID)
+    assert g.handoff_userid == "" and g.handoff_at is None

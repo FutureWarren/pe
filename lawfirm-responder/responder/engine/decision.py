@@ -108,6 +108,20 @@ def decide(
     if msg.sender_is_staff:
         decision.reasons.append("gate:staff-message")
         return decision
+    # 会话已转人工接待 → AI 一律沉默（见 docs/kf-handoff.md）。
+    # 与下面的 gate:human-takeover 的区别：那条靠律师**发言**触发，
+    # 而转接发生在律师说第一句话之前——少了这一条，转接后 AI 还会抢在
+    # 律师前面回话，客户会看到两个"人"同时在说话。
+    if group.handoff_userid and group.handoff_at is not None:
+        waited = (now - group.handoff_at).total_seconds()
+        if waited < settings.handoff_reclaim_seconds:
+            decision.reasons.append(f"gate:handed-off({group.handoff_userid})")
+            return decision
+        # 超时仍没人接手：把客户交回 AI。转接引入的最坏情况是「被转给一个
+        # 不看企微的律师」，那比 AI 一直陪着更糟——宁可 AI 接回来继续兜着。
+        # 真正的升级提醒由 worker 的 SLA 扫描负责，这里只管别让客户没人理。
+        decision.reasons.append("handoff:reclaimed")
+
     if (
         seconds_since_last_staff_reply is not None
         and seconds_since_last_staff_reply < settings.takeover_seconds
