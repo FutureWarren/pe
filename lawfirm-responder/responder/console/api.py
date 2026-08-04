@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from responder.config import persist_setting
 from responder.models import GroupProfile
 from responder.store.db import Store
 
@@ -112,9 +113,33 @@ def _own_group_ids(store: Store, p: Principal) -> set[str]:
 
 
 @router.get("/me")
-def me(p: Principal = Depends(get_principal)):
+def me(request: Request, p: Principal = Depends(get_principal)):
     """登录探针 + 前端角色开关的唯一依据（数据隔离仍在各端点服务端强制）。"""
+    _remember_base_url(request)
     return {"role": p.role, "userid": p.userid, "name": p.name}
+
+
+def _remember_base_url(request: Request) -> None:
+    """首次有人从公网打开控制台时，把这个地址记下来当作对外基础地址。
+
+    为什么要自动记：交接单末尾的「看完整对话」深链、律师登录链接，都需要知道
+    服务器的对外地址。它此前只能人工写进 .env——而运维侧未必够得着这台机器，
+    结果就是链接一直发不出去。控制台被访问到的那个地址，恰恰就是律师能打开的
+    那个地址，直接采信它即可。
+
+    只认非本机地址：管理员从 127.0.0.1 调试时记下来的地址，别人一个都打不开。
+    """
+    s = request.app.state.pipeline.settings
+    if s.public_base_url:
+        return
+    host = (request.headers.get("host") or "").strip()
+    if not host or host.split(":")[0] in ("localhost", "127.0.0.1", "::1"):
+        return
+    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    base = f"{scheme}://{host}"
+    s.public_base_url = base
+    persist_setting("RESPONDER_PUBLIC_BASE_URL", base)
+    logger.info("public_base_url auto-detected: %s", base)
 
 
 @router.get("/todo")
@@ -513,8 +538,6 @@ def set_mode(body: ModeSwitch, request: Request, _: Principal = Depends(require_
 
     正式模式下 AI 会真的向客户发言，属重大操作——前端须二次确认。
     """
-    from responder.config import persist_setting
-
     if body.mode not in ("shadow", "live"):
         raise HTTPException(400, "mode 只能是 shadow 或 live")
     settings = request.app.state.pipeline.settings
