@@ -260,9 +260,10 @@ def _probe_app(store, settings, kf):
 
 
 class ProbeKf(FakeKf):
-    def __init__(self, *, state_ok=True, **kw):
+    def __init__(self, *, state_ok=True, add_ok=True, **kw):
         super().__init__(**kw)
         self.state_ok = state_ok
+        self.add_ok = add_ok
 
     def account_list(self):
         return [{"open_kfid": OPEN_KFID, "name": "在线咨询"}]
@@ -274,6 +275,12 @@ class ProbeKf(FakeKf):
         if not self.state_ok:
             raise RuntimeError(f"kf {path} failed: {{'errcode': 60020}}")
         return {"service_state": 1, "servicer_userid": ""}
+
+    def servicer_add(self, open_kfid, userids):
+        if not self.add_ok:
+            return {"error": "kf servicer/add failed: {'errcode': 60011}"}
+        self.servicers = sorted(set(self.servicers) | set(userids))
+        return {"errcode": 0}
 
 
 def test_probe_reports_ready_when_roster_and_endpoint_check_out(tmp_path):
@@ -324,3 +331,42 @@ def test_probe_without_any_conversation_is_not_an_error(tmp_path):
     assert data["state_probe"]["ok"] is False
     assert not data["state_probe"].get("error")
     assert data["ready"] is True
+
+
+# ------------------------------------------------------ 一键把律师加为接待人
+# 这一步在企微那边不好点：客服账号由企微应用托管，kf.weixin.qq.com 的后台
+# 会劝你点「开始使用」把管理权夺回网页侧——那会打断消息推送。所以程序代劳。
+def test_add_servicers_puts_roster_into_the_account(tmp_path):
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    kf = ProbeKf(servicers=())
+    data = TestClient(_probe_app(store, p.settings, kf)).post(
+        "/console/kf/servicers/add").json()
+    assert data["ok"] is True
+    assert data["accounts"][0]["added"] == ["wei"]
+    assert kf.servicers == ["wei"]
+
+
+def test_add_servicers_reports_who_did_not_make_it(tmp_path):
+    """以**回读结果**为准，不信写接口自己说的话——加没加上，看列表里有没有。"""
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    data = TestClient(_probe_app(store, p.settings, ProbeKf(servicers=(), add_ok=False))).post(
+        "/console/kf/servicers/add").json()
+    assert data["ok"] is False
+    assert data["accounts"][0]["failed"] == ["wei"]
+    assert "60011" in data["accounts"][0]["error"]
+
+
+def test_add_servicers_needs_a_roster_first(tmp_path):
+    """名册为空时说人话，而不是报一个 0 人成功的假成功。"""
+    from fastapi.testclient import TestClient
+
+    db = str(tmp_path / "empty.db")
+    store = Store(db)
+    settings = Settings(mode="live", db_path=db, wecom_kf_secret="s", admin_token="")
+    r = TestClient(_probe_app(store, settings, ProbeKf())).post("/console/kf/servicers/add")
+    assert r.status_code == 400
+    assert "名册" in r.json()["detail"]

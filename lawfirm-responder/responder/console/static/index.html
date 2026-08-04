@@ -946,6 +946,9 @@ function openStatusPanel() {
         <button class="btn-outline" style="margin-top:8px" onclick="checkHandoff()">
           ${ico("users")}检查转接是否就绪
         </button>
+        <button class="btn-outline" style="margin-top:8px" onclick="addServicers()">
+          ${ico("users")}把名册律师加为接待人
+        </button>
         <div id="hoResult" class="meta" style="margin-top:8px"></div>
       </div>` : ""}
       <div class="srow admin-only"><div class="k">程序版本</div>
@@ -1059,6 +1062,25 @@ async function checkHandoff() {
   if (sp.ok) lines.push(`✅ 转接接口已连通（当前会话状态 ${sp.service_state}）`);
   else if (sp.error) lines.push(`❌ 接口探测失败：${esc(sp.error)}`);
   else if (sp.reason) lines.push(`… ${esc(sp.reason)}`);
+  el.innerHTML = lines.join("<br>");
+}
+
+/* 一键把「团队」页名册里的律师加为客服账号接待人。
+   律师不是接待人，转接就会被企微当场拒掉——而这一步在微信客服后台不好点：
+   那个账号由企微应用托管，后台里点「开始使用」反而会夺走管理权、打断消息推送。
+   所以由服务器直接调接口加，加完立刻回读列表确认。 */
+async function addServicers() {
+  const el = document.getElementById("hoResult");
+  el.textContent = "正在添加……";
+  let r;
+  try { r = await api("/kf/servicers/add", { method: "POST" }); }
+  catch (e) { el.innerHTML = `<b style="color:var(--danger)">${esc(e.detail || "添加失败，请重试")}</b>`; return; }
+  const lines = [r.ok ? "✅ 名册律师已全部是接待人" : "⚠️ 有人没加上"];
+  for (const a of r.accounts) {
+    lines.push(`「${esc(a.name || a.open_kfid)}」已就位 ${a.added.length} 位`);
+    if (a.failed.length) lines.push(`　❌ 没加上：${a.failed.map(esc).join("、")}`);
+    if (a.error) lines.push(`　接口报错：${esc(a.error)}`);
+  }
   el.innerHTML = lines.join("<br>");
 }
 

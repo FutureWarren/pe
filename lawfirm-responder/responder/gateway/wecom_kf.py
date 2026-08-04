@@ -130,6 +130,24 @@ class KfClient:
         data = self.servicer_raw(open_kfid)
         return [s["userid"] for s in (data.get("servicer_list") or []) if s.get("userid")]
 
+    def servicer_add(self, open_kfid: str, userids: list[str]) -> dict:
+        """把律师加为该客服账号的接待人。返回原始结果（含逐人 errcode）。
+
+        为什么要做成 API 而不是让律所自己去后台点：这个客服账号由企微应用托管，
+        kf.weixin.qq.com 那个后台顶部横幅明说「正在通过企业微信应用管理相关能力」，
+        点「开始使用」会把管理权夺回网页后台——那会打断消息推送，代价远大于收益。
+        既然程序有权限，就由程序加，律所侧一个按钮的事。
+        """
+        if not userids:
+            return {"error": "没有可添加的 userid"}
+        try:
+            return self._post(
+                "kf/servicer/add", {"open_kfid": open_kfid, "userid_list": userids}
+            )
+        except Exception as e:
+            logger.exception("kf servicer/add error (open_kfid=%s)", open_kfid)
+            return {"error": str(e)[:300]}
+
     def account_list(self) -> list[dict]:
         """客服账号列表（部署自检用）。"""
         try:

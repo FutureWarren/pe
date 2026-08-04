@@ -682,6 +682,46 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
     }
 
 
+@router.post("/kf/servicers/add")
+def add_kf_servicers(request: Request, _: Principal = Depends(require_admin)):
+    """把名册里的律师批量加为客服账号的接待人（转接的硬前置）。
+
+    为什么由程序代劳：这个客服账号是企微应用托管的，kf.weixin.qq.com 顶部横幅
+    「正在通过企业微信应用管理相关能力」即指此事——在那个后台点「开始使用」会把
+    管理权夺回网页侧，打断消息推送，代价远大于收益。既然程序有权限，就程序来加。
+
+    幂等：已经是接待人的再加一次也无妨；加完立刻回读一次列表，
+    以**回读结果**为准报成功与否，不信写接口自己说的话。
+    """
+    store: Store = request.app.state.store
+    client = getattr(request.app.state.pipeline, "_kf_client", None)
+    if client is None or not client.available():
+        raise HTTPException(400, "微信客服通道未配置")
+
+    userids = [law["userid"] for law in store.list_lawyers(active_only=True)
+               if law.get("userid")]
+    if not userids:
+        raise HTTPException(400, "律师名册为空：先在「团队」页添加律师")
+    accounts = client.account_list()
+    if not accounts:
+        raise HTTPException(400, "取不到客服账号：检查 Secret 与企微可信 IP")
+
+    out = []
+    for a in accounts:
+        kfid = a.get("open_kfid", "")
+        raw = client.servicer_add(kfid, userids)
+        after = set(client.servicer_list(kfid))
+        out.append({
+            "open_kfid": kfid,
+            "name": a.get("name", ""),
+            "added": sorted(set(userids) & after),
+            "failed": sorted(set(userids) - after),
+            "error": raw.get("error", ""),
+        })
+    ok = all(not a["failed"] for a in out)
+    return {"ok": ok, "accounts": out, "roster": userids}
+
+
 def _probe_state_endpoint(store: Store, client, s) -> dict:
     """拿一通真实会话读一次会话状态，验证 kf_state_path / kf_trans_path 配得对不对。
 
