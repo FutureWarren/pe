@@ -656,18 +656,59 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
             "missing": [{"userid": u, "name": names.get(u, "")} for u in missing],
             "raw": raw if not servicers else None,  # 取不到接待人时才回原始返回
         })
+    state = _probe_state_endpoint(store, client, s)
+    if state.get("error"):
+        ready = False
     return {
         "ready": ready,
+        "enabled": s.handoff_enabled,
+        "mode": s.mode,
+        "priorities": s.handoff_priorities,
         "accounts": out,
         "roster_size": len(roster),
         "reclaim_seconds": s.handoff_reclaim_seconds,
+        "state_probe": state,
         "hint": (
             "律师名册为空：先在「团队」页添加律师，转接才有对象"
             if not roster
             else "有律师不是接待人，转接会失败——到企微后台把他们加进「接待人员」"
-            if not ready
-            else "名册全员都是接待人，转接的前置条件已满足"
+            if not ready and any(a["missing"] for a in out)
+            else f"接口路径探测失败：{state.get('error', '')}"
+            if state.get("error")
+            else "接待人齐、接口通，转接的前置条件已满足"
+            if state.get("ok")
+            else "接待人齐；接口路径还没验过（等一通真实客服会话进来后再点一次）"
         ),
+    }
+
+
+def _probe_state_endpoint(store: Store, client, s) -> dict:
+    """拿一通真实会话读一次会话状态，验证 kf_state_path / kf_trans_path 配得对不对。
+
+    只读，不改任何状态。为什么必须探：企微文档站在开发环境不可达，这两个路径是
+    照着记忆写的配置项；写错的话平时一切正常，直到 P0 线索来的那一刻转接失败。
+    读接口与转接口同属 `kf/service_state/*`，读得通即可判定前缀正确。
+    """
+    convo = next(
+        (g for g in store.list_groups()
+         if g.get("kf_open_kfid") and g.get("kf_external_userid")),
+        None,
+    )
+    if not convo:
+        return {"ok": False, "reason": "还没有任何客服会话可供探测"}
+    try:
+        raw = client.post_raw(s.kf_state_path, {
+            "open_kfid": convo["kf_open_kfid"],
+            "external_userid": convo["kf_external_userid"],
+        })
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300], "path": s.kf_state_path}
+    return {
+        "ok": True,
+        "path": s.kf_state_path,
+        "trans_path": s.kf_trans_path,
+        "service_state": raw.get("service_state"),
+        "servicer_userid": raw.get("servicer_userid", ""),
     }
 
 

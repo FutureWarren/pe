@@ -279,10 +279,72 @@ class Pipeline:
                 self.store, group, convo, self.sender,
                 settings=self.settings, force=urgent_kf, urgent=decision.urgent,
             )
+            if row:
+                self._maybe_handoff(group, row, urgent=decision.urgent)
             return bool(row and row.get("_notified_now"))
         except Exception:
             logger.exception("lead dispatch failed: %s", msg.group_id)
             return False
+
+    def _maybe_handoff(self, group: GroupProfile, lead_row: dict, *, urgent: bool) -> bool:
+        """强意愿线索 → 把会话直接转给分到的律师（见 docs/kf-handoff.md）。
+
+        为什么值得做：现在的链路最后一步是「律师打电话给客户」，那是最脆的一环——
+        陌生号码接通率本来就低，何况客户往往正在上班、开庭，或正因为被辞退而
+        不敢接陌生电话。转接把这一步整个删掉：律师在原窗口接着聊，上下文全在。
+
+        六个前提缺一不可，少一个就回落到现有链路（交接单已经推过了，不会有人掉队）：
+          1. 开关打开；
+          2. 微信客服会话——抖音侧接待走 AI即用，没有对等能力；
+          3. 本会话尚未转接过（转两次没有意义，且会把 SLA 计时打乱）；
+          4. 够格：P0 或紧急。别放宽到 P1/P2——一周 416 人进私信，
+             全转过去律师什么也别干了；
+          5. 已经派给了具体律师（分案引擎的结论，转接只是兑现它）；
+          6. 那位律师确实是这个客服账号的接待人——不是的话企微直接拒，
+             白白让客户等一场空。
+        """
+        s = self.settings
+        client = self.kf_client  # 受模式门控：影子模式绝不真的转
+        if not (s.handoff_enabled and client and group.is_kf and not group.is_douyin):
+            return False
+        if group.handoff_userid:
+            return False
+        tiers = {t.strip().upper() for t in s.handoff_priorities.split(",") if t.strip()}
+        if not urgent and (lead_row.get("priority") or "").upper() not in tiers:
+            return False
+        target = lead_row.get("assigned_userid") or ""
+        if not target:
+            return False
+        try:
+            if target not in set(client.servicer_list(group.kf_open_kfid)):
+                logger.warning(
+                    "handoff skipped: %s 不是 %s 的接待人", target, group.kf_open_kfid
+                )
+                return False
+        except Exception:
+            logger.exception("handoff servicer check failed: %s", group.group_id)
+            return False
+
+        # 先跟客户说一句再转，否则律师还没看到的这段时间里客户对着静默。
+        # 不点名（业务决策 2026-08，见 CLAUDE.md）：这里更不能点——客户读到名字
+        # 就会等那个人，万一律师临时改派或没接手，等的就是一个不会出现的人。
+        text = templates.handing_over(seed=group.group_id)
+        from responder.compliance.guard import guard
+
+        checked = guard(text, Action.HANDOFF, templates.safe_fallback(group))
+        self._send_group(group, group.group_id, checked.text)
+
+        if not client.transfer(group.kf_open_kfid, group.kf_external_userid, target):
+            # 转不过去就当没转：交接单已经推给律师了，他还能打电话，客户不会掉队
+            logger.warning("handoff transfer failed, 回落原链路: %s", group.group_id)
+            return False
+        self.store.set_handoff(group.group_id, target)
+        self.store.save_reply(
+            f"handoff-{group.group_id}-{int(time.time())}", group.group_id,
+            checked.text, "live", checked.passed, category="handoff",
+        )
+        logger.info("handoff: %s → %s", group.group_id, target)
+        return True
 
     def _recent_cta(self, group_id: str) -> bool:
         """接管时间窗内该群是否已发过带面谈引导/收尾语的回复——有则本次不再带（防套路感）。"""

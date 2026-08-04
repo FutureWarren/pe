@@ -1045,14 +1045,20 @@ async function checkHandoff() {
   if (r.error) { el.innerHTML = `<b style="color:var(--danger)">${esc(r.error)}</b>`; return; }
   const lines = [
     `${r.ready ? "✅" : "⚠️"} ${esc(r.hint)}`,
-    `律师名册 ${r.roster_size} 位`,
+    `律师名册 ${r.roster_size} 位 · 触发档位 ${esc(r.priorities || "P0")}`,
   ];
+  if (!r.enabled) lines.push("⚠️ 转接开关是关的（RESPONDER_HANDOFF_ENABLED）");
+  if (r.mode !== "live") lines.push(`⚠️ 当前是${esc(r.mode)}模式，不会真的转接`);
   for (const a of r.accounts) {
     lines.push(`「${esc(a.name || a.open_kfid)}」接待人 ${a.servicers.length} 位`);
     if (a.missing.length) {
       lines.push(`　❌ 不是接待人：${a.missing.map(m => esc(m.name || m.userid)).join("、")}`);
     }
   }
+  const sp = r.state_probe || {};
+  if (sp.ok) lines.push(`✅ 转接接口已连通（当前会话状态 ${sp.service_state}）`);
+  else if (sp.error) lines.push(`❌ 接口探测失败：${esc(sp.error)}`);
+  else if (sp.reason) lines.push(`… ${esc(sp.reason)}`);
   el.innerHTML = lines.join("<br>");
 }
 

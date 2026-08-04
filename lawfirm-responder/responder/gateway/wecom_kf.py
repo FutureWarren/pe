@@ -31,6 +31,14 @@ ORIGIN_SERVICER = 5  # 接待人员（真人客服/律师）发的 → 触发人
 # 全都认——认漏一个的后果是客户进来后对着空窗口，没人打招呼。
 ENTER_EVENTS = ("enter_session", "user_enter_session", "enter_chat")
 
+# 会话状态机（见 docs/kf-handoff.md）。AI 工作时会话停在 1，
+# 转成 3 并指定 servicer_userid，这通会话就出现在那位律师的客服工作台里。
+STATE_UNHANDLED = 0
+STATE_ROBOT = 1
+STATE_POOL = 2
+STATE_HUMAN = 3
+STATE_ENDED = 4
+
 
 class KfClient:
     """微信客服 API 客户端。sync 在任何模式下都要工作（收），send 由管道按模式门控（发）。"""
@@ -131,6 +139,47 @@ class KfClient:
         except Exception:
             logger.exception("kf account/list error")
             return []
+
+    # ------------------------------------------------------------ 转接
+    def service_state(self, open_kfid: str, external_userid: str) -> int | None:
+        """读会话当前状态；取不到返回 None（不阻断业务，按「未知」处理）。"""
+        try:
+            data = self._post(
+                self.settings.kf_state_path,
+                {"open_kfid": open_kfid, "external_userid": external_userid},
+            )
+        except Exception:
+            logger.exception("kf service_state get error")
+            return None
+        v = data.get("service_state")
+        return int(v) if v is not None else None
+
+    def transfer(
+        self, open_kfid: str, external_userid: str, servicer_userid: str
+    ) -> bool:
+        """把会话转给指定律师人工接待。失败返回 False，由调用方回落原链路。
+
+        失败最常见的原因是**该律师不是这个客服账号的接待人**——企微直接拒绝。
+        所以调用方应先校验名册与接待人的交集（控制台自检会把差集报出来）。
+        """
+        if not servicer_userid:
+            return False
+        try:
+            self._post(
+                self.settings.kf_trans_path,
+                {
+                    "open_kfid": open_kfid,
+                    "external_userid": external_userid,
+                    "service_state": STATE_HUMAN,
+                    "servicer_userid": servicer_userid,
+                },
+            )
+            return True
+        except Exception:
+            logger.exception(
+                "kf transfer failed (%s → %s)", open_kfid, servicer_userid
+            )
+            return False
 
     # ------------------------------------------------------------ 发
     def send_text(self, open_kfid: str, external_userid: str, text: str) -> bool:

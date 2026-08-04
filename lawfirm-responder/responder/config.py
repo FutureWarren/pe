@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     douyin_default_notify_userid: str = ""
 
     # ---- 会话转接（见 docs/kf-handoff.md）
+    # 强意愿线索直接把会话转给分到的律师，他在企微客服工作台接着聊，
+    # 省掉「打电话」这个最容易断的环节。
+    handoff_enabled: bool = True
+    # 哪些优先级触发转接。紧急线索无论优先级一律转。
+    # 别放宽到 P1/P2——一周 416 人进私信，全转过去律师什么也别干了。
+    handoff_priorities: str = "P0"
+    # 转接接口路径。企微文档站在部署环境不可达，故做成配置项：
+    # 控制台自检探到正确路径后改这里，不必改代码重新部署。
+    kf_trans_path: str = "kf/service_state/trans"
+    kf_state_path: str = "kf/service_state/get"
     # 转接后律师迟迟不接手 → 把客户收回给 AI。转接引入的最坏情况是
     # 「客户被交给一个不看企微的律师」，那比 AI 一直陪着更糟，必须有这个兜底。
     handoff_reclaim_seconds: int = 1800

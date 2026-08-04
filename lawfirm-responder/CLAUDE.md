@@ -117,6 +117,15 @@ ruff check responder tests       # lint
   超发的代价不是少发一条，是应用被平台标记，故 `service._douyin_budget` 宁可少说一句。
   发送 endpoint 因文档站不可达而做成配置项，由 `scripts/douyin_smoke.py --probe` 校正。
 
+- 会话转接（2026-08，见 `docs/kf-handoff.md`）：P0 或紧急线索直接把微信客服会话
+  转给分案引擎派出的律师（`service._maybe_handoff` → `kf.service_state/trans`），
+  取代「律师打电话」这一最脆的环节。**六个前提缺一不可**：开关开、微信客服会话
+  （抖音无对等能力）、本会话未转过、够格（P0/紧急，**不得放宽到 P1/P2**）、
+  已派给具体律师、且该律师确实是该客服账号的接待人。接待人校验必须在过渡话术
+  **之前**——话发出去客户就真的在等了。转接失败一律静默回落原链路且**不落库**
+  （落了库 AI 就闭嘴，而那头根本没人）。转接后 `gate:handed-off` 让 AI 沉默，
+  超过 `handoff_reclaim_seconds` 无人接手则回收给 AI。过渡话术不点名（同上条），
+  并给一个此刻能做的下一步（先发材料）。就绪自检在控制台「状态」页一键可查。
 - 自动升级（2026-08）：服务器每 5 分钟自查远端分支有无新提交，有则自行拉取重启
   （`ops.auto_update_tick`，worker.tick 调度）。原因是运维侧未必够得着这台服务器，
   但服务器够得着 GitHub。**推送即上线**，因此 push 前必须 pytest + verify 全绿——

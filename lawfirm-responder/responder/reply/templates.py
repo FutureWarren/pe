@@ -172,6 +172,27 @@ def greeting_again(group: GroupProfile, seed: str = "") -> str:
     return _pick(variants, seed)
 
 
+def handing_over(lawyer_name: str = "", seed: str = "") -> str:
+    """把会话转给律师之前，先跟客户说一句。
+
+    直接转会留下一段尴尬的静默（律师那边还没看到）。先说一句，客户才知道
+    发生了什么、在等什么。
+
+    **默认不点名**（业务决策 2026-08，见 CLAUDE.md 对客称呼一条）：客户读到
+    名字就会等那个人，而转接后律师可能改派、可能没接手，等的就成了一个不会
+    出现的人。`lawyer_name` 保留给「人已确定坐在对面」的场景（如群聊）。
+    末句给一个确定的下一步：客户知道现在该干什么，就不会中途走掉。
+    """
+    who = f"{lawyer_name}律师" if lawyer_name else "我们的律师"
+    variants = [
+        f"您的情况我整理好，转给{who}了，稍等一下就在这个对话里回您。"
+        "您要是还有材料（合同、聊天记录、工资条），可以先发过来。",
+        f"我把您说的情况转给{who}了，看到会直接在这儿回您，您稍等。"
+        "这会儿手边有相关材料的话，先发过来会更快。",
+    ]
+    return _pick(variants, seed)
+
+
 def safe_fallback(group: GroupProfile) -> str:
     """合规拦截后的兜底回复：只承接，不含任何实质内容。固定文本，不走变体。"""
     L = _lawyer(group)
