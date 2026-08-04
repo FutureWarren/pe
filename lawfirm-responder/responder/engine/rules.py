@@ -98,6 +98,28 @@ CONTACT_PATTERNS = [
     r"再问一(遍|次)",
 ]
 
+# ---------------------------------------------------------------- 身份试探
+# 「你是人还是机器？」几乎每通对话都会被问一次。此前它落进默认沉默，
+# 客户就真的看不到任何回应——而问这句话的人本来就在怀疑，没人应更坐实了怀疑。
+IDENTITY_PATTERNS = [
+    r"是(真)?人还是(机器|机器人|ai|智能|人工)",
+    r"(机器|机器人|ai)还是(真)?人",
+    r"(你|您)(们)?(是|是不是)(不是)?(真人|机器人|机器|ai|智能客服|人工智能)",
+    r"(真人|机器人|机器|ai)(吗|么|嘛)",
+    r"(你|您)(们)?(是)?(不是)?律师(吗|么|嘛)",
+]
+
+# ---------------------------------------------------------------- 索要律师联系方式
+# 客户主动开口要律师电话，是整通对话里最强的成交信号——比留下自己的号码还强，
+# 因为那是他自己要往前走。此前它落进泛泛承接（「我帮您转给律师确认下」），
+# 等于在客户伸手的那一刻给了他一句空话。
+WANT_LAWYER_CONTACT_PATTERNS = [
+    r"(律师|你们|你)(的)?(电话|手机|号码|联系方式|微信)[^。！？!?]{0,4}(多少|给我|发我|留给我)",
+    r"(给|发|留)(我|一下|个)?(律师|你们)(的)?(电话|手机号|号码|微信|联系方式)",
+    r"我(直接|自己)?(打|加|联系)(给)?(律师|你们)",
+    r"(怎么|如何|哪里)(能|可以)?(联系|找到)(上)?(律师|你们)",
+]
+
 # ---------------------------------------------------------------- 通用法律知识
 # 判据：不需要本案具体信息即可给一般性法律框架
 GENERAL_TOPIC = (
@@ -125,6 +147,30 @@ _FEE = [re.compile(p) for p in FEE_PATTERNS]
 _CASE = [re.compile(p) for p in CASE_PATTERNS]
 _CONTACT = [re.compile(p) for p in CONTACT_PATTERNS]
 _PRESENCE = re.compile(PRESENCE_PATTERN)
+_IDENTITY = [re.compile(p, re.I) for p in IDENTITY_PATTERNS]
+_WANT_LAWYER_CONTACT = [re.compile(p) for p in WANT_LAWYER_CONTACT_PATTERNS]
+
+
+def is_identity_question(text: str) -> bool:
+    """客户在问「你到底是谁/是不是机器人」。"""
+    return bool(_match_any(_IDENTITY, (text or "").strip()))
+
+
+def wants_lawyer_contact(text: str) -> bool:
+    """客户主动要律师的电话/微信。"""
+    return bool(_match_any(_WANT_LAWYER_CONTACT, (text or "").strip()))
+
+
+def is_chasing(text: str, category: Category) -> bool:
+    """这条消息是在「催」，而不是在问新问题。
+
+    区分这两者是有代价的教训：客户接连问了两个费用问题，第二个被当成
+    「又问了一遍」，于是 AI 回「抱歉让您久等了，我刚又催了一下」——
+    客户没在等，他在问。答非所问比复读更伤。
+    """
+    if wants_lawyer_contact(text):
+        return False  # 「怎么联系律师」是往前走，不是在催
+    return category == Category.CONTACT or is_presence_check(text)
 
 
 def is_presence_check(text: str) -> bool:
@@ -187,6 +233,14 @@ def classify(content: str, msg_type: str = "text") -> tuple[Action, Category, bo
         return Action.HANDOFF, Category.URGENT, True, [f"urgent:{hit}"]
     if hit := _match_any(_ANGRY, text):
         return Action.HANDOFF, Category.URGENT, True, [f"angry:{hit}"]
+
+    # 「你是人还是机器」：先于费用/案件判定，否则「你们是律师吗」会被别的层吞掉
+    if _match_any(_IDENTITY, text):
+        return Action.HANDOFF, Category.OTHER, False, ["identity-question"]
+
+    # 要律师电话：比费用问题更强的信号，先判，别让「多少钱」把它盖过去
+    if _match_any(_WANT_LAWYER_CONTACT, text):
+        return Action.HANDOFF, Category.CONTACT, False, ["want-lawyer-contact"]
 
     if hit := _match_any(_FEE, text):
         return Action.HANDOFF, Category.FEE, False, [f"fee:{hit}"]

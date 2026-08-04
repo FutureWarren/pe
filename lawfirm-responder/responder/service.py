@@ -5,6 +5,7 @@
 """
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -346,6 +347,24 @@ class Pipeline:
         logger.info("handoff: %s → %s", group.group_id, target)
         return True
 
+    def _is_repeat_message(self, msg: IncomingMessage) -> bool:
+        """这条消息客户刚刚发过一模一样的（标点/空格差异不算）。
+
+        真的把同一句话再发一遍，就是在催了——那时候「我又催了一下」才对题。
+        比对的是客户自己的历史消息，不是类别：类别相同的两个不同问题不算重复。
+        """
+        cur = _norm(msg.content)
+        if not cur:
+            return False
+        # 本条消息此刻已经入库，也在这份历史里——所以「重复」的判据是出现 ≥2 次
+        seen = 0
+        for m in self.store.recent_messages(msg.group_id, limit=8):
+            if m.get("sender_is_staff") or m.get("msg_type") == "event":
+                continue
+            if _norm(m.get("content", "")) == cur:
+                seen += 1
+        return seen >= 2
+
     def _recent_cta(self, group_id: str) -> bool:
         """接管时间窗内该群是否已发过带面谈引导/收尾语的回复——有则本次不再带（防套路感）。"""
         return self._recent_marker(group_id, templates.CTA_MARKERS)
@@ -518,6 +537,16 @@ class Pipeline:
         )
         if n == 0:
             return text
+        # 同类别 ≠ 同一个问题。客户接连问了两个费用问题，第二个被当成「又问了一遍」，
+        # 于是回「抱歉让您久等了，我刚又催了一下」——他没在等，他在问。
+        # 真机测试实测到的答非所问，比复读更伤客户。
+        # 「又问了一遍」只有两种：他在催（催回复/在吗），或者他真的把同一句话再发了一次。
+        if not (
+            rules.is_chasing(msg.content, decision.category)
+            or self._is_repeat_message(msg)
+        ):
+            decision.reasons.append("followup:new-question-same-category")
+            return text
         if n == 1:
             decision.reasons.append("followup:second-touch")
             # 二次安抚整段替换原文，generate() 拼好的索要联系方式也一并被丢掉了，
@@ -536,6 +565,13 @@ class Pipeline:
         decision.urgent = True
         decision.reasons.append("followup:suppressed-escalated")
         return None
+
+
+_PUNCT = re.compile(r"[\s，。！？、,.!?~～…]+")
+
+
+def _norm(text: str) -> str:
+    return _PUNCT.sub("", (text or "").strip())
 
 
 def _history_text(history: list[dict]) -> str:

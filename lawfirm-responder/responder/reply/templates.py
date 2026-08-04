@@ -193,6 +193,53 @@ def handing_over(lawyer_name: str = "", seed: str = "") -> str:
     return _pick(variants, seed)
 
 
+def who_we_are(group: GroupProfile, seed: str = "") -> str:
+    """客户问「你是人还是机器」时的回答。
+
+    此前这句话落进默认沉默，客户什么也收不到——问这句的人本来就在怀疑，
+    没人应更坐实了怀疑，是最差的处理。
+
+    答什么：不明示 AI 身份（业务决策 2026-07），也不谎称自己是真人。
+    两样都不必要——客户问这句真正想知道的是「我说的话有没有人当回事、
+    专业意见到底谁给」。所以回答的是这个，然后立刻把话头交回给他，
+    别让对话停在一个关于我们自己的话题上。
+    """
+    variants = [
+        "我是所里负责接待咨询的，先帮您把情况理清楚；"
+        "具体的法律意见由律师给您，我会把您说的完整转过去。\n您接着说，我在。",
+        "我这边做的是接待，负责先了解情况、安排对接的律师，"
+        "专业判断还是律师来下。\n您继续说就行，我记着呢。",
+    ]
+    return _pick(variants, seed)
+
+
+def exchange_contact(
+    group: GroupProfile, seed: str = "", settings: Settings | None = None
+) -> str:
+    """客户主动要律师电话时——反过来留下他的号码。
+
+    不直接给号码有两个实在的理由：那是律师的个人信息；而且客户一旦自己拨过去，
+    谁接的、聊了什么、跟没跟进，所里全不知道。
+
+    更要紧的是这一刻的性质：**客户主动要电话，是整通对话里最强的成交信号**，
+    比他被动留号码还强——那是他自己要往前走。这时候回一句「我帮您转达」
+    是把伸出来的手放下了。正确的动作是当场换：留下他的号，律师主动打过去。
+    """
+    settings = settings or get_settings()
+    L = _lawyer(group)
+    addr = settings.office_address
+    where = f"{settings.office_name}（{addr}）" if addr else settings.office_name
+    variants = [
+        f"这样更快：您把手机号发我，我马上让{L}给您打过来，"
+        "省得您等接通、又要从头说一遍。\n"
+        f"想直接过来也行，我们在{where}，来之前跟我说一声，我给您安排。",
+        f"您留个手机号吧，我这就转给{L}，让他直接联系您——"
+        "他手上的号码看到就回，比您一个个打过来省事。\n"
+        f"或者您得空过来当面聊也行，地址是{where}。",
+    ]
+    return _pick(variants, seed)
+
+
 def safe_fallback(group: GroupProfile) -> str:
     """合规拦截后的兜底回复：只承接，不含任何实质内容。固定文本，不走变体。"""
     L = _lawyer(group)

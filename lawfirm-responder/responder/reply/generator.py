@@ -115,6 +115,16 @@ def generate(
         return guard(text, Action.ANSWER, fallback)
 
     if decision.action == Action.HANDOFF:
+        # 两类消息有专属答法，且都自带下一步，不再套 _close（会变成问两遍电话）
+        if "identity-question" in decision.reasons:
+            return guard(
+                templates.who_we_are(group, seed=msg.msg_id), Action.HANDOFF, fallback
+            )
+        if "want-lawyer-contact" in decision.reasons:
+            return guard(
+                templates.exchange_contact(group, seed=msg.msg_id, settings=settings),
+                Action.HANDOFF, fallback,
+            )
         text = _close(templates.build_handoff(decision.category, group, seed=msg.msg_id))
         return guard(text, Action.HANDOFF, fallback)
 
