@@ -115,6 +115,24 @@ def handoff_generic(group: GroupProfile, seed: str = "") -> str:
     return _pick(variants, seed)
 
 
+def handoff_noted(group: GroupProfile, seed: str = "") -> str:
+    """一对一窗口里「收下并继续」的承接。取代泛泛的 handoff_generic。
+
+    「这个我帮您转给律师确认下」在群里没问题（律师本人就在群里，客户看得见），
+    但在一对一窗口里连着说三遍，客户读到的是「你说什么我都这一句」。
+    真机测试里客户连答了两条我们问的问题，换回的都是这句——对面立刻知道没人在听。
+
+    改成「记下了 + 还有什么接着说」：一样不下结论，但它是开着的门，不是句号。
+    这里不再问手机号——追问阶段已经问过一次了，隔一条又问就成了催单。
+    """
+    variants = [
+        "记下了，这些我一并整理给律师。您要是还有细节或者材料，随时发我。",
+        "好的，我都记着呢，会连同前面说的一起转给律师。还有别的情况也可以接着说。",
+        "收到，这条我也记下了。您继续说，我一起整理给律师。",
+    ]
+    return _pick(variants, seed)
+
+
 def greeting_opener(group: GroupProfile, seed: str = "", contact_left: bool = False) -> str:
     """一对一客服的开场引导：接住客户，并请他说明情况（首轮筛查的第一步）。
 
@@ -240,6 +258,42 @@ def exchange_contact(
     return _pick(variants, seed)
 
 
+def intake_probe(
+    group: GroupProfile, seed: str = "", settings: Settings | None = None,
+    ask_phone: bool = True,
+) -> str:
+    """客户第一次把自己的事说出来时的回应——问下去，而不是「我帮您转达」。
+
+    真机测试里客户说「我现在遇到了劳务仲裁的问题，拖欠工资」，AI 回
+    「看到您消息了，这个我帮您转给律师确认下」。他刚把事情交出来，
+    换回一句套话，对面立刻就知道没人在听——律所方的原话是「显得非常的笨」。
+
+    这一刻正确的动作是**追问**。理由有三层：
+      1. 追问是「在听」最有力的证明，比任何安抚话术都管用；
+      2. 问出来的时间点、进展、材料，正是律师接手时最需要的三样，
+         客户答完，交接单的含金量完全不同；
+      3. 追问不是下结论——合规红线拦的是对本案作判断，问情况不在其列。
+
+    末尾仍留一条快车道（留手机号），但放在追问之后：先让他觉得被理解，
+    再谈下一步，顺序反了就成了推销。
+    """
+    settings = settings or get_settings()
+    L = _lawyer(group)
+    variants = [
+        "明白了，这类情况我们处理得比较多。为了让{L}一次就说到点子上，"
+        "您再补两句：这事大概是什么时候开始的？现在走到哪一步了？\n"
+        "手上有合同、聊天记录、转账记录这些材料的话，也可以直接发过来。",
+        "您说的我记下了。想给您准信儿，还得再问两句："
+        "从什么时候开始的？中间跟对方沟通过没有、结果怎么样？\n"
+        "相关的材料（合同、聊天记录、转账记录）方便的话先发我。",
+    ]
+    text = _pick(variants, seed)
+    # 已经问过电话的不再问第二遍——同一通对话里问两次就成了催单
+    if ask_phone:
+        text += f"要是着急，留个手机号，{L}直接给您打过来。"
+    return text.replace("{L}", L)
+
+
 def safe_fallback(group: GroupProfile) -> str:
     """合规拦截后的兜底回复：只承接，不含任何实质内容。固定文本，不走变体。"""
     L = _lawyer(group)
@@ -263,7 +317,10 @@ HANDOFF_BY_CATEGORY = {
 
 
 def build_handoff(category: Category, group: GroupProfile, seed: str = "") -> str:
-    return HANDOFF_BY_CATEGORY.get(category, handoff_generic)(group, seed)
+    if category not in HANDOFF_BY_CATEGORY:
+        # 一对一窗口的兜底承接要留个开口，别把话说死（见 handoff_noted）
+        return (handoff_noted if group.is_kf else handoff_generic)(group, seed)
+    return HANDOFF_BY_CATEGORY[category](group, seed)
 
 
 # ---------------------------------------------------------------- ① 直接回答
@@ -298,6 +355,8 @@ ASK_CONTACT_MARKERS = ("手机号",)
 # 轻推（「留个手机号也行」）之后再来一次完整邀约，多出的是所址和面谈邀请，
 # 属于正常升级、不是催单；但完整邀约本身在同一通对话里只该出现一次。
 OFFICE_INVITE_MARKERS = ("来所里", "当面聊")
+# 追问话术的标记：同一通对话里只追问一次，问第二遍就成了查户口
+INTAKE_MARKERS = ("走到哪一步", "什么时候开始")
 CTA_MARKERS = ("约个时间", "再给您细说") + ASK_CONTACT_MARKERS
 
 

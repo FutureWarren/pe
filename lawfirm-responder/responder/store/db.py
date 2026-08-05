@@ -436,6 +436,19 @@ class Store:
             ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
+    def count_event_messages(self) -> int:
+        """收到过多少条进线事件（msg_type='event'）。
+
+        「进线即问候」整条链路挂在企微推送这个事件上。一条都没有，问候就永远
+        不会发——而这个现象跟「新版没部署」在客户那边看起来一模一样。
+        自检里报出这个数，就能一眼分清是哪一种。
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM messages WHERE msg_type='event'"
+            ).fetchone()
+        return int(row["n"] or 0)
+
     def idle_conversations(self, since: datetime, until: datetime) -> list[str]:
         """最后一条消息落在 [since, until] 内的会话——即刚安静下来的对话。
 

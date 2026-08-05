@@ -160,6 +160,7 @@ class Pipeline:
             and not signals.scan(convo)[1]
             and not self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
         )
+        self._maybe_intake(msg, decision, group, convo)
         result = generate(
             msg, decision, group, history=history, settings=self.settings,
             include_cta=not self._recent_cta(msg.group_id),
@@ -346,6 +347,39 @@ class Pipeline:
         )
         logger.info("handoff: %s → %s", group.group_id, target)
         return True
+
+    def _maybe_intake(
+        self, msg: IncomingMessage, decision: Decision, group: GroupProfile,
+        convo: list[dict],
+    ) -> None:
+        """客户第一次把自己的事说出来 → 改走追问，别回泛泛承接。就地修改 decision。
+
+        真机测试的原话：「显得非常的笨」。客户说「我遇到劳务仲裁的问题，拖欠工资」，
+        AI 回「看到您消息了，这个我帮您转给律师确认下」——他刚把事情交出来，
+        换回一句套话。这一刻是整通对话里信息量最大的一刻，接住它的方式是追问。
+
+        只在一对一进线窗口做：群聊里承办律师本人在场，AI 追着问情况是越界。
+        只做一次：问第二遍就成了查户口。
+        已经留了联系方式的不问：那时候该做的是把人交出去，不是继续采集。
+        """
+        if not (group.is_kf and decision.action == Action.HANDOFF):
+            return
+        if decision.category not in (Category.OTHER, Category.CASE_STATUS):
+            return
+        if group.client_status != ClientStatus.PROSPECT or group.handoff_userid:
+            return
+        # 已经留了联系方式的不再追问要电话——追问话术里带着「留个手机号」，
+        # 对一个刚给过号码的人再问一次，就是在证明没人在听
+        if signals.scan(convo)[1]:
+            return
+        # 太短的消息没有可追问的内容（「嗯」「好的」），泛泛追问反而更像机器人
+        if len(_norm(msg.content)) < 6:
+            return
+        if self._recent_marker(group.group_id, templates.INTAKE_MARKERS, limit=20):
+            return
+        # 刚问过手机号的，追问里就别再带电话那一句
+        asked = self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
+        decision.reasons.append("kf:intake-quiet" if asked else "kf:intake")
 
     def _is_repeat_message(self, msg: IncomingMessage) -> bool:
         """这条消息客户刚刚发过一模一样的（标点/空格差异不算）。

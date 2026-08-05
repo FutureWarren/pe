@@ -184,3 +184,58 @@ def test_group_chat_reply_is_untouched(tmp_path):
                                  content="你是人还是机器？"))
     # 群里同样该答（沉默更差），但话术里点名承办律师——那是群聊的规矩
     assert "identity-question" in d.reasons
+
+
+# ------------------------------------- ④ 客户第一次说明情况：追问，别回套话
+# 律所方原话：「在用户之后的聊天中显得非常的笨」。客户把事情交出来，
+# 换回一句「这个我帮您转给律师确认下」，对面立刻知道没人在听。
+def test_first_description_gets_questions_not_a_platitude(tmp_path):
+    _, sent = run_conversation(tmp_path, [
+        "你好", "我现在遇到了劳务仲裁的问题，拖欠工资",
+    ])
+    reply = sent[1]
+    assert "转给律师确认" not in reply
+    assert "什么时候开始" in reply or "走到哪一步" in reply  # 在追问
+    assert "材料" in reply  # 顺手把律师接手时最需要的东西要过来
+
+
+def test_intake_only_probes_once(tmp_path):
+    """问第二遍就成了查户口。"""
+    _, sent = run_conversation(tmp_path, [
+        "你好", "我现在遇到了劳务仲裁的问题，拖欠工资", "老板一直拖着不给说法",
+    ])
+    joined = "\n".join(sent)
+    assert joined.count("什么时候开始") + joined.count("走到哪一步") == 1
+
+
+def test_followup_message_is_received_not_deflected(tmp_path):
+    """客户回答完我们的追问，不能再回「我帮您转给律师确认下」。"""
+    _, sent = run_conversation(tmp_path, [
+        "你好", "我现在遇到了劳务仲裁的问题，拖欠工资", "已经三个月没发了，去年10月开始的",
+    ])
+    assert "记" in sent[2]  # 「记下了」/「我都记着呢」
+    assert "转给律师确认" not in sent[2]
+
+
+def test_intake_skipped_once_phone_is_known(tmp_path):
+    """已经给过号码的人再被问一次电话，等于证明没人在听。"""
+    _, sent = run_conversation(tmp_path, [
+        "我电话13812345678，你们联系我", "我这个是拖欠工资的事",
+    ])
+    assert "\n".join(sent).count("手机号") == 0
+
+
+def test_wage_arrears_is_a_legal_question(tmp_path):
+    """真机测试里「拖欠工资」四个字不在词表里，最该答的问题被判成沉默。"""
+    from responder.models import Action
+    action, category, _, _ = rules.classify("公司拖欠工资怎么办")
+    assert action is Action.ANSWER and category is Category.GENERAL_LAW
+
+
+def test_compensation_amount_is_not_mistaken_for_our_fee(tmp_path):
+    """「我能拿到多少赔偿」问的是客户能拿多少，不是我们收多少。"""
+    from responder.models import Action
+    action, category, _, _ = rules.classify("那我能拿到多少赔偿")
+    assert (action, category) == (Action.ANSWER, Category.GENERAL_LAW)
+    # 律师费的问法仍然走费用层（AI 绝不报价）
+    assert rules.classify("你们律师费怎么收")[1] is Category.FEE

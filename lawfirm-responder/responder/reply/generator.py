@@ -120,6 +120,15 @@ def generate(
             return guard(
                 templates.who_we_are(group, seed=msg.msg_id), Action.HANDOFF, fallback
             )
+        if "kf:intake" in decision.reasons or "kf:intake-quiet" in decision.reasons:
+            # 追问本身就是下一步，不再套 _close（问完三句再问电话就成了查户口）
+            return guard(
+                templates.intake_probe(
+                    group, seed=msg.msg_id, settings=settings,
+                    ask_phone="kf:intake-quiet" not in decision.reasons,
+                ),
+                Action.HANDOFF, fallback,
+            )
         if "want-lawyer-contact" in decision.reasons:
             return guard(
                 templates.exchange_contact(group, seed=msg.msg_id, settings=settings),

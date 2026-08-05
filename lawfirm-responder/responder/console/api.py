@@ -782,8 +782,18 @@ def diagnostics(request: Request, _: Principal = Depends(require_admin)):
             for a in accounts
         ]
         kf["ok"] = bool(accounts)
-    # 没有提醒接收人的会话＝线索生成了也没人知道，属静默失败，必须显式暴露
     store = request.app.state.store
+    # 进线事件计数：进线即问候这条链路完全依赖企微推送 enter_session 事件。
+    # 事件一条都没收到过，问候就永远不会发——而现象（「客户进来没人打招呼」）
+    # 和「代码没生效」长得一模一样。有这个数就能一眼分清是哪一种。
+    kf["enter_events"] = store.count_event_messages()
+    kf["welcome_on_enter"] = s.kf_welcome_on_enter
+    if kf["ok"] and not kf["enter_events"]:
+        kf["hint"] = (
+            "从没收到过进线事件：企微只在会话被接入智能助手后才推送，"
+            "客户扫码那一刻可能不推。开场白改由「客户第一条消息」兜底触发。"
+        )
+    # 没有提醒接收人的会话＝线索生成了也没人知道，属静默失败，必须显式暴露
     orphan = [
         g["group_id"] for g in store.list_groups()
         if g.get("ai_enabled") and not (g.get("lawyer_userid") or s.default_notify_userid)
