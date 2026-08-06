@@ -274,6 +274,11 @@ class Pipeline:
         if not self.settings.lead_brief_enabled:
             return False
         urgent_kf = group.is_kf and decision.urgent
+        # 冷消息不在这里出单，但**不是被丢掉**：等这通对话安静下来，
+        # `worker._sweep_idle_leads` 会补一张完整的单并推给客服
+        # （notify_all_leads，业务决策 2026-08）。
+        # 当场推的问题是客户才说了一句「在吗」——那张单上什么也没有，
+        # 三十秒后他讲完案情还得再推一张。
         if not urgent_kf and signals.detect(msg.content)[0] == signals.COLD:
             return False
         try:

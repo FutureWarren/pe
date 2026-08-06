@@ -245,7 +245,10 @@ class Worker:
     def _sweep_idle_leads(self, now: datetime) -> None:
         """对话安静下来后补一份线索简报——聊完没留电话的咨询同样有跟进价值。
 
-        冷线索只归档进控制台，不推送打扰律师（见 lead.should_notify）。
+        这也是**冷线索的推送时机**（`notify_all_leads`，业务决策 2026-08）。
+        为什么等到静默而不是当场推：客户刚说一句「在吗」就给客服推一张交接单，
+        三十秒后他把案情讲完了又得推第二张。等安静下来再推，一通对话一张单，
+        而且那张单里已经有完整经过。
         """
         s = self.pipeline.settings
         if not s.lead_brief_enabled:

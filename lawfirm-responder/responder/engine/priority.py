@@ -25,6 +25,16 @@ P0, P1, P2 = "P0", "P1", "P2"
 TIER_ZH = {P0: "强意愿", P1: "有意愿", P2: "一般"}
 TIER_SLA_ZH = {P0: "1 小时内联系", P1: "今天内联系", P2: "48 小时内跟进"}
 
+# 给客服看的只有两档（业务决策 2026-08，律所方：「只用标记好是强意愿还是
+# 弱意愿就好了」）。三档留在内部——评分、督办时限、看板都还要用它——
+# 但推到人手上的那张单只需要回答一个问题：这单现在打还是排队打。
+# 分得越细，接单的人越要停下来想「P1 和 P2 差在哪」，那一停就是摩擦。
+STRONG, WEAK = "强意愿", "弱意愿"
+
+
+def bucket(tier: str) -> str:
+    return STRONG if tier == P0 else WEAK
+
 # 各信号的分值与展示文案。key 与 signals.detect 的命中名对齐，
 # 权重依据见 docs/lead-routing.md「强意愿的定义」一节。
 _SIGNAL_POINTS: list[tuple[str, int, str]] = [

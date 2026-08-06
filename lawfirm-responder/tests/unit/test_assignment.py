@@ -145,5 +145,6 @@ def test_notification_carries_priority_and_factors(tmp_path):
     lead.dispatch(store, group, _hist("我想委托你们，电话17721275495"), snd,
                   settings=settings)
     text = snd.direct[0][1]
-    assert text.startswith("【P0 强意愿】")
+    # 客服手上只认强/弱两档（业务决策 2026-08）——P 码留在内部给评分与督办用
+    assert text.startswith("【强意愿】")
     assert "1 小时内联系" in text and "优先依据" in text and "已留电话 +40" in text

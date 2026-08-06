@@ -93,7 +93,10 @@ def test_contact_message_creates_and_notifies_lead(tmp_path):
     assert sender.leads, "高意向线索应推送接待人"
     to, text = sender.leads[-1]
     assert to == "weilai"
-    assert text.startswith("【P") and "17721275495" in text
+    # 只留了电话 = 40 分，还够不到 P0 的 60 分线，所以标「弱意愿」。
+    # 这条阈值是否合适见 docs/lead-routing.md——留电话对律所是不是强信号，
+    # 属判断阈值，须律所方确认后再动。
+    assert text.startswith("【弱意愿】") and "17721275495" in text
     # 降级路径下摘要取客户原话，绝不编造
     assert "试用期被辞退有补偿吗？" in text or "电话是17721275495" in text
 
@@ -228,3 +231,64 @@ def test_brief_falls_back_when_no_public_url():
     text = format_notification(row, g, Settings(public_base_url=""))
     assert "http" not in text
     assert "劳动仲裁咨询群" in text
+
+
+# ---------------------------------------------- 全量推送：不能躺死在对话里
+# 业务决策 2026-08，律所方原话：「我们有很多的客服，全部都得推给客服，
+# 不能躺死在对话里」。旧口径把冷线索留在库里不打扰人，前提是人手紧张——
+# 律所侧不是这个前提，那条节流就从「保护」变成了「丢单」。
+def test_cold_lead_is_pushed_too_when_manpower_allows(tmp_path):
+    from responder import lead as lead_mod
+
+    store, settings, sender, group = _cold_env(tmp_path, notify_all_leads=True)
+    row = lead_mod.dispatch(store, group, _hist("你们几点上班"), sender, settings=settings)
+    assert row is not None
+    assert sender.direct, "冷线索也要有人接手，不能只归档"
+
+
+def test_cold_lead_stays_archived_when_the_switch_is_off(tmp_path):
+    """旧口径保留：人手紧张的所可以关掉，只推有意向的。"""
+    from responder import lead as lead_mod
+
+    store, settings, sender, group = _cold_env(tmp_path, notify_all_leads=False)
+    lead_mod.dispatch(store, group, _hist("你们几点上班"), sender, settings=settings)
+    assert not sender.direct
+
+
+def test_full_push_does_not_mean_one_brief_per_message(tmp_path):
+    """只放开门槛，不放开频次——一通对话仍然只推一张单。"""
+    from responder import lead as lead_mod
+
+    store, settings, sender, group = _cold_env(tmp_path, notify_all_leads=True)
+    for _ in range(3):
+        lead_mod.dispatch(store, group, _hist("你们几点上班"), sender, settings=settings)
+    assert len(sender.direct) == 1
+
+
+def _cold_env(tmp_path, **over):
+    from responder.config import Settings
+    from responder.models import ClientStatus, GroupProfile
+    from responder.store.db import Store
+
+    db = str(tmp_path / "cold.db")
+    cfg = dict(db_path=db, lead_brief_enabled=True, default_notify_userid="wei",
+               llm_refine_enabled=False)
+    cfg.update(over)
+    settings = Settings(**cfg)
+
+    class Snd:
+        def __init__(self):
+            self.direct = []
+
+        def send_direct_text(self, userid, text):
+            self.direct.append((userid, text))
+            return True
+
+    group = GroupProfile(group_id="kf:wk:cold", client_status=ClientStatus.PROSPECT,
+                         kf_open_kfid="wk", kf_external_userid="cold")
+    return Store(db), settings, Snd(), group
+
+
+def _hist(text):
+    return [{"content": text, "sender_is_staff": False,
+             "created_at": "2026-08-06T10:00:00"}]

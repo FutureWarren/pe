@@ -140,6 +140,10 @@ class Settings(BaseSettings):
 
     # ---- 线索简报：筛查完成后把咨询整理成交接单推给接待人
     lead_brief_enabled: bool = True
+    # 全量推送（业务决策 2026-08，律所方：「我们有很多的客服，全部都得推给客服，
+    # 不能躺死在对话里」）。系统只负责标好强弱，推不推由人手决定，不由系统替他们定。
+    # 关掉则回到旧口径：只推有意向的（冷线索仅归档）。
+    notify_all_leads: bool = True
     lead_history_window: int = 30  # 整理简报时回看的对话条数
     # 会话静默多久后为「有意向但未触发即时通知」的咨询补一份简报（秒）
     lead_idle_seconds: int = 900

@@ -160,7 +160,8 @@ def format_notification(
         pass
     tier = lead.get("priority") or ""
     if tier:
-        head = f"【{tier} {priority.TIER_ZH.get(tier, '')}】"
+        # 客服手上只认强/弱两档：这张单要回答的问题就一个——现在打还是排队打
+        head = f"【{priority.bucket(tier)}】"
         sla = priority.TIER_SLA_ZH.get(tier, "")
     else:  # 旧数据未评分
         head = "【高意向线索】" if lead["intent"] == "hot" else "【新咨询线索】"
@@ -220,13 +221,22 @@ def _notified_within(previous: dict | None, seconds: int) -> bool:
 
 def should_notify(
     previous: dict | None, intent: str, *, gap_seconds: int = 0,
+    include_cold: bool = False,
 ) -> bool:
-    """仅在「首次达到可跟进意向」「意向升级」或「隔了一次咨询后再来」时通知。
+    """在「首次达到可跟进意向」「意向升级」或「隔了一次咨询后再来」时通知。
 
     没有第三条时，隔周回头的老客户永远不会再惊动律师——notified_at 一旦写下
     就是永久的，等于把回访客户静音了。以「一次咨询」为节流粒度才对。
+
+    include_cold（业务决策 2026-08，律所方：「我们有很多的客服，全部都得推给
+    客服，不能躺死在对话里」）：冷线索也推。原口径把冷线索留在库里不打扰人，
+    前提是人手紧张——律所侧不是这个前提，那条节流就从「保护」变成了「丢单」。
+    系统只负责标好强弱，推不推由人手决定。
+
+    注意它**只放开门槛，不放开频次**：下面三条节流照旧，
+    所以一通对话仍然只推一张单，不会因为客户多说几句就连推五条。
     """
-    if intent == signals.COLD:
+    if intent == signals.COLD and not include_cold:
         return False
     if previous is None or not previous.get("notified_at"):
         return True
@@ -266,7 +276,8 @@ def dispatch(
     if force and _notified_within(previous, settings.lead_force_cooldown_seconds):
         force = False
     notify = force or should_notify(
-        previous, intent, gap_seconds=settings.lead_session_gap_seconds
+        previous, intent, gap_seconds=settings.lead_session_gap_seconds,
+        include_cold=settings.notify_all_leads,
     )
     lead = build_and_store(
         store, group, history, settings=settings,
