@@ -46,6 +46,13 @@
       "op": "report",
       "to": "future",
       "why": "demo 前最后一次体检：确认名册、接待人、各客服账号状态都对"
+    },
+    {
+      "id": "2026-08-06-digest-preview",
+      "op": "digest",
+      "to": "future",
+      "days": 7,
+      "why": "demo 前先看一眼战报长什么样——默认早九点才推，等到明早就来不及改了"
     }
   ]
 }
