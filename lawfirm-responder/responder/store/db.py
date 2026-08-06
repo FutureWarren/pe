@@ -126,6 +126,13 @@ CREATE TABLE IF NOT EXISTS lawyers (
     last_assigned_at TEXT,            -- 负载均衡的平局裁决：最久没接单的先接
     created_at TEXT
 );
+-- 已执行过的运维指令（见 responder/opscmd.py）。存在的唯一理由是幂等：
+-- 自动升级每 5 分钟拉一次仓库，没有这张表，一条「重置令牌」会每五分钟重置一次。
+CREATE TABLE IF NOT EXISTS ops_commands (
+    id TEXT PRIMARY KEY,
+    result TEXT DEFAULT '',
+    created_at TEXT
+);
 """
 
 # 旧库平滑升级：新增列在此登记，启动时按需 ALTER（SQLite 无 IF NOT EXISTS 列语法）
@@ -435,6 +442,23 @@ class Store:
                 (group_id, limit),
             ).fetchall()
         return [dict(r) for r in reversed(rows)]
+
+    def command_done(self, command_id: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM ops_commands WHERE id=?", (command_id,)
+            ).fetchone()
+        return row is not None
+
+    def mark_command_done(self, command_id: str, result: str = "") -> None:
+        """运维指令执行留痕。幂等的根据地——auto_update 每 5 分钟拉一次，
+        少了这张表，一条「重置令牌」会每五分钟重置一次。"""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO ops_commands(id, result, created_at)"
+                " VALUES(?,?,?)",
+                (command_id, result, datetime.now().isoformat()),
+            )
 
     def count_event_messages(self) -> int:
         """收到过多少条进线事件（msg_type='event'）。

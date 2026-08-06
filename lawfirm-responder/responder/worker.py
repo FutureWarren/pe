@@ -146,6 +146,23 @@ class Worker:
             ops.auto_update_tick(s, busy=busy)
         except Exception:
             logger.exception("auto update check failed")
+        self._run_ops_commands()
+
+    def _run_ops_commands(self) -> None:
+        """执行仓库里待办的运维指令（见 responder/opscmd.py）。
+
+        跟自动升级同一轮跑：那时候仓库刚好是新拉下来的，指令文件也是最新的。
+        放在升级之后而不是之前，是因为指令往往依赖同一批提交里的新代码。
+        """
+        try:
+            from responder.opscmd import Runner
+
+            Runner(
+                self.pipeline.settings, self.store,
+                sender=self.sender, kf_client=self.kf_client,
+            ).run_pending()
+        except Exception:
+            logger.exception("ops commands failed")
 
     def _sweep_winback(self, now: datetime) -> None:
         """挽留：会话静默且仍未留联系方式 → 补发一条，一通对话只发一次。
