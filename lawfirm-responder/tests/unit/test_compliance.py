@@ -14,6 +14,16 @@ def test_forbidden_quote_fee():
     assert forbidden.check("律师费3万起")
 
 
+def test_forbidden_free_is_also_a_quote():
+    # 抖音那套现成话术里满屏「免费」，照搬进来就等于让 AI 替所里许价。
+    # 零也是一个价：客户后面拿这句话说事，跟报了个数字没有区别。
+    assert forbidden.check("电话咨询免费，您方便留个电话吗")
+    assert forbidden.check("我们会主动打来免费沟通")
+    assert forbidden.check("先聊聊，不收费的")
+    # 「费用由律师和您谈」是正确的回避说法，不该被这条误伤
+    assert forbidden.check("费用这块得律师了解案情后跟您细说") == []
+
+
 def test_forbidden_predict_case():
     assert forbidden.check("您的案子大概率会判缓刑")
 
