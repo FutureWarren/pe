@@ -168,6 +168,7 @@ class Pipeline:
         )
         reply_text = None
         if result:
+            result.text = self._with_intro(result.text, decision, group)
             mode = "live" if (self.settings.mode == "live" and decision.should_speak) else "shadow"
             final_text = self._apply_followup_policy(
                 msg, decision, group, result.text, mode, ask_contact=want_contact,
@@ -348,6 +349,20 @@ class Pipeline:
         logger.info("handoff: %s → %s", group.group_id, target)
         return True
 
+    def _with_intro(self, text: str, decision: Decision, group: GroupProfile) -> str:
+        """本通对话的第一条回复补一句自报家门。
+
+        开场白话术自带律所全称，但客户一进来就直接说事时走的是承接/追问路径，
+        那句就丢了——对面不知道在跟谁说话。补一行，不改正文。
+        """
+        if not group.is_kf or decision.category == Category.GREETING:
+            return text  # 开场白话术里本来就有全称，别报两遍
+        if decision.urgent:
+            return text  # 人正急着（拘留/开庭），先安抚，自我介绍往后放
+        if self.store.has_greeting(group.group_id):
+            return text  # 本会话已经开过口，不再报第二遍全称
+        return templates.intro_line(self.settings) + "\n" + text
+
     def _maybe_intake(
         self, msg: IncomingMessage, decision: Decision, group: GroupProfile,
         convo: list[dict],
@@ -377,9 +392,20 @@ class Pipeline:
             return
         if self._recent_marker(group.group_id, templates.INTAKE_MARKERS, limit=20):
             return
-        # 刚问过手机号的，追问里就别再带电话那一句
-        asked = self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
-        decision.reasons.append("kf:intake-quiet" if asked else "kf:intake")
+        # 追问里那句「留个手机号」受同一条业务规则约束：聊够了才开口。
+        # 客户刚说第一句就被问号码，像推销；刚问过又问，像催单。两种都要让。
+        spoken = sum(
+            1 for m in convo
+            if not m.get("sender_is_staff") and m.get("msg_type") != "event"
+            and (m.get("content") or "").strip()
+        )
+        threshold = self.settings.ask_contact_after_messages
+        quiet = (
+            threshold <= 0  # 0 = 整条「主动要电话」的收口动作被关掉了
+            or spoken < threshold
+            or self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
+        )
+        decision.reasons.append("kf:intake-quiet" if quiet else "kf:intake")
 
     def _is_repeat_message(self, msg: IncomingMessage) -> bool:
         """这条消息客户刚刚发过一模一样的（标点/空格差异不算）。
@@ -436,6 +462,9 @@ class Pipeline:
         注意第 6 条比的是**邀约**标记而不是「手机号」：承接回复里的轻推
         （「留个手机号也行」）不该挡住这一步——完整邀约多出的是所址和面谈邀请，
         是新信息，属于正常升级。
+
+        但**紧挨着的上一条**刚问过电话就得让一让（第 7 条）：升级是隔一轮再进一步，
+        连着两条都在要号码，读起来就是催单，不是引导。
         """
         threshold = self.settings.ask_contact_after_messages
         if threshold <= 0 or not group.is_kf:
@@ -455,6 +484,8 @@ class Pipeline:
             return False
         if signals.scan(convo)[1]:
             return False
+        if self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS, limit=1):
+            return False  # 上一条刚问过号码，这条再问就是催单
         return not self._recent_marker(group.group_id, templates.OFFICE_INVITE_MARKERS)
 
     # ------------------------------------------------------------ 发送

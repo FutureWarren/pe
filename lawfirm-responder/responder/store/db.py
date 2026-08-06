@@ -625,13 +625,21 @@ class Store:
         return row is not None
 
     def has_greeting(self, group_id: str) -> bool:
-        """这通对话是否已经发过开场白（进线问候或引导型开场）。
+        """这通对话我们是否已经开过口。
 
         一通对话只该有一次自我介绍。客户扫码进来被问候过、接着把情况打出来，
         若规则判不出那是不是法律问题而再回一遍「请您说说什么情况」，
         就是当着客户的面复读——这个查询就是用来拦住第二次的。
+
+        判据是「有没有回过话」而不是「有没有发过 greeting 类回复」：
+        客户第一句就直接说事时走的是承接/追问路径，那一轮压根没有 greeting 类
+        记录，用类别判会永远为假，于是每一轮都重新自我介绍一遍。
         """
-        return self.has_reply_category(group_id, "greeting")
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM replies WHERE group_id=? LIMIT 1", (group_id,)
+            ).fetchone()
+        return row is not None
 
     def set_reply_feedback(self, reply_id: int, feedback: str) -> None:
         with self._conn() as conn:

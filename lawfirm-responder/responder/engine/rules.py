@@ -168,6 +168,19 @@ def wants_lawyer_contact(text: str) -> bool:
     return bool(_match_any(_WANT_LAWYER_CONTACT, (text or "").strip()))
 
 
+def has_substance(text: str) -> bool:
+    """客户是不是已经把「事」说出来了（而不只是打了个招呼、应了一声）。
+
+    判据放宽而不放严：说了却被当成没说，代价是回一句「麻烦您把情况讲一下」——
+    客户刚讲完，这句话等于告诉他没人在听，是整条链路上最伤的一句。
+    反过来，招呼被误判成有内容，最坏结果只是回一句追问，不难看。
+    """
+    t = (text or "").strip()
+    if is_bare_greeting(t) or _CHITCHAT.match(t) or _COURTESY.match(t):
+        return False
+    return bool(_GENERAL_TOPIC.search(t)) or len(t) >= 12
+
+
 def is_chasing(text: str, category: Category) -> bool:
     """这条消息是在「催」，而不是在问新问题。
 

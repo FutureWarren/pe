@@ -170,8 +170,13 @@ def test_greeting_never_repeated_in_one_conversation(tmp_path):
     assert "比如" not in reply, "第二句不该又是开场白"
     assert "律师" in reply  # 改走承接话术
     assert "魏律师" not in reply, "一对一进线不点名具体律师（谁接单由分案引擎后定）"
+    # 客户把事情说出来了，回应必须接着他说的往下问，而不是让他再讲一遍
+    assert "什么时候开始" in reply or "走到哪一步" in reply
     reasons = [d["reasons"] for d in store.list_decisions(GID)]
-    assert any("greeting:already-sent" in r for r in reasons)
+    assert any("kf:substance" in r for r in reasons), (
+        "有内容的消息不该再绕开场白那条路——那条路的兜底是「请您说说什么情况」，"
+        "而他刚说完"
+    )
 
 
 def test_kf_replies_never_mention_group(tmp_path):
@@ -282,10 +287,16 @@ def test_handoff_reply_always_has_a_next_step(tmp_path):
 
     业务决策 2026-08：「我帮您问下律师，请您稍等」说完客户只能干等，
     很多人就这么走了。每条回复都要留一个下一步动作。
+
+    「下一步」不等于「要电话」：第一条就问号码像推销（要电话有自己的阈值），
+    但让他回答两个问题、把材料发过来，同样是明确的下一步——而且这一步
+    问出来的东西律师接手时正好要用。
     """
     _, kf = _chat(tmp_path, ["我的案子现在到哪一步了？"])
     text = kf.texts()
-    assert "手机号" in text, "承接类回复必须带下一步引导"
+    assert any(k in text for k in ("手机号", "材料", "什么时候开始", "走到哪一步")), (
+        "承接类回复必须给客户一件此刻能做的事"
+    )
 
 
 def test_next_step_yields_to_full_ask_contact(tmp_path):

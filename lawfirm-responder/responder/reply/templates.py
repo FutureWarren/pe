@@ -115,6 +115,17 @@ def handoff_generic(group: GroupProfile, seed: str = "") -> str:
     return _pick(variants, seed)
 
 
+def intro_line(settings: Settings | None = None) -> str:
+    """一通对话里的第一句自报家门。
+
+    客户扫码进来第一句就直接说事的时候，走的是承接/追问路径，
+    拿不到 greeting_opener 里那句律所全称——而那句话不能丢：
+    对面得先知道自己在跟谁说话，这既是礼貌，也是「这不是个野鸡账号」的凭据。
+    所以把它拆出来，由管道在本通对话的第一条回复上加一次。
+    """
+    return f"您好，这里是{(settings or get_settings()).office_name}。"
+
+
 def handoff_noted(group: GroupProfile, seed: str = "") -> str:
     """一对一窗口里「收下并继续」的承接。取代泛泛的 handoff_generic。
 
@@ -153,8 +164,10 @@ def greeting_opener(group: GroupProfile, seed: str = "", contact_left: bool = Fa
     if contact_left:
         L = _lawyer(group)
         variants = [
+            # 不用「他」：接单律师由分案引擎按专长与负载算出，性别未知，
+            # 而这句话是发给客户看的，猜错就是当着人面把人叫错。
             f"好的，您的联系方式我已经记下，稍后由{L}与您电话联系。",
-            f"收到，电话我记下来了。我先把您的情况整理给{L}，他会尽快与您联系。",
+            f"收到，电话我记下来了。我先把您的情况整理给{L}，尽快与您联系。",
             f"好的，联系方式收到。我这边转给{L}，请您留意来电。",
         ]
         return _pick(variants, seed)
@@ -283,9 +296,9 @@ def intake_probe(
         "明白了，这类情况我们处理得比较多。为了让{L}一次就说到点子上，"
         "您再补两句：这事大概是什么时候开始的？现在走到哪一步了？\n"
         "手上有合同、聊天记录、转账记录这些材料的话，也可以直接发过来。",
-        "您说的我记下了。想给您准信儿，还得再问两句："
+        "您说的我记下了。想让{L}给您准信儿，还得再问两句："
         "从什么时候开始的？中间跟对方沟通过没有、结果怎么样？\n"
-        "相关的材料（合同、聊天记录、转账记录）方便的话先发我。",
+        "相关的材料（合同、聊天记录、转账记录）方便的话也先发我。",
     ]
     text = _pick(variants, seed)
     # 已经问过电话的不再问第二遍——同一通对话里问两次就成了催单

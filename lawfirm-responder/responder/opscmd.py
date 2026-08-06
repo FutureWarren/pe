@@ -198,6 +198,33 @@ class Runner:
             )
         return "接待人添加结果：\n" + "\n".join(lines) if lines else "取不到客服账号"
 
+    def _op_add_lawyer(self, item: dict) -> str:
+        """把一位律师加进名册，并在兜底接收人为空时把他设为兜底接收人。
+
+        这条指令解的是一个**静默失败**：名册为空、兜底接收人也没配时，
+        线索照样入库、评分照样算，但那张交接单**一个人也发不到**——
+        控制台里看着一切正常，律师那边什么都没有。
+        实测过：客户留了电话，系统安安静静地把它存进了数据库，没人知道。
+
+        userid 是企微成员账号（通讯录里那个「账号」字段），不是密钥。
+        """
+        userid = str(item.get("userid", "")).strip()
+        if not userid:
+            return "缺 userid，没加"
+        self.store.upsert_lawyer(userid, {
+            "name": str(item.get("name", "") or userid),
+            "specialties": str(item.get("specialties", "")),
+            "role": str(item.get("role", "lawyer")),
+            "on_duty": True,
+            "active": True,
+        })
+        lines = [f"已加入律师名册：{item.get('name', '') or userid}（{userid}）"]
+        if not self.settings.default_notify_userid:
+            self.settings.default_notify_userid = userid
+            persist_setting("RESPONDER_DEFAULT_NOTIFY_USERID", userid)
+            lines.append("并设为线索/提醒的兜底接收人（此前为空＝交接单发不出去）")
+        return "\n".join(lines)
+
     def _op_report(self, item: dict) -> str:
         """把关键状态汇报一遍——远程排障时省掉一整轮来回提问。"""
         s = self.settings

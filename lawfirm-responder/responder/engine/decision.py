@@ -83,11 +83,20 @@ def decide(
         and msg.msg_type == "text"
         and msg.content.strip()
     ):
-        action, category = Action.ANSWER, Category.GREETING
-        # 刚留下联系方式的客户不能再被问「您是什么情况」——换收下并转交的话术
-        reasons = reasons + [
-            "kf:contact-ack" if signals.extract_contact(msg.content) else "kf:greeting-opener"
-        ]
+        if signals.extract_contact(msg.content):
+            # 刚留下联系方式的客户不能再被问「您是什么情况」——换收下并转交的话术
+            action, category = Action.ANSWER, Category.GREETING
+            reasons = reasons + ["kf:contact-ack"]
+        elif rules.has_substance(msg.content):
+            # 客户已经把事情说出来了，再回「麻烦您把情况讲一下」就是没在听。
+            # 真机测试里最刺眼的一条：客户说「公司拖欠我三个月工资，还把我辞退了」，
+            # 换回一句「比如『准备离婚，孩子抚养权想争取』」——他刚说完，我们还在要他说。
+            # 交给承接路径，由管道的 _maybe_intake 转成追问。
+            action, category = Action.HANDOFF, Category.OTHER
+            reasons = reasons + ["kf:substance"]
+        else:
+            action, category = Action.ANSWER, Category.GREETING
+            reasons = reasons + ["kf:greeting-opener"]
 
     decision = Decision(
         msg_id=msg.msg_id,

@@ -239,3 +239,30 @@ def test_command_can_name_its_own_recipient(env):
 
     assert snd.direct[0][0] == "future"
     assert settings.admin_token != "old-token-xyz"
+
+
+def test_add_lawyer_also_fixes_the_silent_notification_hole(env):
+    """名册为空 + 兜底接收人为空 = 线索照样入库评分，但交接单一个人也发不到。
+
+    这是最坏的一种失败：控制台里一切正常，律师那边什么都没有。
+    实测过——客户留了电话，系统安安静静地把它存进了数据库。
+    """
+    repo, store, settings = env
+    settings.default_notify_userid = ""
+    write_commands(repo, [{
+        "id": "c1", "op": "add_lawyer", "to": "future",
+        "userid": "future", "name": "魏涞", "specialties": "劳动仲裁",
+    }])
+
+    Runner(settings, store, sender=Snd()).run_pending()
+
+    assert store.get_lawyer("future")["name"] == "魏涞"
+    assert settings.default_notify_userid == "future"
+
+
+def test_add_lawyer_does_not_steal_an_existing_notify_target(env):
+    """已经配好接收人的，不能被一条加人指令悄悄改掉。"""
+    repo, store, settings = env  # fixture 里是 wei
+    write_commands(repo, [{"id": "c1", "op": "add_lawyer", "userid": "zhang"}])
+    Runner(settings, store, sender=Snd()).run_pending()
+    assert settings.default_notify_userid == "wei"

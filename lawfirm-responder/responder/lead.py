@@ -185,7 +185,14 @@ def format_notification(
     if lead.get("suggested_action"):
         lines += ["", f"建议动作：{lead['suggested_action']}"]
     if lead.get("opening_line"):
-        lines.append(f"开场参考：「{lead['opening_line']}」")
+        # 模型爱写「我是XX律师」这种占位符。收件人就是被派的那位律师，
+        # 名字我们是知道的——留着 XX 让人以为系统没做完，顺手换掉。
+        opening = lead["opening_line"]
+        # 派单时会把被派律师同步写回会话档案（assignment.ensure），所以这里是准的
+        who = (group.lawyer_name or "").strip()
+        opening = opening.replace("XX律师", f"{who}律师" if who else "律师")
+        opening = opening.replace("XX", who or "")
+        lines.append(f"开场参考：「{opening}」")
     # 末尾这一行原来是句死路：「完整对话见控制台」——律师得开浏览器、找地址、
     # 登录、翻列表、找到人，五步，所以他不会做。改成可点的深链，一步直达。
     # public_base_url 没配时退回原文案（本机开发/未定域名）。
