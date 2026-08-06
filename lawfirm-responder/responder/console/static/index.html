@@ -906,7 +906,10 @@ async function doLogin(ev, retried = false) {
       await new Promise(r => setTimeout(r, 3000));
       return doLogin(null, true);
     } else {
-      showLogin("暂时连不上服务器，请检查网络后重试");
+      /* 带上真实原因：光说「连不上」时排查过一整轮网络，而真凶可能是
+         某个状态码或浏览器的 Load failed——这行字省下的是几个来回。 */
+      const why = st ? `服务器返回 ${st}` : (e.message || "请求未送达");
+      showLogin(`暂时连不上服务器（${why}），请把这行字发给管理员`);
     }
   }
   btn.disabled = false; btn.textContent = "进入控制台";

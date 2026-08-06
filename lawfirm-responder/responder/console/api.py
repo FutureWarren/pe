@@ -32,7 +32,17 @@ _UI_FILE = Path(__file__).parent / "static" / "index.html"
 
 @ui_router.get("/ui", include_in_schema=False)
 def console_ui() -> HTMLResponse:
-    return HTMLResponse(_UI_FILE.read_text(encoding="utf-8"))
+    """整个控制台是这一个文件，所以它**绝不能被缓存**。
+
+    踩过的坑：服务器升级到新版后，律所方手机上的页面仍是旧的——报错文案、
+    新按钮全是老样子，看起来就像「升级没生效」。浏览器（尤其 iOS Safari）
+    对没有缓存头的 HTML 会自作主张地缓存，而这个页面每次升级都在变。
+    自动升级把发版频率抬高之后，这个坑必然天天踩。
+    """
+    return HTMLResponse(
+        _UI_FILE.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
+    )
 
 
 @dataclass

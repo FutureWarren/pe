@@ -76,3 +76,15 @@ def test_todo_done_then_reopen(tmp_path):
     assert c.post(f"/console/todo/{rid}/reopen").json()["ok"]
     pending = [r for r in store.pending_reminders() if r["id"] == rid]
     assert pending and pending[0]["status"] == "pending"
+
+
+def test_ui_is_never_cached():
+    """自动升级把发版频率抬高之后，缓存住的旧页面会被当成「升级没生效」。
+
+    实际踩过：服务器已经是新版，手机上的页面却还是旧报错文案、旧按钮，
+    排查方向整个被带偏。整个控制台就是这一个文件，它必须每次都重新取。
+    """
+    app = FastAPI()
+    app.include_router(ui_router)
+    r = TestClient(app).get("/ui")
+    assert "no-store" in r.headers.get("cache-control", "")
