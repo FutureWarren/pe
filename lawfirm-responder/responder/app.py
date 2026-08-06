@@ -64,6 +64,12 @@ def create_app() -> FastAPI:
             "kf": bool(kf_client and kf_client.available()),
             "douyin": bool(dy_client and dy_client.available()),
             "queued": worker.qsize(),
+            # 进线事件累计条数。「进线即问候」整条链路挂在企微推这个事件上，
+            # 一条都没有就说明企微根本没通知过我们「有人进来了」——那跟
+            # 「新版没部署」在客户那边看起来一模一样，得有个数才分得清。
+            # 放在这个免鉴权端点上，是因为控制台要带令牌头、手机上打不开；
+            # 一个整数不含任何客户信息，代价是零。
+            "enter_events": store.count_event_messages(),
         }
 
     return app

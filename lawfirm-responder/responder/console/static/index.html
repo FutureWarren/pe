@@ -877,7 +877,7 @@ async function whoami() {
   me = await api("/me");
   applyRole();
 }
-async function doLogin(ev) {
+async function doLogin(ev, retried = false) {
   if (ev) ev.preventDefault();
   const btn = document.getElementById("loginBtn");
   token = document.getElementById("tokenInput").value.trim();
@@ -892,10 +892,22 @@ async function doLogin(ev) {
       setTimeout(openStatusPanel, 400);
     }
   } catch (e) {
-    if (String(e.message) !== "401")
-      showLogin("暂时连不上服务器，请检查网络后重试");
-    else
+    /* 报错要说真话：升级重启大约十几秒，那期间的失败跟「令牌错了」「没网」
+       是三件完全不同的事，混成一句「连不上服务器」会让人去查根本没问题的地方。
+       网络类失败自动重试一次——重启窗口通常几秒就过去了，不该让人自己猜。 */
+    const st = e.status || 0;
+    if (st === 401 || st === 403 || String(e.message) === "401") {
       showLogin("令牌不正确，请核对后重试。如遗忘请联系系统管理员");
+    } else if (st >= 500) {
+      showLogin("服务器正在重启（多半是在自动升级），十几秒后再点一次就好");
+    } else if (!st && !retried) {
+      showLogin("正在重试……");
+      btn.textContent = "重试中…";
+      await new Promise(r => setTimeout(r, 3000));
+      return doLogin(null, true);
+    } else {
+      showLogin("暂时连不上服务器，请检查网络后重试");
+    }
   }
   btn.disabled = false; btn.textContent = "进入控制台";
   return false;
