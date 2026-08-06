@@ -82,60 +82,99 @@ class Runner:
             op = str(item.get("op", "")).strip()
             if not cid or not op or self.store.command_done(cid):
                 continue
+            rollback = None
             try:
                 text = self._dispatch(op, item)
+                if isinstance(text, tuple):  # (结果文案, 送达失败时的回滚动作)
+                    text, rollback = text
                 ok = True
             except Exception as e:  # 一条指令炸了不能拖垮后面的，也不能拖垮 worker
                 logger.exception("运维指令失败: %s %s", cid, op)
                 text, ok = f"「{op}」执行失败：{str(e)[:200]}", False
-            # 先落库再发消息：发送失败可以重发，重复执行不行
+
+            delivered = self._notify(self._target(item), text)
+            if rollback and not delivered:
+                # 改了令牌却没人收到新令牌 = 把人锁在门外，比不改坏得多。
+                # 撤销，且**不落库**——下一轮企微恢复了会自动重来。
+                rollback()
+                logger.warning("运维指令送达失败，已回滚并留待下轮重试: %s", cid)
+                continue
             self.store.mark_command_done(cid, text[:500])
-            self._notify(text)
             out.append({"id": cid, "op": op, "ok": ok, "result": text})
         return out
 
-    def _dispatch(self, op: str, item: dict) -> str:
+    def _dispatch(self, op: str, item: dict):
         fn = getattr(self, f"_op_{op}", None)
         if fn is None:
             return f"不认识的指令「{op}」，已跳过"
         return fn(item)
 
-    def _notify(self, text: str) -> None:
-        """结果发到管理员的企业微信——律所方不必登任何后台就能看到。"""
-        target = (
-            self.settings.default_notify_userid
+    def _target(self, item: dict | None = None) -> str:
+        """结果发给谁。指令可以指定 to，否则按兜底链找。
+
+        名册为空、兜底接收人也没配是**很常见的初始状态**（今天就是），
+        所以这个函数返回空串是正常分支，不是异常。
+        """
+        return (
+            (item or {}).get("to", "")
+            or self.settings.default_notify_userid
             or self.settings.bot_default_notify_userid
+            or next(
+                (x["userid"] for x in self.store.list_lawyers(active_only=True)
+                 if x.get("userid")),
+                "",
+            )
         )
-        if not target:
-            laws = [x for x in self.store.list_lawyers(active_only=True) if x.get("userid")]
-            target = laws[0]["userid"] if laws else ""
+
+    def _notify(self, target: str, text: str) -> bool:
+        """把结果发到管理员企业微信。返回**是否确实发出去了**。
+
+        返回值不是装饰性的：重置令牌那条指令靠它决定要不要回滚。
+        """
         if not target or self.sender is None:
-            logger.info("运维指令结果（无处可发）：%s", text)
-            return
+            logger.warning("运维指令结果无处可发：%s", text[:120])
+            return False
         try:
-            self.sender.send_direct_text(target, f"【系统维护】\n{text}")
+            return self.sender.send_direct_text(target, f"【系统维护】\n{text}") is not False
         except Exception:
             logger.exception("运维指令结果发送失败")
+            return False
 
     # ---------------------------------------------------------- 指令
-    def _op_reset_admin_token(self, item: dict) -> str:
-        """重置控制台访问令牌。
+    def _op_reset_admin_token(self, item: dict):
+        """重置控制台访问令牌。返回 (文案, 回滚动作)。
 
         **不接受指定值**：指令文件在公开仓库里，写进去的令牌等于公开。
         由服务器随机生成，只走企微私信这一条路送到人手上。
+
+        这条指令唯一的危险不是被人滥用，而是**改成功了但通知没送到**——
+        旧令牌当场失效、新令牌没人知道，等于把律所锁在自己的系统外面，
+        比不改坏得多。所以两道保险：没有收件人就什么都不做；
+        发送失败就回滚。宁可这条指令白跑一轮，也不能留下一扇锁死的门。
         """
+        if not self._target(item) or self.sender is None:
+            return (
+                "没有可送达的接收人，令牌**未改动**。\n"
+                "请先在指令里指定 to（企微 userid），"
+                "或配置 RESPONDER_DEFAULT_NOTIFY_USERID。"
+            )
+        old = self.settings.admin_token
         token = _new_token()
         self.settings.admin_token = token
         persist_setting("RESPONDER_ADMIN_TOKEN", token)
         from responder.console import api as console_api
 
         console_api._fails.clear()  # 顺手解掉因反复输错造成的锁定
+
+        def rollback() -> None:
+            self.settings.admin_token = old
+            persist_setting("RESPONDER_ADMIN_TOKEN", old)
+
         base = self.settings.public_base_url.rstrip("/")
-        link = f"{base}/ui#t={token}" if base else ""
         lines = [f"控制台访问令牌已重置为：\n{token}", "", "旧令牌立即失效。"]
-        if link:
-            lines += ["", f"免输入登录链接（存成书签，点一下直接进）：\n{link}"]
-        return "\n".join(lines)
+        if base:
+            lines += ["", f"免输入登录链接（存成书签，点一下直接进）：\n{base}/ui#t={token}"]
+        return "\n".join(lines), rollback
 
     def _op_add_kf_servicers(self, item: dict) -> str:
         """把名册里的律师加为客服接待人——会话转接的硬前置。"""

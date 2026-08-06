@@ -160,10 +160,13 @@ def test_report_command_answers_the_questions_we_keep_asking(env):
         assert key in text
 
 
-def test_result_is_recorded_before_it_is_sent(env):
-    """发送失败可以重发，重复执行不行——所以先落库再发消息。"""
+def test_send_failure_does_not_make_a_harmless_command_retry_forever(env):
+    """汇报类指令送不出去就算了，不能每 5 分钟重跑一次刷屏。
+
+    可回滚的指令（重置令牌）走的是另一套：见下面「送不到就别改」那一组。
+    """
     repo, store, settings = env
-    write_commands(repo, [{"id": "c1", "op": "reset_admin_token"}])
+    write_commands(repo, [{"id": "c1", "op": "report"}])
 
     class Broken:
         def send_direct_text(self, userid, text):
@@ -182,3 +185,57 @@ def test_falls_back_to_first_lawyer_when_no_notify_target(env):
     snd = Snd()
     Runner(settings, store, sender=snd).run_pending()
     assert snd.direct[0][0] == "zhang"
+
+
+# --------------------------------------------- 送不到就别改：锁死比不改坏得多
+# 这条指令唯一的危险不是被滥用，而是「改成功了但通知没送到」——
+# 旧令牌当场失效、新令牌没人知道，等于把律所锁在自己的系统外面。
+def test_reset_does_nothing_when_there_is_nobody_to_tell(env):
+    """名册为空、兜底接收人也没配，是很常见的初始状态（今天就是）。"""
+    repo, store, settings = env
+    settings.default_notify_userid = ""
+    write_commands(repo, [{"id": "c1", "op": "reset_admin_token"}])
+
+    Runner(settings, store, sender=Snd()).run_pending()
+
+    assert settings.admin_token == "old-token-xyz"  # 一动没动
+
+
+def test_reset_rolls_back_when_the_message_fails_to_send(env):
+    repo, store, settings = env
+    write_commands(repo, [{"id": "c1", "op": "reset_admin_token"}])
+
+    class Broken:
+        def send_direct_text(self, userid, text):
+            raise RuntimeError("企微挂了")
+
+    Runner(settings, store, sender=Broken()).run_pending()
+    assert settings.admin_token == "old-token-xyz"
+    # 且不落库——企微恢复后下一轮自动重来，不需要人再提交一次指令
+    assert not store.command_done("c1")
+
+
+def test_reset_rolls_back_when_wecom_reports_failure(env):
+    """企微接口返回失败（而不是抛异常）同样算没送到。"""
+    repo, store, settings = env
+    write_commands(repo, [{"id": "c1", "op": "reset_admin_token"}])
+
+    class Refuses:
+        def send_direct_text(self, userid, text):
+            return False
+
+    Runner(settings, store, sender=Refuses()).run_pending()
+    assert settings.admin_token == "old-token-xyz"
+
+
+def test_command_can_name_its_own_recipient(env):
+    """名册还没建起来时，指令自带收件人就是唯一能走通的路。"""
+    repo, store, settings = env
+    settings.default_notify_userid = ""
+    write_commands(repo, [{"id": "c1", "op": "reset_admin_token", "to": "future"}])
+    snd = Snd()
+
+    Runner(settings, store, sender=snd).run_pending()
+
+    assert snd.direct[0][0] == "future"
+    assert settings.admin_token != "old-token-xyz"
