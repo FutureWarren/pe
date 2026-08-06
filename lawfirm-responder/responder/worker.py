@@ -293,26 +293,42 @@ class Worker:
             logger.exception("message processing failed: %s", msg.msg_id)
 
     def _sweep_lead_sla(self, now: datetime) -> None:
-        """P0 强意愿线索超时未联系 → 追加提醒并抄送第二责任人。
+        """线索超时未联系 → 追加提醒并抄送第二责任人。
 
         「一小时内联系」是分层规则对律师的要求（docs/lead-routing.md），没有督办
         它就只是一句口号。每单只追一次（sla_nudged），避免变成骚扰。
+
+        P0 与 P1 都扫，只是时限差一个量级。**P1 一度完全没有督办**——
+        单子推出去之后律师不跟，就再没有任何机制会提起它。而 P1 是
+        「有意愿但还没留电话」，恰恰最需要有人推一把：它不该占用律师的
+        即时注意力（那是 P0 的特权），但放着不管就是白丢。
         """
         s = self.pipeline.settings
-        sender = self.pipeline.sender
-        if not (s.lead_brief_enabled and s.lead_sla_enabled and sender):
+        if not (s.lead_brief_enabled and s.lead_sla_enabled and self.pipeline.sender):
             return
-        cutoff = now - timedelta(seconds=s.lead_p0_sla_seconds)
-        for row in self.store.overdue_p0_leads(cutoff):
+        self._nudge_overdue("P0", s.lead_p0_sla_seconds, now, "强意愿线索")
+        self._nudge_overdue("P1", s.lead_p1_sla_seconds, now, "有意愿线索")
+
+    def _nudge_overdue(
+        self, priority: str, sla_seconds: int, now: datetime, label: str
+    ) -> None:
+        s = self.pipeline.settings
+        sender = self.pipeline.sender
+        if sla_seconds <= 0:
+            return  # 该档督办被关掉
+        cutoff = now - timedelta(seconds=sla_seconds)
+        for row in self.store.overdue_leads(priority, cutoff):
             group = self.store.get_group(row["group_id"])
             if group is None:
                 continue
             to = row.get("assigned_userid") or group.lawyer_userid or s.default_notify_userid
             if not to:
                 continue
-            mins = int(s.lead_p0_sla_seconds // 60)
+            # 超过一小时就用小时说话：「已超 1440 分钟」没人算得过来
+            mins = int(sla_seconds // 60)
+            waited = f"{mins} 分钟" if mins < 120 else f"{mins // 60} 小时"
             text = (
-                f"【督办】强意愿线索已超 {mins} 分钟未标记联系\n"
+                f"【督办】{label}已超 {waited} 未标记联系\n"
                 f"客户：{group.name or row['group_id']}\n"
                 f"诉求：{(row.get('summary') or '')[:60]}\n"
                 f"联系方式：{row.get('contact') or '见会话'}\n"

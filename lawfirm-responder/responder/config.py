@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     # P0 线索超过该时长仍未标记「已联系」→ 追加提醒并抄送第二责任人
     lead_sla_enabled: bool = True
     lead_p0_sla_seconds: int = 3600
+    # P1 同样要有人管，只是时限宽得多。P1 是「有意愿但还没留电话」——
+    # 它不该占用律师的即时注意力（那是 P0 的特权），但放着不管就是白丢：
+    # 单子推出去之后没有任何机制会再提起它。0 = 关闭 P1 督办。
+    lead_p1_sla_seconds: int = 86400
     # 紧急线索强推交接单的冷却时间：客户连发几条急消息，律师只该收一张单
     lead_force_cooldown_seconds: int = 600
     # 控制台对外基础地址（生成律师登录链接用）；留空时从请求 Host 推断

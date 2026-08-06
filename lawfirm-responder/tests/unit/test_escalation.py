@@ -101,3 +101,68 @@ def test_escalation_falls_back_to_global_target(tmp_path):
     later = datetime.now() + timedelta(seconds=700)
     assert escalation.escalate_overdue(store, snd, settings=settings, now=later)
     assert snd.sent[0][0] == "reception"
+
+
+# ------------------------------------------------------- P1 也要有人管
+# 律所方问到点子上：只按 P0 转接，会不会把 P1 丢掉？
+# 转接不丢——P1 照样派单、照样推交接单，只是不占用律师的即时注意力。
+# 但**督办**一度真的只扫 P0：单子推出去之后律师不跟，就再没有任何机制
+# 会提起它。而 P1 是「有意愿但还没留电话」，恰恰最需要有人推一把。
+def _overdue_env(tmp_path, priority, **over):
+    from datetime import datetime, timedelta
+
+    from responder.config import Settings
+    from responder.models import ClientStatus, GroupProfile
+    from responder.service import Pipeline
+    from responder.store.db import Store
+    from responder.worker import Worker
+
+    db = str(tmp_path / f"sla-{priority}.db")
+    store = Store(db)
+    cfg = dict(mode="live", db_path=db, lead_brief_enabled=True, lead_sla_enabled=True,
+               default_notify_userid="wei")
+    cfg.update(over)
+    settings = Settings(**cfg)
+
+    class Snd:
+        def __init__(self):
+            self.direct = []
+
+        def send_direct_text(self, userid, text):
+            self.direct.append((userid, text))
+            return True
+
+    snd = Snd()
+    store.upsert_group(GroupProfile(group_id="kf:wk:c", name="客户 A",
+                                    client_status=ClientStatus.PROSPECT))
+    store.upsert_lead("kf:wk:c", {"intent": "warm", "priority": priority,
+                                  "summary": "咨询欠薪", "contact": "13712345678"})
+    store.assign_lead("kf:wk:c", "wei")
+    old = (datetime.now() - timedelta(days=3)).isoformat()
+    with store._conn() as conn:
+        conn.execute("UPDATE leads SET assigned_at=? WHERE group_id=?", (old, "kf:wk:c"))
+    worker = Worker(Pipeline(store, snd, settings), store, snd)
+    worker._sweep_lead_sla(datetime.now())
+    return snd
+
+
+def test_p1_leads_get_chased_too(tmp_path):
+    snd = _overdue_env(tmp_path, "P1")
+    assert snd.direct, "P1 派出去没人跟的话，得有人提起它"
+    assert "有意愿线索" in snd.direct[0][1]
+
+
+def test_p1_sla_can_be_switched_off(tmp_path):
+    snd = _overdue_env(tmp_path, "P1", lead_p1_sla_seconds=0)
+    assert not snd.direct
+
+
+def test_long_sla_is_phrased_in_hours(tmp_path):
+    """「已超 1440 分钟」没人算得过来。"""
+    snd = _overdue_env(tmp_path, "P1")
+    assert "24 小时" in snd.direct[0][1]
+
+
+def test_p0_still_uses_its_own_shorter_clock(tmp_path):
+    snd = _overdue_env(tmp_path, "P0")
+    assert "强意愿线索" in snd.direct[0][1] and "60 分钟" in snd.direct[0][1]

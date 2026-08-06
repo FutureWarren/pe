@@ -949,22 +949,33 @@ class Store:
                 (userid, datetime.now().isoformat(), datetime.now().isoformat(), group_id),
             )
 
-    def overdue_p0_leads(self, notified_before: datetime) -> list[dict]:
-        """通知已发、超时仍停在 new 的强意愿线索——SLA 升级的扫描对象。"""
+    def overdue_leads(
+        self, priority: str, notified_before: datetime
+    ) -> list[dict]:
+        """通知已发、超时仍停在 new 的线索——SLA 督办的扫描对象。
+
+        P0 与 P1 用不同时限（见 config 的 lead_p0/p1_sla_seconds）。
+        P1 一度完全没有督办：单子推出去之后律师不跟，就再没有任何人会提起它——
+        而 P1 是「有意愿但还没留电话」，恰恰是最需要有人推一把的那批。
+        """
         with self._conn() as conn:
             return [
                 dict(r)
                 for r in conn.execute(
                     # 时钟用 COALESCE(notified_at, assigned_at)：批量导入的线索
                     # notify=False 从不写 notified_at，只认 notified_at 会让
-                    # 导入进来的 P0 永远等不到督办（文档却承诺了有兜底）
-                    "SELECT * FROM leads WHERE priority='P0' AND status='new'"
+                    # 导入进来的线索永远等不到督办（文档却承诺了有兜底）
+                    "SELECT * FROM leads WHERE priority=? AND status='new'"
                     " AND sla_nudged=0"
                     " AND COALESCE(notified_at, assigned_at) IS NOT NULL"
                     " AND COALESCE(notified_at, assigned_at)<=?",
-                    (notified_before.isoformat(),),
+                    (priority, notified_before.isoformat()),
                 ).fetchall()
             ]
+
+    def overdue_p0_leads(self, notified_before: datetime) -> list[dict]:
+        """向后兼容的旧名（外部脚本可能还在用）。"""
+        return self.overdue_leads("P0", notified_before)
 
     def mark_lead_nudged(self, group_id: str) -> None:
         with self._conn() as conn:
