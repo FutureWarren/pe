@@ -13,7 +13,9 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -961,8 +963,29 @@ def conversation(
     return store.recent_messages(group_id, limit)
 
 
+def resolve_range(name: str, now: datetime | None = None) -> tuple[str, str, str]:
+    """把「今天 / 本月 / 全部」翻成 (since, until, 中文标签)。
+
+    管理员看的是「今天怎么样」「这个月怎么样」。全时段累计数只在开张第一天
+    有意义——之后它只会越来越像一个常数，看不出好坏，也就没人再看。
+    """
+    now = now or datetime.now()
+    if name == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start.isoformat(), now.isoformat(), "今天"
+    if name == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start.isoformat(), now.isoformat(), f"{now.month} 月"
+    if name == "7d":
+        return (now - timedelta(days=7)).isoformat(), now.isoformat(), "近 7 天"
+    return "", "", "全部"
+
+
 @router.get("/metrics")
-def metrics(store: Store = Depends(get_store), p: Principal = Depends(get_principal)):
+def metrics(
+    range: str = "today",
+    store: Store = Depends(get_store), p: Principal = Depends(get_principal),
+):
     """看板：三分类分布、承接量、合规拦截，以及线索转化漏斗（业务侧最关心）。
 
     律师身份下所有数字都只统计自己名下的会话与线索；管理员额外拿到分律师负载表。
@@ -970,11 +993,16 @@ def metrics(store: Store = Depends(get_store), p: Principal = Depends(get_princi
     own = None if p.is_admin else sorted(_own_group_ids(store, p))
     # SQL 聚合而非拉一万行进 Python：超过一万条后内存聚合会被 LIMIT 静默截断，
     # 合规看板从此说谎（「拦截 0 次」可能只是没统计到）
+    since, until, label = resolve_range(range)
     dec = store.decision_stats(group_ids=own)
     rep = store.reply_stats(group_ids=own)
-    lead_agg = store.lead_stats(assigned_userid=None if p.is_admin else p.userid)
+    lead_agg = store.lead_stats(
+        assigned_userid=None if p.is_admin else p.userid, since=since, until=until,
+    )
     out = {
         "scope": "all" if p.is_admin else "mine",
+        "range": range,
+        "range_label": label,
         "decisions_total": dec["total"],
         "by_action": dec["by_action"],
         "urgent_count": dec["urgent"],
@@ -1005,7 +1033,60 @@ def metrics(store: Store = Depends(get_store), p: Principal = Depends(get_princi
         # 只数「在办且未指派」——把已成交/无效也算进来会让批量分派按钮
         # 的数字虚高，点完还不消失
         out["leads_unassigned"] = lead_agg["unassigned"]
+        # 管理员真正要看的那张表：谁分到几单、跟进了几单、多久才跟上。
+        # 「在办数」只说明此刻手上压着多少，说明不了做得怎么样。
+        out["staff"] = store.staff_performance(since=since, until=until)
     return out
+
+
+@router.get("/export/leads")
+def export_leads(
+    request: Request, range: str = "today", fmt: str = "xlsx",
+    store: Store = Depends(get_store), _: Principal = Depends(require_admin),
+):
+    """把这一段的客户档案导成 Excel（管理员专用）。
+
+    为什么这是管理员的主视图而不是附加功能：控制台是给「在系统里干活的人」
+    用的——律师看自己的单、点已联系。所主任要的是另一样东西：一份能打印、
+    能转发、能在会上过一遍的表。让他为了看昨天进了多少客户去点开网页、
+    翻列表，他不会每天做。
+
+    AI 对话不进表（律所方原话：「不想看到那么多 AI 对话，那么乱」），
+    只留一列深链——要看原文点一下就到。
+    """
+    from fastapi.responses import Response
+
+    from responder import exporter
+
+    since, until, label = resolve_range(range)
+    rows = exporter.build_rows(
+        store, store.leads_in_range(since or None, until or None),
+        settings=request.app.state.pipeline.settings,
+    )
+    stamp = datetime.now().strftime("%Y%m%d")
+    name = f"客户档案-{label}-{stamp}"
+    if fmt == "csv":
+        body, mime, ext = exporter.to_csv(rows), "text/csv; charset=utf-8", "csv"
+    else:
+        try:
+            body, mime, ext = (
+                exporter.to_xlsx(rows, title=label),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "xlsx",
+            )
+        except ValueError:
+            # 服务器缺 openpyxl 时给 CSV 而不是报错——管理员要的是那份表，
+            # 不是一句「导出失败」
+            body, mime, ext = exporter.to_csv(rows), "text/csv; charset=utf-8", "csv"
+    filename = quote(f"{name}.{ext}")
+    return Response(
+        content=body, media_type=mime,
+        headers={
+            # 中文文件名走 RFC 5987，否则浏览器存成一串乱码
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+            "X-Row-Count": str(max(len(rows) - 1, 0)),
+        },
+    )
 
 
 # ================================================================ 团队管理

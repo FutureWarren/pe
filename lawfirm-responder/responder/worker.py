@@ -120,6 +120,31 @@ class Worker:
         self._sweep_lead_sla(now)
         self._sweep_winback(now)
         self._maybe_auto_update(now)
+        self._maybe_daily_digest(now)
+
+    def _maybe_daily_digest(self, now: datetime) -> None:
+        """每天固定时间给管理员推一份战报。
+
+        幂等靠 ops_commands 表里的日期键：worker 每 10 秒 tick 一次，
+        少了它，到点那一小时会推 360 条。
+        """
+        s = self.pipeline.settings
+        if not s.daily_digest_enabled or now.hour != s.daily_digest_hour:
+            return
+        key = f"digest-{now:%Y%m%d}"
+        if self.store.command_done(key):
+            return
+        try:
+            from responder.digest import build_digest, digest_target
+
+            target = digest_target(self.store, s)
+            if not target or self.sender is None:
+                return  # 没人可发就不占用当天的幂等键，等配好了照发
+            text = build_digest(self.store, s, now=now)
+            if self.sender.send_direct_text(target, text) is not False:
+                self.store.mark_command_done(key, "daily digest sent")
+        except Exception:
+            logger.exception("daily digest failed")
 
     def _maybe_auto_update(self, now: datetime) -> None:
         """定时看远端分支有没有新版，有就自己拉下来重启。

@@ -241,6 +241,12 @@ class Runner:
             lines.append("并设为线索/提醒的兜底接收人（此前为空＝交接单发不出去）")
         return "\n".join(lines)
 
+    def _op_digest(self, item: dict) -> str:
+        """立刻推一份战报（同 worker 每日自动推的那份，供随时调阅/测试）。"""
+        from responder.digest import build_digest
+
+        return build_digest(self.store, self.settings, days=int(item.get("days", 1)))
+
     def _op_report(self, item: dict) -> str:
         """把关键状态汇报一遍——远程排障时省掉一整轮来回提问。"""
         s = self.settings

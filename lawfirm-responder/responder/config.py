@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     # 「客户被交给一个不看企微的律师」，那比 AI 一直陪着更糟，必须有这个兜底。
     handoff_reclaim_seconds: int = 1800
 
+    # ---- 每日战报：管理员不必打开任何页面就知道昨天怎么样。
+    # 控制台是给「在系统里干活的人」用的；所主任要的是一份推到眼前的摘要。
+    # 让他每天主动去点开一个网页看数字，这件事不会持续超过一周。
+    daily_digest_enabled: bool = True
+    daily_digest_hour: int = 9  # 本地时间几点推（0-23）
+    # 收件人留空则用 default_notify_userid
+    daily_digest_userid: str = ""
+
     # 律所线下地址：邀约到所面谈的话术里用。留空则只约时间不报地址。
     office_address: str = "上海市松江区九峰路88号平高广场11楼"
     office_name: str = "上海松沪律师事务所"

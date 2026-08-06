@@ -342,10 +342,73 @@ class Store:
             ).fetchone()
         return {k: (r[k] or 0) for k in ("total", "blocked", "good", "bad")}
 
-    def lead_stats(self, assigned_userid: str | None = None) -> dict:
-        where, args = "", []
+    def staff_performance(
+        self, since: str | None = None, until: str | None = None
+    ) -> list[dict]:
+        """按律师看这段时间的处理情况——管理员真正要看的那张表。
+
+        「员工表现」不是一个数，是四个问题：分到几单、联系了几单、成交几单、
+        以及**多久才联系上**。最后一项最要紧：线索的价值随时间塌得极快，
+        一小时内打过去和第二天打过去，是两桩不同的生意。
+
+        响应时长按「派单 → 首次标记已联系」算，用 `updated_at` 近似首次状态变更：
+        线索状态一旦离开 new 就极少回头改，这个近似在业务上够用，
+        而精确到分钟需要一张状态变更流水表——那是为了好看多养一张表，不值。
+        """
+        where, args = ["l.assigned_userid<>''"], []
+        if since:
+            where.append("l.created_at>=?")
+            args.append(since)
+        if until:
+            where.append("l.created_at<?")
+            args.append(until)
+        clause = " WHERE " + " AND ".join(where)
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT l.assigned_userid AS userid,"
+                " COALESCE(w.name, l.assigned_userid) AS name,"
+                " COUNT(*) AS assigned,"
+                " SUM(CASE WHEN l.status<>'new' THEN 1 ELSE 0 END) AS handled,"
+                " SUM(CASE WHEN l.status='converted' THEN 1 ELSE 0 END) AS converted,"
+                " SUM(CASE WHEN l.status='invalid' THEN 1 ELSE 0 END) AS invalid,"
+                " SUM(CASE WHEN l.status='new' THEN 1 ELSE 0 END) AS pending,"
+                " SUM(CASE WHEN l.priority='P0' THEN 1 ELSE 0 END) AS p0,"
+                " SUM(CASE WHEN l.priority='P0' AND l.status='new' THEN 1 ELSE 0 END)"
+                "     AS p0_pending,"
+                " AVG(CASE WHEN l.status<>'new' AND l.assigned_at IS NOT NULL"
+                "     THEN (julianday(l.updated_at) - julianday(l.assigned_at)) * 24"
+                "     END) AS avg_hours"
+                f" FROM leads l LEFT JOIN lawyers w ON w.userid=l.assigned_userid{clause}"
+                " GROUP BY l.assigned_userid ORDER BY assigned DESC",
+                args,
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["avg_hours"] = round(d["avg_hours"], 1) if d["avg_hours"] else None
+            d["handled_rate"] = (
+                round(d["handled"] * 100 / d["assigned"]) if d["assigned"] else 0
+            )
+            out.append(d)
+        return out
+
+    def lead_stats(
+        self, assigned_userid: str | None = None,
+        since: str | None = None, until: str | None = None,
+    ) -> dict:
+        conds, args = [], []
         if assigned_userid is not None:
-            where, args = " WHERE assigned_userid=?", [assigned_userid]
+            conds.append("assigned_userid=?")
+            args.append(assigned_userid)
+        # 时间范围：管理员看的是「今天怎么样」「这个月怎么样」，
+        # 全时段累计数只在第一天有意义，之后它只会越来越像一个常数
+        if since:
+            conds.append("created_at>=?")
+            args.append(since)
+        if until:
+            conds.append("created_at<?")
+            args.append(until)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
         with self._conn() as conn:
             rows = conn.execute(
                 f"SELECT status, COUNT(*) AS n FROM leads{where} GROUP BY status", args
@@ -835,6 +898,24 @@ class Store:
         )
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(sql, (*args, limit, offset)).fetchall()]
+
+    def leads_in_range(self, since: str | None, until: str | None) -> list[dict]:
+        """某个时间段内进来的线索，按进线时间正序——导出的表要能顺着读下来。
+
+        导出不分页：管理员要的就是「这一段全部」，缺一行这张表就不能拿去开会。
+        """
+        conds, args = [], []
+        if since:
+            conds.append("created_at>=?")
+            args.append(since)
+        if until:
+            conds.append("created_at<?")
+            args.append(until)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(
+                f"SELECT * FROM leads{where} ORDER BY created_at", args
+            ).fetchall()]
 
     def count_leads(
         self, status: str | None = None, assigned_userid: str | None = None, *,

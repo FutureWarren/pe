@@ -120,6 +120,11 @@ button:disabled { opacity: .4; cursor: default; }
   max-width: 46vw; overflow: hidden; text-overflow: ellipsis;
 }
 .chip { background: var(--chip-bg); color: var(--ink-2); }
+/* 时间范围切换：选中态要一眼看得出，否则看板上的数字属于哪一段全靠猜 */
+button.chip { cursor: pointer; border: 1px solid transparent; padding: 6px 14px; font-size: 13px; }
+button.chip[aria-pressed="true"] {
+  background: var(--brand); color: #fff; font-weight: 600;
+}
 .chip .tx, .badge .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.badge, button.time { position: relative; }
 button.badge::after, button.time::after { content: ""; position: absolute; inset: -8px; }
@@ -538,6 +543,23 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
 
   <section id="tab-board" hidden>
     <div class="page-title">看板</div>
+    <!-- 时间切换：管理员看的是「今天怎么样」「这个月怎么样」。
+         全时段累计只在开张第一天有意义，之后它越来越像一个常数。 -->
+    <div class="row" style="gap:6px;margin-bottom:10px;align-items:center">
+      <button class="chip" data-range="today" onclick="setRange('today')">今天</button>
+      <button class="chip" data-range="7d" onclick="setRange('7d')">近 7 天</button>
+      <button class="chip" data-range="month" onclick="setRange('month')">本月</button>
+      <button class="chip" data-range="all" onclick="setRange('all')">全部</button>
+      <button class="btn-outline admin-only" style="margin-left:auto"
+        onclick="exportLeads()">${'' /* 见 exportLeads：管理员的主视图是那张表 */}
+        <svg class="ico"><use href="#i-clipboard"/></svg>导出客户档案
+      </button>
+    </div>
+    <div class="card admin-only" style="margin-bottom:10px" id="staffCard" hidden>
+      <div class="eyebrow" style="margin:0 0 2px">员工处理情况</div>
+      <div class="meta">分到几单、跟进了几单、多久跟上——线索的价值随时间塌得很快</div>
+      <div id="staffTable" style="margin-top:8px"></div>
+    </div>
     <div class="card" style="margin-bottom:10px">
       <div class="eyebrow" style="margin:0 0 2px">线索转化</div>
       <div class="meta">从 AI 首轮筛查到成交的全过程</div>
@@ -607,23 +629,27 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
     <span class="app">AI 响应助手</span>
     <div class="goldline"></div>
   </div>
-  <button class="navbtn on" id="nav-todo" onclick="setTab('todo')">
-    <svg class="ico"><use href="#i-clipboard"/></svg><span>待办</span><span class="nbadge" id="todoBadge" hidden></span>
-  </button>
-  <button class="navbtn" id="nav-leads" onclick="setTab('leads')" style="position:relative">
-    <svg class="ico"><use href="#i-flame"/></svg><span>线索</span><span class="nbadge" id="leadBadge" hidden></span>
-  </button>
-  <button class="navbtn" id="nav-log" onclick="setTab('log')">
-    <svg class="ico"><use href="#i-message"/></svg><span>记录</span>
-  </button>
-  <button class="navbtn" id="nav-board" onclick="setTab('board')">
+  <!-- 顺序即优先级。看板在最前：管理员每天第一眼要看的是「今天怎么样、
+       谁在跟、跟得如何」。AI 对话记录挪到最后并改名「AI 质检」——
+       律所方原话「不想看到那么多 AI 对话，那么乱」：它是偶尔抽查的工具，
+       不是每天要读的信息流，摆在第三位就等于天天在请人去读它。 -->
+  <button class="navbtn on" id="nav-board" onclick="setTab('board', true)">
     <svg class="ico"><use href="#i-chart"/></svg><span>看板</span>
   </button>
-  <button class="navbtn admin-only" id="nav-groups" onclick="setTab('groups')">
+  <button class="navbtn" id="nav-leads" onclick="setTab('leads', true)" style="position:relative">
+    <svg class="ico"><use href="#i-flame"/></svg><span>线索</span><span class="nbadge" id="leadBadge" hidden></span>
+  </button>
+  <button class="navbtn" id="nav-todo" onclick="setTab('todo', true)">
+    <svg class="ico"><use href="#i-clipboard"/></svg><span>待办</span><span class="nbadge" id="todoBadge" hidden></span>
+  </button>
+  <button class="navbtn admin-only" id="nav-groups" onclick="setTab('groups', true)">
     <svg class="ico"><use href="#i-users"/></svg><span>会话</span>
   </button>
-  <button class="navbtn admin-only" id="nav-team" onclick="setTab('team')">
+  <button class="navbtn admin-only" id="nav-team" onclick="setTab('team', true)">
     <svg class="ico"><use href="#i-briefcase"/></svg><span>团队</span>
+  </button>
+  <button class="navbtn" id="nav-log" onclick="setTab('log', true)">
+    <svg class="ico"><use href="#i-message"/></svg><span>AI 质检</span>
   </button>
   <div class="nav-foot">
     <button class="capsule" onclick="openStatusPanel()" style="width:100%">
@@ -872,6 +898,12 @@ function applyRole() {
   document.body.dataset.role = me ? me.role : "";
   // 律师身份若停在管理页（如上次会话是管理员），拉回待办
   if (me && me.role !== "admin" && (tab === "groups" || tab === "team")) setTab("todo");
+  // 管理员落在看板：他要的是「今天怎么样、谁在跟、跟得如何」，
+  // 而「待办」是干活的人的页面——所主任打开就看见一列待办事项，
+  // 第一反应是「这些都要我处理？」，那是把角色搞反了。
+  if (me && me.role === "admin" && tab === "todo" && !lsGet("tab_touched")) {
+    setTab("board");
+  }
 }
 async function whoami() {
   me = await api("/me");
@@ -1997,15 +2029,83 @@ async function submitFb(id) {
 }
 
 /* ============ 看板 ============ */
+/* 默认「今天」：管理员早上打开控制台，想知道的是昨天到今天发生了什么，
+   不是开张以来的累计——那个数字每天都差不多，看不出好坏。 */
+let boardRange = lsGet("board_range") || "today";
+
+function setRange(r) {
+  boardRange = r; lsSet("board_range", r);
+  lastSig.board = null;      // 换了时间范围必须重画，哪怕数字碰巧一样
+  loadBoard();
+}
+
+async function exportLeads() {
+  /* 管理员的主视图其实是一张表：能打印、能转发、能在会上过一遍。
+     用 fetch 而不是 <a download>，是因为要带令牌头。 */
+  toast("正在生成表格…");
+  try {
+    const r = await fetch(`/console/export/leads?range=${boardRange}`,
+      { headers: { "X-Admin-Token": token } });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const blob = await r.blob();
+    const name = decodeURIComponent(
+      (r.headers.get("content-disposition") || "").split("''")[1] || "客户档案.xlsx");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    a.remove(); URL.revokeObjectURL(url);
+    toast(`已导出 ${r.headers.get("x-row-count") || 0} 条`);
+  } catch (e) { toast("导出失败，请重试", false); }
+}
+
+/* 员工处理情况：管理员真正要看的那张表。
+   「在办数」只说明此刻手上压着多少，说明不了做得怎么样——
+   分到几单、跟进了几单、多久跟上，才是四个能问出话来的数。 */
+function renderStaff(staff, label) {
+  const card = document.getElementById("staffCard");
+  if (!card) return;
+  if (!staff.length) { card.hidden = true; return; }
+  card.hidden = false;
+  const head = `
+    <div class="row" style="flex-wrap:nowrap;padding:0 0 6px;border-bottom:1px solid var(--line)">
+      <span class="l" style="flex:2">律师</span>
+      <span class="l" style="flex:1;text-align:right">分到</span>
+      <span class="l" style="flex:1;text-align:right">已跟进</span>
+      <span class="l" style="flex:1;text-align:right">成交</span>
+      <span class="l" style="flex:1.4;text-align:right">平均响应</span>
+    </div>`;
+  document.getElementById("staffTable").innerHTML = head + staff.map(s => {
+    /* 未跟进的 P0 标红：这是唯一需要管理员当场做点什么的数 */
+    const warn = s.p0_pending > 0;
+    const hrs = s.avg_hours === null || s.avg_hours === undefined
+      ? "—" : (s.avg_hours < 1 ? "<1 小时" : `${s.avg_hours} 小时`);
+    return `
+      <div class="row" style="flex-wrap:nowrap;padding:8px 0;border-bottom:1px solid var(--line)">
+        <span style="flex:2;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${esc(s.name)}${warn ? ` <span class="pchip p0">P0×${s.p0_pending} 待联系</span>` : ""}
+        </span>
+        <span style="flex:1;text-align:right;font-size:14px">${s.assigned}</span>
+        <span style="flex:1;text-align:right;font-size:14px">${s.handled}
+          <span class="l">(${s.handled_rate}%)</span></span>
+        <span style="flex:1;text-align:right;font-size:14px;color:var(--ok)">${s.converted}</span>
+        <span style="flex:1.4;text-align:right;font-size:14px">${hrs}</span>
+      </div>`;
+  }).join("") +
+    `<div class="meta" style="margin-top:8px">「${esc(label)}」进线的线索 ·
+      平均响应 = 派单到首次标记「已联系」的间隔</div>`;
+}
+
 async function loadBoard() {
   const t = document.getElementById("tiles");
   if (!loadedOnce.board) t.innerHTML = skeleton();
+  document.querySelectorAll("[data-range]").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.range === boardRange)));
   let m;
-  try { m = await api("/metrics"); }
+  try { m = await api("/metrics?range=" + encodeURIComponent(boardRange)); }
   catch (e) { if (String(e.message) !== "401") t.innerHTML = errCard("loadBoard"); return; }
   loadedOnce.board = true;
   document.getElementById("boardFoot").textContent =
-    "统计口径：系统上线以来累计 · 每分钟自动更新" +
+    `统计口径：线索按「${m.range_label || "全部"}」计 · 每分钟自动更新` +
     (lastSuccess ? ` · 最后更新 ${fmtLast(lastSuccess)}` : "");
   const sig = JSON.stringify(m);
   if (lastSig.board === sig) return;
@@ -2068,6 +2168,7 @@ async function loadBoard() {
         ? `<div class="meta" style="margin-top:8px;color:var(--warn)">另有 ${m.leads_unassigned} 条线索未指派（名册启用前的旧单）</div>`
         : "");
   } else if (lbCard) lbCard.hidden = true;
+  renderStaff(m.staff || [], m.range_label || "");
   const order = [["answer", "--s1"], ["handoff", "--s2"], ["silence", "--s3"]];
   const total = order.reduce((s, [k]) => s + (m.by_action[k] || 0), 0);
   document.getElementById("dist").innerHTML = total === 0
@@ -2385,7 +2486,9 @@ async function saveGroup(isNew, aiEnabled) {
 }
 
 /* ============ 框架 ============ */
-function setTab(t) {
+function setTab(t, byUser = false) {
+  // 用户自己点过之后就别再自动跳转（管理员默认落看板只该发生在他没选择过时）
+  if (byUser) lsSet("tab_touched", "1");
   tab = t;
   for (const k of ["todo", "leads", "log", "board", "groups", "team"]) {
     document.getElementById("tab-" + k).hidden = k !== t;
