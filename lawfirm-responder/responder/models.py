@@ -58,6 +58,11 @@ class GroupProfile(BaseModel):
     # 会话已转人工接待：接手的律师 userid 与转接时刻（见 docs/kf-handoff.md）
     handoff_userid: str = ""
     handoff_at: datetime | None = None
+    # 客户跨会话记忆（见 responder/memory.py）：老客户回访时注入模型上下文。
+    # 只由已入库的事实拼装，不让模型自由发挥——记错一件客户没说过的事，
+    # 比不记得更伤人。
+    memory: str = ""
+    memory_at: datetime | None = None
 
     @property
     def is_douyin(self) -> bool:

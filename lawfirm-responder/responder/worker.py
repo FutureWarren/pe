@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from responder import lead
+from responder import lead, memory
 from responder.compliance.guard import guard
 from responder.engine import signals
 from responder.gateway import bot, douyin, wecom_kf
@@ -117,6 +117,7 @@ class Worker:
         except Exception:
             logger.exception("escalate_overdue failed")
         self._sweep_idle_leads(now)
+        self._sweep_customer_memory(now)
         self._sweep_lead_sla(now)
         self._sweep_winback(now)
         self._maybe_auto_update(now)
@@ -294,6 +295,32 @@ class Worker:
             self.pipeline.handle(msg)
         except Exception:
             logger.exception("message processing failed: %s", msg.msg_id)
+
+    def _sweep_customer_memory(self, now: datetime) -> None:
+        """对话安静下来后，把这通咨询沉淀成客户记忆（见 responder/memory.py）。
+
+        为什么在这里而不是每条消息都算：记忆是给**下一次**用的，
+        对话进行中反复重算既无意义又白烧 CPU；而且聊到一半的事实
+        往往还会被后面几句改写。
+
+        每次都覆盖重算，不做增量：记忆全部由已入库事实拼装，
+        重算的结果是确定的，反而比累积追加更不容易长歪。
+        """
+        s = self.pipeline.settings
+        if not s.knowledge_enabled:
+            return  # 与知识库共用一个开关：都属「长期记忆」
+        until = now - timedelta(seconds=s.lead_idle_seconds)
+        since = now - timedelta(seconds=max(s.lead_idle_seconds * 4, 86400))
+        for gid in self.store.idle_conversations(since, until):
+            group = self.store.get_group(gid)
+            if group is None:
+                continue
+            try:
+                text = memory.build_customer_memory(self.store, group, now=now)
+                if text and text != group.memory:
+                    self.store.set_memory(gid, text)
+            except Exception:
+                logger.exception("customer memory sweep failed: %s", gid)
 
     def _sweep_lead_sla(self, now: datetime) -> None:
         """线索超时未联系 → 追加提醒并抄送第二责任人。

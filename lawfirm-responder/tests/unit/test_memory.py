@@ -9,11 +9,15 @@
    而话术须人审后才能对客户生效（CLAUDE.md 合规护栏）。
 """
 
+import json
+from datetime import datetime, timedelta
+
 from responder import memory
 from responder.config import Settings
 from responder.models import Action, ClientStatus, Decision, GroupProfile, IncomingMessage
 from responder.service import Pipeline
 from responder.store.db import Store
+from responder.worker import Worker
 
 FEE_Q = "劳动仲裁怎么收费"
 FEE_A = "劳动仲裁按案件难度定，具体由律师了解情况后当面谈。"
@@ -178,3 +182,99 @@ def test_group_profile_is_untouched_by_recall(tmp_path):
     p = _pipeline(tmp_path, store)
     p._recall(_msg("劳动仲裁怎么收费？"), _answer_decision())
     assert store.get_group("g1").case_type == ""
+
+
+# ============================================================== 客户记忆
+# 老客户隔三周回来，AI 该记得他上次说过什么。没有这一层，每次回访都是从零开始，
+# 而客户那边的感受是「我上次不是都讲过了吗」——这句话一出，信任就没了。
+def _returning_customer(tmp_path, days_ago=5, **over):
+    """造一个上次来过、这次刚回来的客户。"""
+    cfg = dict(mode="live", db_path=str(tmp_path / "m.db"), llm_answer_enabled=False,
+               llm_refine_enabled=False, lead_brief_enabled=False)
+    cfg.update(over)
+    settings = Settings(**cfg)
+    store = Store(settings.db_path)
+    gid = "kf:wk:老客户"
+    store.upsert_group(GroupProfile(
+        group_id=gid, kf_open_kfid="wk", kf_external_userid="老客户",
+        client_status=ClientStatus.PROSPECT, case_type="劳动仲裁",
+    ))
+    store.upsert_lead(gid, {
+        "intent": "warm", "contact": "13712345678", "case_type": "劳动仲裁",
+        "key_facts": json.dumps(["拖欠三个月工资", "被辞退"], ensure_ascii=False),
+        "summary": "被拖欠工资并遭辞退",
+    })
+    old = (datetime.now() - timedelta(days=days_ago)).isoformat()
+    with store._conn() as conn:
+        conn.execute("UPDATE messages SET created_at=? WHERE group_id=?", (old, gid))
+    return store, settings, gid
+
+
+def test_memory_is_assembled_from_stored_facts_only(tmp_path):
+    """不让模型自由发挥：记错一件客户没说过的事，比完全不记得更伤人。"""
+    store, settings, gid = _returning_customer(tmp_path)
+    text = memory.build_customer_memory(store, store.get_group(gid))
+    assert "劳动仲裁" in text
+    assert "拖欠三个月工资" in text and "被辞退" in text
+    assert "已留联系方式" in text
+
+
+def test_sweep_writes_memory_after_the_conversation_goes_quiet(tmp_path):
+    """记忆是给下一次用的，对话进行中反复重算既无意义又白烧 CPU。"""
+    store, settings, gid = _returning_customer(tmp_path)
+    store.save_message(IncomingMessage(msg_id="m1", group_id=gid, sender_id="c",
+                                       content="公司拖欠我三个月工资"))
+    old = (datetime.now() - timedelta(hours=2)).isoformat()
+    with store._conn() as conn:
+        conn.execute("UPDATE messages SET created_at=? WHERE group_id=?", (old, gid))
+
+    worker = Worker(Pipeline(store, None, settings), store, None)
+    worker._sweep_customer_memory(datetime.now())
+    assert store.get_group(gid).memory
+
+
+def test_returning_customer_gets_the_memory_injected(tmp_path):
+    store, settings, gid = _returning_customer(tmp_path)
+    store.set_memory(gid, "上次咨询：5 天前 · 案由：劳动仲裁 · 他说过：拖欠三个月工资")
+    p = Pipeline(store, None, settings)
+    text = p._customer_memory(store.get_group(gid), [])
+    assert "劳动仲裁" in text
+    assert "不要再问一遍" in text  # 明确告诉模型别重复提问
+
+
+def test_memory_not_injected_mid_conversation(tmp_path):
+    """同一通对话里完整历史本来就在上下文，再塞一遍会让模型把上次和刚才搞混。"""
+    store, settings, gid = _returning_customer(tmp_path)
+    store.set_memory(gid, "上次咨询：5 天前 · 案由：劳动仲裁")
+    convo = [{"content": f"第{i}句", "sender_is_staff": False, "msg_type": "text"}
+             for i in range(4)]
+    assert Pipeline(store, None, settings)._customer_memory(store.get_group(gid), convo) == ""
+
+
+def test_signed_clients_do_not_get_a_recap(tmp_path):
+    """已委托客户的事律师全程在跟，AI 复述一段旧摘要只会显得多余。"""
+    store, settings, gid = _returning_customer(tmp_path)
+    store.set_memory(gid, "上次咨询：5 天前")
+    g = store.get_group(gid)
+    g.client_status = ClientStatus.SIGNED
+    store.upsert_group(g)
+    assert Pipeline(store, None, settings)._customer_memory(store.get_group(gid), []) == ""
+
+
+def test_memory_can_be_cleared(tmp_path):
+    """客户要求删除时得能删干净（PIPL）。"""
+    store, settings, gid = _returning_customer(tmp_path)
+    store.set_memory(gid, "一些记忆")
+    store.set_memory(gid, "")
+    g = store.get_group(gid)
+    assert g.memory == "" and g.memory_at is None
+
+
+def test_ordinary_profile_updates_do_not_wipe_memory(tmp_path):
+    """记忆是后台异步写的，而建档更新是高频的——混在一起会被随手覆盖掉。"""
+    store, settings, gid = _returning_customer(tmp_path)
+    store.set_memory(gid, "上次咨询：5 天前")
+    g = store.get_group(gid)
+    g.case_stage = "已立案"
+    store.upsert_group(g)
+    assert store.get_group(gid).memory == "上次咨询：5 天前"

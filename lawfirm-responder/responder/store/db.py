@@ -167,6 +167,10 @@ _ADDED_COLUMNS = {
         # 必须显式记状态，否则 AI 会抢在律师前面回话。
         "handoff_userid": "TEXT DEFAULT ''",
         "handoff_at": "TEXT",
+        # 客户跨会话记忆：这个人是谁、什么案子、上次聊到哪一步（见 responder/memory.py）。
+        # 老客户隔三周回来，AI 该记得他——没有这一列，每次回访都是从零开始。
+        "memory": "TEXT DEFAULT ''",
+        "memory_at": "TEXT",
     },
     # parts：这条回复实际拆成了几条平台消息。抖音按**条**限额（同一窗口最多 6 条），
     # 一行 replies 可能对应 3 条真实消息，不记下来就算不准配额。
@@ -277,6 +281,19 @@ class Store:
         d = dict(row)
         d["ai_enabled"] = bool(d["ai_enabled"])
         return GroupProfile(**d)
+
+    def set_memory(self, group_id: str, text: str) -> None:
+        """写入客户跨会话记忆。空串 = 清空（客户要求删除时用）。
+
+        单独一个方法而不是走 upsert_group：记忆是后台异步生成的，
+        而 upsert_group 会被消息处理链高频调用——混在一起，
+        一次普通的建档更新就会把刚算好的记忆覆盖成空。
+        """
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE groups SET memory=?, memory_at=? WHERE group_id=?",
+                (text, datetime.now().isoformat() if text else None, group_id),
+            )
 
     def set_handoff(self, group_id: str, userid: str) -> None:
         """标记会话已转给该律师人工接待（userid 为空 = 收回给 AI）。"""

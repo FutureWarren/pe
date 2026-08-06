@@ -32,6 +32,7 @@ def _llm_answer_body(
     settings: Settings,
     now: datetime,
     knowledge_text: str = "",
+    memory_text: str = "",
 ) -> str | None:
     """取模型生成的正文并净化；不可用/失败/示弱/净化判废 → None。"""
     if not settings.llm_answer_enabled:
@@ -39,6 +40,7 @@ def _llm_answer_body(
     body = llm.generate_answer_body(
         msg.content,
         knowledge_text=knowledge_text,
+        memory_text=memory_text,
         case_type=group.case_type,
         client_status_label=_STATUS_LABEL[group.client_status],
         case_stage=group.case_stage,
@@ -66,6 +68,7 @@ def generate(
     ask_contact: bool = False,
     next_step: bool = False,
     knowledge_text: str = "",
+    memory_text: str = "",
     settings: Settings | None = None,
     now: datetime | None = None,
 ) -> GuardResult | None:
@@ -141,7 +144,7 @@ def generate(
         return guard(text, Action.HANDOFF, fallback)
 
     # ANSWER：优先 Claude 生成一般性框架；失败/示弱时确定性降级为承接式回答
-    body = _llm_answer_body(msg, group, history, settings, now, knowledge_text)
+    body = _llm_answer_body(msg, group, history, settings, now, knowledge_text, memory_text)
     if body:
         text = templates.answer_scaffold(
             group, body,

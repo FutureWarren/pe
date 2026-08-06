@@ -342,3 +342,44 @@ def test_report_lists_each_kf_account(env):
     snd = Snd()
     Runner(settings, store, sender=snd, kf_client=FakeKf(servicers=("a", "b"))).run_pending()
     assert "客服账号「在线咨询」接待人 2 位" in snd.direct[0][1]
+
+
+def test_backfill_memory_covers_conversations_the_sweep_can_never_see(env):
+    """定时扫描只回看 24 小时。功能上线前就安静下来的会话落在窗口外，
+    永远等不到那次扫描——而它们恰恰是最早那批客户，最可能回访。"""
+    import json
+    from datetime import datetime, timedelta
+
+    from responder.models import ClientStatus, GroupProfile
+
+    repo, store, settings = env
+    gid = "kf:wk:old"
+    store.upsert_group(GroupProfile(
+        group_id=gid, kf_open_kfid="wk", kf_external_userid="old",
+        client_status=ClientStatus.PROSPECT, case_type="劳动仲裁",
+    ))
+    store.upsert_lead(gid, {
+        "intent": "warm", "contact": "137",
+        "key_facts": json.dumps(["拖欠三个月工资"], ensure_ascii=False),
+    })
+    with store._conn() as conn:  # 半个月前的老会话，早已不在扫描窗口内
+        conn.execute("UPDATE leads SET created_at=?",
+                     ((datetime.now() - timedelta(days=15)).isoformat(),))
+
+    write_commands(repo, [{"id": "c1", "op": "backfill_memory"}])
+    Runner(settings, store, sender=Snd()).run_pending()
+
+    assert "劳动仲裁" in store.get_group(gid).memory
+
+
+def test_backfill_does_not_overwrite_existing_memory(env):
+    repo, store, settings = env
+    from responder.models import ClientStatus, GroupProfile
+
+    store.upsert_group(GroupProfile(group_id="kf:wk:x", kf_open_kfid="wk",
+                                    kf_external_userid="x",
+                                    client_status=ClientStatus.PROSPECT))
+    store.set_memory("kf:wk:x", "人工写好的记忆")
+    write_commands(repo, [{"id": "c1", "op": "backfill_memory"}])
+    Runner(settings, store, sender=Snd()).run_pending()
+    assert store.get_group("kf:wk:x").memory == "人工写好的记忆"

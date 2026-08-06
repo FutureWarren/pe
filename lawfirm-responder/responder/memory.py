@@ -26,8 +26,10 @@
 模型会努力把它用上，于是答非所问，而且答得理直气壮。
 """
 
+import json
 import logging
 import re
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -88,3 +90,64 @@ def format_for_prompt(hits: list[dict]) -> str:
         lines.append(f"问：{h.get('question', '').strip()}")
         lines.append(f"本所口径：{h.get('answer', '').strip()}")
     return "\n".join(lines)
+
+
+# ================================================================ 客户记忆
+# 老客户隔三周回来，AI 该记得他上次说过什么。没有这一层，每次回访都是从零开始——
+# 而客户那边的感受是「我上次不是都讲过了吗」，这句话一出，信任就没了。
+_STAGE_ZH = {
+    "new": "还没联系上",
+    "contacted": "律师已联系过",
+    "converted": "已委托",
+    "invalid": "已标记无效",
+}
+
+
+def build_customer_memory(store, group, now: datetime | None = None) -> str:
+    """从**已入库的事实**拼一段客户记忆。不让模型自由发挥。
+
+    这是刻意的取舍：模型写摘要更流畅，但它会补细节。
+    记错一件客户没说过的事（「上次您说要离婚」——他没说过），
+    比完全不记得更伤人，而且当场就穿帮。所以这里只搬运确定的东西：
+    上次什么时候来的、什么案由、他自己说过的关键事实、进行到哪一步。
+    """
+    now = now or datetime.now()
+    lead = store.get_lead(group.group_id) or {}
+    bits: list[str] = []
+
+    last = store.last_customer_message_at(group.group_id)
+    if last:
+        days = (now - last).days
+        when = "今天" if days == 0 else ("昨天" if days == 1 else f"{days} 天前")
+        bits.append(f"上次咨询：{when}（{last:%m月%d日}）")
+
+    case = lead.get("case_type") or group.case_type
+    if case:
+        bits.append(f"案由：{case}")
+
+    try:
+        facts = json.loads(lead.get("key_facts") or "[]")
+    except (ValueError, TypeError):
+        facts = []
+    if facts:
+        bits.append("他说过：" + "；".join(str(f) for f in facts[:4]))
+
+    if lead.get("contact"):
+        bits.append("已留联系方式")
+    if lead.get("status"):
+        bits.append(f"跟进状态：{_STAGE_ZH.get(lead['status'], lead['status'])}")
+    if group.handoff_userid:
+        bits.append("上次已转由律师接手")
+
+    return " · ".join(bits)
+
+
+def format_customer_memory(text: str) -> str:
+    """注入 prompt 前的包装。空则返回空串，整段不出现。"""
+    if not text.strip():
+        return ""
+    return (
+        f"{text.strip()}\n"
+        "（这些是他此前说过的，不要再问一遍已经知道的信息；"
+        "也不要主动复述得太细，像同事之间对过一次就行。）"
+    )

@@ -78,6 +78,7 @@ def answer_user_prompt(
     is_night: bool,
     is_one_on_one: bool = False,
     knowledge_text: str = "",
+    memory_text: str = "",
 ) -> str:
     """回答生成的 user 消息：全部易变上下文在此拼装。
 
@@ -86,6 +87,10 @@ def answer_user_prompt(
     knowledge_text 是检索到的本所口径（`responder/memory.py`）。放在客户问题
     **之前**：模型读到问题时口径已经在手上了，不必回头找。检索不到就传空串，
     整段不出现——塞一条不相关的知识比不塞更糟，模型会努力把它用上。
+
+    memory_text 是这位客户上一次来的情况。只在**回访**时给：同一通对话里
+    有完整历史，再塞一遍等于重复；而老客户隔几周回来，「上次不是都讲过了吗」
+    这句话一出，前面攒的信任就没了。
     """
     lines = [
         "【背景】",
@@ -99,6 +104,8 @@ def answer_user_prompt(
         lines.append("当前是深夜时段，客户此时发问往往带着焦虑，语气要更柔和。")
     if history_text:
         lines += ["", "【最近对话摘录（旧→新）】", history_text]
+    if memory_text:
+        lines += ["", "【这位客户此前来过，以下是上次的情况】", memory_text]
     if knowledge_text:
         lines += [
             "", "【本所既定口径（优先照此回答，但仍受你的硬性边界约束）】",

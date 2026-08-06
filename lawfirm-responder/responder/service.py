@@ -166,6 +166,7 @@ class Pipeline:
             include_cta=not self._recent_cta(msg.group_id),
             ask_contact=want_contact, next_step=want_next_step,
             knowledge_text=self._recall(msg, decision),
+            memory_text=self._customer_memory(group, convo),
         )
         reply_text = None
         if result:
@@ -379,6 +380,32 @@ class Pipeline:
         except Exception:
             logger.exception("knowledge recall failed: %s", msg.group_id)
             return ""  # 知识库出问题不能拖垮回复——没有它照样能答
+
+    def _customer_memory(self, group: GroupProfile, convo: list[dict]) -> str:
+        """回访客户才注入上次的情况（见 responder/memory.py）。
+
+        **只在回访时给**：同一通对话里完整历史本来就在上下文里，再塞一遍
+        既占地方又可能让模型把「上次」和「刚才」搞混。
+        判据是本次会话的消息条数——刚开口一两句就说明这是新的一轮。
+
+        不给已委托客户：他的事律师全程在跟，AI 复述一段旧摘要只会显得多余。
+        """
+        if not (self.settings.knowledge_enabled and group.is_kf and group.memory):
+            return ""
+        if group.client_status != ClientStatus.PROSPECT:
+            return ""
+        gap = self.settings.lead_session_gap_seconds
+        recent = [
+            m for m in convo
+            if not m.get("sender_is_staff") and m.get("msg_type") != "event"
+        ]
+        # 本次会话已经聊开了（超过两句）就不必再提上次——上下文里有的是内容
+        if len(recent) > 2:
+            return ""
+        last = self.store.last_customer_message_at(group.group_id)
+        if last and (datetime.now() - last).total_seconds() < gap:
+            return ""  # 还在同一通对话里
+        return memory.format_customer_memory(group.memory)
 
     def _with_intro(self, text: str, decision: Decision, group: GroupProfile) -> str:
         """本通对话的第一条回复补一句自报家门。

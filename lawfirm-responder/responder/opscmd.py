@@ -247,6 +247,26 @@ class Runner:
 
         return build_digest(self.store, self.settings, days=int(item.get("days", 1)))
 
+    def _op_backfill_memory(self, item: dict) -> str:
+        """给存量会话补建客户记忆。
+
+        定时扫描只回看 24 小时（够用且便宜），但**功能上线之前**就已经安静下来的
+        会话落在窗口外，永远等不到那一次扫描——它们恰恰是最早那批客户，
+        最可能回访，也最该被记住。这条指令把历史补齐，跑一次就够。
+        """
+        from responder import memory
+
+        done = 0
+        for row in self.store.list_groups():
+            group = self.store.get_group(row["group_id"])
+            if group is None or group.memory:
+                continue
+            text = memory.build_customer_memory(self.store, group)
+            if text:
+                self.store.set_memory(group.group_id, text)
+                done += 1
+        return f"已为 {done} 个存量会话补建客户记忆"
+
     def _op_report(self, item: dict) -> str:
         """把关键状态汇报一遍——远程排障时省掉一整轮来回提问。"""
         s = self.settings
