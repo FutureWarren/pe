@@ -77,10 +77,15 @@ def answer_user_prompt(
     history_text: str,
     is_night: bool,
     is_one_on_one: bool = False,
+    knowledge_text: str = "",
 ) -> str:
     """回答生成的 user 消息：全部易变上下文在此拼装。
 
     渠道（群聊 / 一对一私信）也是易变上下文，必须在这里给——system 保持静态。
+
+    knowledge_text 是检索到的本所口径（`responder/memory.py`）。放在客户问题
+    **之前**：模型读到问题时口径已经在手上了，不必回头找。检索不到就传空串，
+    整段不出现——塞一条不相关的知识比不塞更糟，模型会努力把它用上。
     """
     lines = [
         "【背景】",
@@ -94,6 +99,12 @@ def answer_user_prompt(
         lines.append("当前是深夜时段，客户此时发问往往带着焦虑，语气要更柔和。")
     if history_text:
         lines += ["", "【最近对话摘录（旧→新）】", history_text]
+    if knowledge_text:
+        lines += [
+            "", "【本所既定口径（优先照此回答，但仍受你的硬性边界约束）】",
+            knowledge_text,
+            "注：口径与边界冲突时以边界为准——例如口径里若含金额，不要复述金额。",
+        ]
     lines += [
         "", "【客户刚才的问题】", question.strip(),
         "", "请按你的角色和边界要求回复这条问题。",

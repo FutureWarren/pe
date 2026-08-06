@@ -9,7 +9,7 @@ import re
 import time
 from datetime import datetime, timedelta
 
-from responder import lead
+from responder import lead, memory
 from responder.config import Settings, get_settings
 from responder.engine import llm, rules, signals
 from responder.engine.decision import decide, wait_seconds
@@ -165,6 +165,7 @@ class Pipeline:
             msg, decision, group, history=history, settings=self.settings,
             include_cta=not self._recent_cta(msg.group_id),
             ask_contact=want_contact, next_step=want_next_step,
+            knowledge_text=self._recall(msg, decision),
         )
         reply_text = None
         if result:
@@ -353,6 +354,31 @@ class Pipeline:
         )
         logger.info("handoff: %s → %s", group.group_id, target)
         return True
+
+    def _recall(self, msg: IncomingMessage, decision: Decision) -> str:
+        """检索本所既定口径，注入这一轮的回答（见 responder/memory.py）。
+
+        只在**直接回答**时检索：承接类走确定性模板，不进模型，注了也没人读。
+        只用 approved 条目——草稿是机器提炼或刚导入的，没经人审的话术不能对客户生效
+        （CLAUDE.md 合规护栏）。
+
+        检索不到就返回空串，整段不出现在 prompt 里。塞一条不相关的知识
+        比不塞更糟：模型会努力把它用上，于是答非所问，而且答得理直气壮。
+        """
+        if decision.action != Action.ANSWER or not self.settings.knowledge_enabled:
+            return ""
+        try:
+            entries = self.store.list_knowledge(status="approved")
+            hits = memory.search(entries, msg.content, limit=self.settings.knowledge_top_k)
+            if not hits:
+                return ""
+            # 记下哪几条真被用到：用不上的条目该被清掉，而不是越攒越多
+            self.store.bump_knowledge_hits([h["id"] for h in hits])
+            decision.reasons.append(f"kb:{','.join(str(h['id']) for h in hits)}")
+            return memory.format_for_prompt(hits)
+        except Exception:
+            logger.exception("knowledge recall failed: %s", msg.group_id)
+            return ""  # 知识库出问题不能拖垮回复——没有它照样能答
 
     def _with_intro(self, text: str, decision: Decision, group: GroupProfile) -> str:
         """本通对话的第一条回复补一句自报家门。

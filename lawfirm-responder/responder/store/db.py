@@ -126,6 +126,21 @@ CREATE TABLE IF NOT EXISTS lawyers (
     last_assigned_at TEXT,            -- 负载均衡的平局裁决：最久没接单的先接
     created_at TEXT
 );
+-- 律所知识库（见 responder/memory.py）。status 是合规闸门：
+-- 导入/自动提炼的一律 draft，人工审核过才 approved，只有 approved 会被 AI 引用。
+-- 话术须人工审核后合并（CLAUDE.md），机器自己写的知识不能直接对客户生效。
+CREATE TABLE IF NOT EXISTS knowledge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    tags TEXT DEFAULT '',
+    source TEXT DEFAULT '',          -- douyin | manual | lawyer（律师实答提炼）
+    status TEXT DEFAULT 'draft',     -- draft | approved | retired
+    hits INTEGER DEFAULT 0,          -- 被引用次数：哪些条目真在起作用
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_status ON knowledge(status);
 -- 已执行过的运维指令（见 responder/opscmd.py）。存在的唯一理由是幂等：
 -- 自动升级每 5 分钟拉一次仓库，没有这张表，一条「重置令牌」会每五分钟重置一次。
 CREATE TABLE IF NOT EXISTS ops_commands (
@@ -505,6 +520,70 @@ class Store:
                 (group_id, limit),
             ).fetchall()
         return [dict(r) for r in reversed(rows)]
+
+    # ------------------------------------------------------------ 知识库
+    def add_knowledge(
+        self, question: str, answer: str, *, tags: str = "",
+        source: str = "manual", status: str = "draft",
+    ) -> int | None:
+        """新增一条知识。同一个问题重复导入只更新答案，不堆重复条目。
+
+        去重键是**归一化后的问题**：抖音那份问答里同一个问题常有
+        「怎么收费」「怎么收费？」两种写法，按原文去重等于没去重。
+        """
+        from responder import memory
+
+        q = (question or "").strip()
+        a = (answer or "").strip()
+        if not q or not a:
+            return None
+        key = memory._norm(q)
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            for row in conn.execute("SELECT id, question FROM knowledge").fetchall():
+                if memory._norm(row["question"]) == key:
+                    conn.execute(
+                        "UPDATE knowledge SET answer=?, tags=?, source=?, updated_at=?"
+                        " WHERE id=?",
+                        (a, tags, source, now, row["id"]),
+                    )
+                    return int(row["id"])
+            cur = conn.execute(
+                "INSERT INTO knowledge(question, answer, tags, source, status,"
+                " created_at, updated_at) VALUES(?,?,?,?,?,?,?)",
+                (q, a, tags, source, status, now, now),
+            )
+            return int(cur.lastrowid)
+
+    def list_knowledge(self, status: str | None = None, limit: int = 500) -> list[dict]:
+        sql = "SELECT * FROM knowledge"
+        args: tuple = ()
+        if status:
+            sql += " WHERE status=?"
+            args = (status,)
+        sql += " ORDER BY hits DESC, id DESC LIMIT ?"
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(sql, (*args, limit)).fetchall()]
+
+    def set_knowledge_status(self, kid: int, status: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE knowledge SET status=?, updated_at=? WHERE id=?",
+                (status, datetime.now().isoformat(), kid),
+            )
+
+    def delete_knowledge(self, kid: int) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM knowledge WHERE id=?", (kid,))
+
+    def bump_knowledge_hits(self, ids: list[int]) -> None:
+        """记下哪几条真被用到了——用不上的条目就该被清掉，而不是越攒越多。"""
+        if not ids:
+            return
+        with self._conn() as conn:
+            conn.executemany(
+                "UPDATE knowledge SET hits=hits+1 WHERE id=?", [(i,) for i in ids]
+            )
 
     def set_note(self, key: str, text: str) -> None:
         """运维小记：给远程排障留一行能读到的证据（复用 ops_commands 表）。

@@ -242,6 +242,7 @@ def generate_answer_body(
     history_text: str = "",
     is_night: bool = False,
     is_one_on_one: bool = False,
+    knowledge_text: str = "",
     max_tokens: int = 500,
     timeout: float = 15.0,
     settings: Settings | None = None,
@@ -255,7 +256,7 @@ def generate_answer_body(
         return None
     user = prompts.answer_user_prompt(
         question, case_type, client_status_label, case_stage, history_text,
-        is_night, is_one_on_one,
+        is_night, is_one_on_one, knowledge_text=knowledge_text,
     )
     try:
         if provider.name == "deepseek":

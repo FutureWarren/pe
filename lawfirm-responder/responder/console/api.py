@@ -1039,6 +1039,101 @@ def metrics(
     return out
 
 
+# ================================================================ 知识库
+class KnowledgeIn(BaseModel):
+    question: str
+    answer: str
+    tags: str = ""
+    source: str = "manual"
+
+
+@router.get("/knowledge")
+def list_knowledge(
+    status: str = "", store: Store = Depends(get_store),
+    _: Principal = Depends(require_admin),
+):
+    """知识库条目。hits 排在前面——用不上的条目该被清掉，而不是越攒越多。"""
+    return {
+        "items": store.list_knowledge(status=status or None),
+        "counts": {
+            s: len(store.list_knowledge(status=s))
+            for s in ("draft", "approved", "retired")
+        },
+    }
+
+
+@router.post("/knowledge")
+def add_knowledge(
+    body: KnowledgeIn, store: Store = Depends(get_store),
+    _: Principal = Depends(require_admin),
+):
+    kid = store.add_knowledge(
+        body.question, body.answer, tags=body.tags, source=body.source,
+    )
+    if kid is None:
+        raise HTTPException(400, "问题和答案都不能为空")
+    return {"ok": True, "id": kid}
+
+
+@router.post("/knowledge/{kid}/status")
+def set_knowledge_status(
+    kid: int, body: dict, store: Store = Depends(get_store),
+    _: Principal = Depends(require_admin),
+):
+    """审核开关。**只有 approved 会被 AI 引用**——导入与机器提炼都落 draft。
+
+    这不是流程洁癖：知识库条目就是话术，而话术须人工审核后才能对客户生效
+    （CLAUDE.md 合规护栏）。一条写错的口径会被 AI 一字不差地重复几百遍。
+    """
+    status = str(body.get("status", "")).strip()
+    if status not in ("draft", "approved", "retired"):
+        raise HTTPException(400, "状态只能是 draft / approved / retired")
+    store.set_knowledge_status(kid, status)
+    return {"ok": True}
+
+
+@router.delete("/knowledge/{kid}")
+def delete_knowledge(
+    kid: int, store: Store = Depends(get_store),
+    _: Principal = Depends(require_admin),
+):
+    store.delete_knowledge(kid)
+    return {"ok": True}
+
+
+@router.post("/knowledge/import")
+async def import_knowledge(
+    request: Request, source: str = "douyin",
+    store: Store = Depends(get_store), _: Principal = Depends(require_admin),
+):
+    """批量导入问答（CSV / TSV / 每行「问题<TAB>答案」）。
+
+    抖音「自动回复—问答知识」导出的就是这个形状。一律落 draft：
+    那 70 条是给抖音写的，语气和口径未必适用于微信侧，得人过一遍。
+    """
+    raw = (await request.body()).decode("utf-8-sig", errors="replace")
+    if not raw.strip():
+        raise HTTPException(400, "没有收到内容")
+    added, skipped = 0, 0
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        # 制表符优先：问答里逗号很常见，按逗号切会把答案切碎
+        parts = line.split("\t") if "\t" in line else line.split(",", 1)
+        if len(parts) < 2:
+            skipped += 1
+            continue
+        q, a = parts[0].strip().strip('"'), parts[1].strip().strip('"')
+        if q in ("问题", "标准问题", "question") or not q or not a:
+            skipped += 1  # 表头或残行
+            continue
+        if store.add_knowledge(q, a, source=source, status="draft"):
+            added += 1
+        else:
+            skipped += 1
+    return {"ok": True, "added": added, "skipped": skipped}
+
+
 class TakeOver(BaseModel):
     userid: str = ""  # 留空 = 转给操作者自己
 

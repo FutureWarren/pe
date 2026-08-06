@@ -138,6 +138,13 @@ class Settings(BaseSettings):
     # 注入模型的群聊上下文条数
     history_window: int = 10
 
+    # ---- 长期记忆：律所自己的知识库（见 responder/memory.py）
+    # 检索到的「本所口径」注入模型上下文，让 AI 答得像你们所而不是像一本教科书。
+    # 只有人工审核过（approved）的条目会被引用——话术须人审是合规护栏。
+    knowledge_enabled: bool = True
+    # 注入几条。多了会挤占上下文、也更容易把不相关的口径带进来。
+    knowledge_top_k: int = 3
+
     # ---- 线索简报：筛查完成后把咨询整理成交接单推给接待人
     lead_brief_enabled: bool = True
     # 全量推送（业务决策 2026-08，律所方：「我们有很多的客服，全部都得推给客服，
