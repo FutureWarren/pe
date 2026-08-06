@@ -582,6 +582,33 @@ class Store:
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(sql, (*args, limit)).fetchall()]
 
+    def get_knowledge(self, kid: int) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM knowledge WHERE id=?", (kid,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def update_knowledge(
+        self, kid: int, *, question: str, answer: str, tags: str = "",
+    ) -> bool:
+        """改写一条知识。**改完一律退回 draft**——审核过的是那个旧答案。
+
+        导入的抖音话术里有大半要重写措辞（比如满屏的「免费」），
+        改完自动生效就等于绕过人工审核，那道闸就白设了。
+        """
+        q = (question or "").strip()
+        a = (answer or "").strip()
+        if not q or not a:
+            return False
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE knowledge SET question=?, answer=?, tags=?, status='draft',"
+                " updated_at=? WHERE id=?",
+                (q, a, tags, datetime.now().isoformat(), kid),
+            )
+            return cur.rowcount > 0
+
     def set_knowledge_status(self, kid: int, status: str) -> None:
         with self._conn() as conn:
             conn.execute(

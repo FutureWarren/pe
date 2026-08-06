@@ -434,6 +434,7 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3.5 19.5c0-3.2 2.4-5.3 5.5-5.3s5.5 2.1 5.5 5.3"/><circle cx="17" cy="9.5" r="2.4"/><path d="M17.5 14.4c2 .3 3.5 1.9 3.5 4.1"/></symbol>
   <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5z"/></symbol>
   <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M9 10h6M9 14h6"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4 18-7z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
@@ -631,6 +632,28 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
       <svg class="ico"><use href="#i-refresh"/></svg>自动分派未指派线索<span id="bulkAssignN"></span>
     </button>
   </section>
+
+  <!-- 知识库：AI 答客户时会引用的所内口径。**只有「已启用」的条目会被引用**，
+       导入和机器提炼一律先落「待审核」——条目就是话术，一条写错的口径会被
+       AI 一字不差地重复几百遍，所以必须有人过一眼才对客户生效。 -->
+  <section id="tab-kb" hidden>
+    <div class="page-title">知识库</div>
+    <div class="meta" style="margin-bottom:10px">
+      所内统一口径。AI 遇到相近的问题会照这里的说法答；审核通过后才生效。
+    </div>
+    <div class="seg" style="margin-bottom:10px">
+      <button id="segKbDraft" class="on" onclick="setKbView('draft')">待审核<span id="kbNDraft"></span></button>
+      <button id="segKbOk" onclick="setKbView('approved')">已启用<span id="kbNOk"></span></button>
+      <button id="segKbOff" onclick="setKbView('retired')">已停用<span id="kbNOff"></span></button>
+    </div>
+    <div id="kbList"></div>
+    <button class="btn-outline" style="width:100%" onclick="editKnowledge(null)">
+      <svg class="ico"><use href="#i-plus"/></svg>新增一条口径
+    </button>
+    <button class="btn-outline" style="width:100%;margin-top:8px" onclick="openKbImport()">
+      <svg class="ico"><use href="#i-plus"/></svg>批量粘贴导入
+    </button>
+  </section>
 </main>
 
 <nav id="nav">
@@ -659,6 +682,9 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
   </button>
   <button class="navbtn admin-only" id="nav-team" onclick="setTab('team', true)">
     <svg class="ico"><use href="#i-briefcase"/></svg><span>团队</span>
+  </button>
+  <button class="navbtn admin-only" id="nav-kb" onclick="setTab('kb', true)" style="position:relative">
+    <svg class="ico"><use href="#i-book"/></svg><span>知识库</span><span class="nbadge" id="kbBadge" hidden></span>
   </button>
   <button class="navbtn" id="nav-log" onclick="setTab('log', true)">
     <svg class="ico"><use href="#i-message"/></svg><span>AI 质检</span>
@@ -2144,6 +2170,150 @@ function renderStaff(staff, label) {
       平均响应 = 派单到首次标记「已联系」的间隔</div>`;
 }
 
+/* ============ 知识库 ============ */
+let kbView = "draft", kbCache = [];
+function setKbView(v) {
+  kbView = v;
+  for (const [id, k] of [["segKbDraft", "draft"], ["segKbOk", "approved"], ["segKbOff", "retired"]]) {
+    document.getElementById(id).classList.toggle("on", k === v);
+  }
+  loadKb();
+}
+async function loadKb() {
+  const el = document.getElementById("kbList");
+  if (!loadedOnce.kb) el.innerHTML = skeleton();
+  let data;
+  try { data = await api("/knowledge?status=" + kbView); }
+  catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadKb"); return; }
+  loadedOnce.kb = true;
+  kbCache = data.items || [];
+  const c = data.counts || {};
+  const n = (id, v) => { document.getElementById(id).textContent = v ? ` ${v}` : ""; };
+  n("kbNDraft", c.draft); n("kbNOk", c.approved); n("kbNOff", c.retired);
+  /* 待审核的条目挂角标：导进来没人审 = AI 一条也用不上，而看板上
+     什么都不会提示，很容易就这么放着了 */
+  const badge = document.getElementById("kbBadge");
+  badge.hidden = !c.draft;
+  badge.textContent = c.draft > 99 ? "99+" : c.draft;
+  if (!kbCache.length) {
+    el.innerHTML = kbView === "draft"
+      ? emptyState("book", "没有待审核的口径",
+          "把常见问答导进来（抖音后台那份就可以），审核通过后 AI 遇到相近问题就照这个说法答。")
+      : emptyState("book", kbView === "approved" ? "还没有启用的口径" : "没有停用的条目",
+          "「已启用」的条目才会被 AI 引用。");
+    return;
+  }
+  el.innerHTML = kbCache.map(k => {
+    const bad = (k.flagged || []).length;
+    return `
+    <div class="card">
+      <div class="row" style="flex-wrap:nowrap">
+        <b style="font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.question)}</b>
+        ${bad ? `<span class="badge warn" style="flex:none">合规待改</span>` : ""}
+        <span class="meta" style="margin-left:auto;flex:none">${k.hits ? "被引用 " + k.hits + " 次" : "未被引用"}</span>
+      </div>
+      <div style="font-size:14px;margin-top:6px;white-space:pre-wrap;line-height:1.6">${esc(k.answer)}</div>
+      ${bad ? `<div class="meta" style="margin-top:6px;color:var(--warn)">
+        ${ico("alert")} 踩到禁止事项：${esc(k.flagged.join("、"))}——改写措辞后才能通过审核</div>` : ""}
+      <div class="meta" style="margin-top:4px">来源：${esc(kbSource(k.source))}</div>
+      <div class="row fb-row">
+        ${k.status !== "approved"
+          ? `<button class="btn-text" data-act="kbok" data-kid="${k.id}">${ico("check")}通过并启用</button>` : ""}
+        ${k.status === "approved"
+          ? `<button class="btn-text muted" data-act="kboff" data-kid="${k.id}">停用</button>` : ""}
+        <button class="btn-text muted" data-act="kbedit" data-kid="${k.id}">改写</button>
+        <button class="btn-text muted" style="margin-left:auto" data-act="kbdel" data-kid="${k.id}">删除</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+/* 角标跨页保持新鲜：导进来一批没人审 = AI 一条也用不上，
+   而这件事在别的页面上没有任何提示，很容易就这么放着了。 */
+async function refreshKbBadge() {
+  const badge = document.getElementById("kbBadge");
+  if (!badge) return;
+  try {
+    const d = await api("/knowledge?status=draft");
+    const n = (d.counts || {}).draft || 0;
+    badge.hidden = !n;
+    badge.textContent = n > 99 ? "99+" : n;
+  } catch (e) { /* 静默：角标不是关键路径 */ }
+}
+function kbSource(s) {
+  return { douyin: "抖音后台导入", manual: "手工录入", lawyer: "律师实答提炼" }[s] || (s || "—");
+}
+async function setKbStatus(kid, status) {
+  try { await api(`/knowledge/${kid}/status`, { method: "POST", body: JSON.stringify({ status }) }); }
+  catch (e) { toast(e.detail || "操作失败，请重试", false); return; }
+  toast(status === "approved" ? "已启用，AI 现在会引用这条" : "已停用");
+  loadKb();
+}
+function delKnowledge(kid) {
+  const k = kbCache.find(x => x.id === kid);
+  openSheet(`<h2>删除这条口径？</h2>
+    <p style="font-size:15px;margin:12px 0 20px">${esc((k && k.question) || "")}</p>
+    <button class="btn-primary xl" onclick="doDelKnowledge(${kid})">确认删除</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">取消</button>`);
+}
+async function doDelKnowledge(kid) {
+  closeSheet();
+  try { await api(`/knowledge/${kid}`, { method: "DELETE" }); }
+  catch (e) { toast(e.detail || "删除失败，请重试", false); return; }
+  toast("已删除"); loadKb();
+}
+function editKnowledge(kid) {
+  const k = kbCache.find(x => x.id === kid) || { id: 0, question: "", answer: "", tags: "" };
+  const isNew = !kid;
+  openSheet(`<h2>${isNew ? "新增一条口径" : "改写口径"}</h2>
+    <div class="field"><label>客户会怎么问</label>
+      <input id="kb_q" value="${esc(k.question)}" placeholder="公司拖欠工资不发怎么办">
+      <div class="help">按意思匹配，不用穷举写法；同一个问题重复录入只会更新答案</div>
+    </div>
+    <div class="field"><label>所内统一口径</label>
+      <textarea id="kb_a" rows="5" placeholder="可以先申请劳动仲裁，需要准备劳动合同、工资流水、考勤记录…">${esc(k.answer)}</textarea>
+      <div class="help">别写具体金额、别承诺结果——这两类会被合规闸门拦下，条目也通不过审核</div>
+    </div>
+    ${isNew ? "" : `<div class="meta" style="margin-bottom:10px">改写后会退回「待审核」，需要再点一次通过才生效</div>`}
+    <button class="btn-primary xl" onclick="saveKnowledge(${isNew ? 0 : kid})">保存</button>`);
+}
+async function saveKnowledge(kid) {
+  const question = document.getElementById("kb_q").value.trim();
+  const answer = document.getElementById("kb_a").value.trim();
+  if (!question || !answer) { toast("问题和答案都要填", false); return; }
+  try {
+    if (kid) await api(`/knowledge/${kid}`, { method: "PUT", body: JSON.stringify({ question, answer }) });
+    else await api("/knowledge", { method: "POST", body: JSON.stringify({ question, answer }) });
+  } catch (e) { toast(e.detail || "保存失败，请重试", false); return; }
+  closeSheet();
+  toast("已保存，在「待审核」里点通过后生效");
+  setKbView("draft");
+}
+function openKbImport() {
+  openSheet(`<h2>批量粘贴导入</h2>
+    <p style="font-size:14px;margin:10px 0;line-height:1.7">
+      一行一条，问题和答案之间用 <b>Tab</b> 或 <b>逗号</b> 隔开。<br>
+      从抖音后台或 Excel 里整列复制过来，格式一般就是对的。</p>
+    <div class="field">
+      <textarea id="kb_bulk" rows="9" placeholder="拖欠工资怎么办&#9;可以申请劳动仲裁，需要准备…&#10;工伤怎么赔&#9;先做工伤认定，再做伤残鉴定…"></textarea>
+    </div>
+    <div class="meta" style="margin-bottom:10px">导入的条目一律落「待审核」，逐条看过再启用。</div>
+    <button class="btn-primary xl" onclick="doKbImport()">导入</button>`);
+}
+async function doKbImport() {
+  const raw = document.getElementById("kb_bulk").value;
+  if (!raw.trim()) { toast("还没粘贴内容", false); return; }
+  let r;
+  try {
+    r = await api("/knowledge/import", {
+      method: "POST", body: raw, headers: { "Content-Type": "text/plain" },
+    });
+  } catch (e) { toast(e.detail || "导入失败，请重试", false); return; }
+  closeSheet();
+  toast(`导入 ${r.added} 条${r.skipped ? `，跳过 ${r.skipped} 行` : ""}` +
+        `${r.flagged ? `，其中 ${r.flagged} 条合规待改` : ""}`);
+  setKbView("draft");
+}
+
 /* 「需要人看一眼」：待办页签取消后，它兜住的那几类不能跟着消失——
    语音/图片消息 AI 读不了，紧急情形需要人当场看。有才显示，没有就不占地方。 */
 async function renderPending() {
@@ -2391,6 +2561,10 @@ document.addEventListener("click", e => {
   else if (act === "sendlogin") sendLogin(uid);
   else if (act === "copylogin") copyLogin(uid);
   else if (act === "editlawyer") editLawyer(uid);
+  else if (act === "kbok") setKbStatus(Number(el.dataset.kid), "approved");
+  else if (act === "kboff") setKbStatus(Number(el.dataset.kid), "retired");
+  else if (act === "kbedit") editKnowledge(Number(el.dataset.kid));
+  else if (act === "kbdel") delKnowledge(Number(el.dataset.kid));
 });
 document.addEventListener("change", e => {
   const el = e.target.closest("[data-act='duty']");
@@ -2569,7 +2743,7 @@ function setTab(t, byUser = false) {
   if (byUser) lsSet("tab_touched", "1");
   tab = t;
   // 待办已不是页签（见导航处注释），但区块留在 DOM 里以复用其渲染函数
-  for (const k of ["leads", "log", "board", "groups", "team"]) {
+  for (const k of ["leads", "log", "board", "groups", "team", "kb"]) {
     document.getElementById("tab-" + k).hidden = k !== t;
     document.getElementById("nav-" + k).classList.toggle("on", k === t);
   }
@@ -2591,6 +2765,8 @@ async function refresh() {
     if (tab === "board") await loadBoard();
     if (tab === "groups") await loadGroups();
     if (tab === "team") { await loadTeam(); refreshBulkAssign(); }
+    if (tab === "kb") await loadKb();
+    else if (me && me.role === "admin") refreshKbBadge();
   } catch (e) { /* 401 已弹登录层 */ }
 }
 setInterval(() => {

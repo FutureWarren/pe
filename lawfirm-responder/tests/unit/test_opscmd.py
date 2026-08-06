@@ -383,3 +383,63 @@ def test_backfill_does_not_overwrite_existing_memory(env):
     write_commands(repo, [{"id": "c1", "op": "backfill_memory"}])
     Runner(settings, store, sender=Snd()).run_pending()
     assert store.get_group("kf:wk:x").memory == "人工写好的记忆"
+
+
+# ------------------------------------------------------ 知识库导入
+def test_import_knowledge_from_repo_file(env):
+    """那 70 条抖音话术要先经合规筛一遍，筛完的结果本来就在仓库里，
+    让律所方再手工粘一遍纯属白费。"""
+    repo, store, settings = env
+    (repo / "ops" / "knowledge.tsv").write_text(
+        "# 抖音后台导出\n"
+        "问题\t答案\n"
+        "拖欠工资怎么办\t可以申请劳动仲裁，需要准备劳动合同、工资流水。\n"
+        "怎么咨询\t电话咨询免费，留个电话吧\n"
+        "残行没有答案\n",
+        encoding="utf-8",
+    )
+    write_commands(repo, [{"id": "k1", "op": "import_knowledge"}])
+
+    Runner(settings, store, sender=Snd()).run_pending()
+
+    rows = store.list_knowledge()
+    assert len(rows) == 2
+    assert {r["status"] for r in rows} == {"draft"}  # 到货即生效是绝对不行的
+    assert store.list_knowledge(status="approved") == []
+
+
+def test_import_knowledge_counts_the_ones_that_need_rewriting(env):
+    """只报「导入 70 条」等于没报——管理员要知道先改哪几条。"""
+    repo, store, settings = env
+    (repo / "ops" / "knowledge.tsv").write_text(
+        "怎么咨询\t电话咨询免费，留个电话吧\n要多久\t一般四十五天左右\n", encoding="utf-8",
+    )
+    write_commands(repo, [{"id": "k2", "op": "import_knowledge"}])
+    snd = Snd()
+
+    Runner(settings, store, sender=snd).run_pending()
+
+    text = snd.direct[0][1]
+    assert "导入 2 条" in text and "1 条踩了禁止事项" in text
+
+
+def test_import_knowledge_refuses_paths_outside_the_repo(env):
+    repo, store, settings = env
+    write_commands(repo, [{"id": "k3", "op": "import_knowledge", "file": "../../etc/passwd"}])
+    snd = Snd()
+
+    Runner(settings, store, sender=snd).run_pending()
+
+    assert "路径不合法" in snd.direct[0][1]
+    assert store.list_knowledge() == []
+
+
+def test_import_knowledge_says_so_when_the_file_is_missing(env):
+    """静默失败是最贵的 bug：没这句话，管理员会以为导进去了、只是没生效。"""
+    repo, store, settings = env
+    write_commands(repo, [{"id": "k4", "op": "import_knowledge"}])
+    snd = Snd()
+
+    Runner(settings, store, sender=snd).run_pending()
+
+    assert "没找到问答文件" in snd.direct[0][1]

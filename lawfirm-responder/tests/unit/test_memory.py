@@ -278,3 +278,75 @@ def test_ordinary_profile_updates_do_not_wipe_memory(tmp_path):
     g.case_stage = "已立案"
     store.upsert_group(g)
     assert store.get_group(gid).memory == "上次咨询：5 天前"
+
+
+# ------------------------------------------------------ 审核台（控制台）
+def _kb_console(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from responder.console.api import router as console_router
+
+    settings = Settings(mode="shadow", db_path=str(tmp_path / "kb_api.db"),
+                        admin_token="sec123", public_base_url="")
+    store = Store(settings.db_path)
+    app = FastAPI()
+    app.state.store = store
+    app.state.pipeline = Pipeline(store, None, settings)
+    app.include_router(console_router)
+    return TestClient(app), store
+
+
+HEAD = {"X-Admin-Token": "sec123"}
+
+
+def test_console_flags_entries_that_trip_the_guard(tmp_path):
+    """抖音那批话术里「免费」比比皆是，逐条人眼看是看不出来的。"""
+    c, store = _kb_console(tmp_path)
+    bad = store.add_knowledge("怎么咨询", "电话咨询免费，您方便留个电话吗")
+    ok = store.add_knowledge("要多久", "劳动仲裁一般四十五天左右")
+    items = {i["id"]: i for i in c.get("/console/knowledge", headers=HEAD).json()["items"]}
+    assert items[bad]["flagged"] == ["quote-fee"]
+    assert items[ok]["flagged"] == []
+
+
+def test_cannot_approve_an_entry_that_trips_the_guard(tmp_path):
+    """出口闸门会拦下它，但那时客户看到的是一句答非所问的兜底话术，
+    而没有人知道原因出在知识库某一条上。所以在审核这一步就得挡住。"""
+    c, store = _kb_console(tmp_path)
+    kid = store.add_knowledge("怎么咨询", "电话咨询免费，您方便留个电话吗")
+    r = c.post(f"/console/knowledge/{kid}/status", json={"status": "approved"}, headers=HEAD)
+    assert r.status_code == 400
+    assert "quote-fee" in r.json()["detail"]
+    assert store.get_knowledge(kid)["status"] == "draft"
+    # 停用不受影响：想把它收起来永远该是允许的
+    assert c.post(f"/console/knowledge/{kid}/status", json={"status": "retired"},
+                  headers=HEAD).status_code == 200
+
+
+def test_rewriting_an_entry_sends_it_back_for_review(tmp_path):
+    """审核过的是那个旧答案。改完自动生效，那道闸就白设了。"""
+    c, store = _kb_console(tmp_path)
+    kid = store.add_knowledge(FEE_Q, FEE_A)
+    store.set_knowledge_status(kid, "approved")
+    r = c.put(f"/console/knowledge/{kid}",
+              json={"question": FEE_Q, "answer": "改了个说法，由律师当面谈。"}, headers=HEAD)
+    assert r.status_code == 200 and r.json()["flagged"] == []
+    row = store.get_knowledge(kid)
+    assert row["status"] == "draft" and row["answer"].startswith("改了个说法")
+
+
+def test_import_reports_how_many_need_rewriting(tmp_path):
+    """导完只说「导入 70 条」等于没说——管理员要知道先改哪几条。"""
+    c, _ = _kb_console(tmp_path)
+    body = "怎么咨询\t电话咨询免费，留个电话吧\n要多久\t一般四十五天左右\n残行\n"
+    r = c.post("/console/knowledge/import", content=body.encode("utf-8"), headers=HEAD)
+    assert r.json() == {"ok": True, "added": 2, "skipped": 1, "flagged": 1}
+
+
+def test_imported_entries_are_never_live_on_arrival(tmp_path):
+    c, store = _kb_console(tmp_path)
+    c.post("/console/knowledge/import",
+           content="要多久\t一般四十五天左右\n".encode(), headers=HEAD)
+    assert store.list_knowledge(status="approved") == []
+    assert len(store.list_knowledge(status="draft")) == 1

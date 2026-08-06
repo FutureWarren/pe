@@ -32,6 +32,7 @@ import logging
 import secrets
 from pathlib import Path
 
+from responder.compliance import forbidden
 from responder.config import Settings, persist_setting
 
 logger = logging.getLogger(__name__)
@@ -266,6 +267,48 @@ class Runner:
                 self.store.set_memory(group.group_id, text)
                 done += 1
         return f"已为 {done} 个存量会话补建客户记忆"
+
+    def _op_import_knowledge(self, item: dict) -> str:
+        """把仓库里的问答文件导进知识库（一行一条，Tab 或逗号分隔）。
+
+        为什么走仓库而不是控制台：那 70 条抖音话术要经我这边先筛一遍合规，
+        筛完的结果本来就在仓库里，让律所方再手工粘一遍纯属白费。
+        **一律落 draft**，和控制台导入同一条规矩——条目就是话术，须人审后生效。
+        知识库文件是问答口径，不是密钥，放公开仓库没有问题。
+        """
+        rel = str(item.get("file", "ops/knowledge.tsv")).strip()
+        if rel.startswith("/") or ".." in rel:  # 只许读仓库里的东西
+            return f"文件路径不合法：{rel}"
+        path = Path(self.settings.update_repo_dir) / rel
+        try:
+            raw = path.read_text(encoding="utf-8-sig")
+        except FileNotFoundError:
+            return f"没找到问答文件：{rel}"
+        source = str(item.get("source", "douyin")).strip() or "douyin"
+        added = skipped = flagged = 0
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t") if "\t" in line else line.split(",", 1)
+            if len(parts) < 2:
+                skipped += 1
+                continue
+            q, a = parts[0].strip().strip('"'), parts[1].strip().strip('"')
+            if not q or not a or q in ("问题", "标准问题", "question"):
+                skipped += 1
+                continue
+            if self.store.add_knowledge(q, a, source=source, status="draft"):
+                added += 1
+                if forbidden.check(a):
+                    flagged += 1
+            else:
+                skipped += 1
+        tail = f"，其中 {flagged} 条踩了禁止事项需先改写" if flagged else ""
+        return (
+            f"知识库导入 {added} 条（跳过 {skipped} 行）{tail}。"
+            "全部落「待审核」，请到控制台「知识库」逐条通过后才会被 AI 引用。"
+        )
 
     def _op_report(self, item: dict) -> str:
         """把关键状态汇报一遍——远程排障时省掉一整轮来回提问。"""

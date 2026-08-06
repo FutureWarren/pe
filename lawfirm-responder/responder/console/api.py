@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from responder.compliance import forbidden
 from responder.config import persist_setting
 from responder.models import GroupProfile
 from responder.store.db import Store
@@ -1052,9 +1053,17 @@ def list_knowledge(
     status: str = "", store: Store = Depends(get_store),
     _: Principal = Depends(require_admin),
 ):
-    """知识库条目。hits 排在前面——用不上的条目该被清掉，而不是越攒越多。"""
+    """知识库条目。hits 排在前面——用不上的条目该被清掉，而不是越攒越多。
+
+    每条带上 `flagged`＝这条答案踩了哪些禁止事项。抖音那批现成话术里
+    「电话咨询免费」之类比比皆是，逐条人眼看是看不出来的（看得出也会看漏）。
+    标出来，管理员才知道该先改哪几条。
+    """
+    items = store.list_knowledge(status=status or None)
+    for it in items:
+        it["flagged"] = forbidden.check(it.get("answer", ""))
     return {
-        "items": store.list_knowledge(status=status or None),
+        "items": items,
         "counts": {
             s: len(store.list_knowledge(status=s))
             for s in ("draft", "approved", "retired")
@@ -1088,8 +1097,39 @@ def set_knowledge_status(
     status = str(body.get("status", "")).strip()
     if status not in ("draft", "approved", "retired"):
         raise HTTPException(400, "状态只能是 draft / approved / retired")
+    if status == "approved":
+        # 通过审核前先过一遍出口闸门。放行了也不会真发出去（guard 在出口还会拦），
+        # 但那时的表现是 AI 的回答被整段丢掉换成兜底话术——客户看到的是
+        # 一句答非所问的套话，而没有人知道原因出在知识库某一条上。
+        item = store.get_knowledge(kid)
+        if item is None:
+            raise HTTPException(404, "条目不存在")
+        hits = forbidden.check(item.get("answer", ""))
+        if hits:
+            raise HTTPException(
+                400, f"这条答案踩了禁止事项（{'、'.join(hits)}），请先改写措辞再通过",
+            )
     store.set_knowledge_status(kid, status)
     return {"ok": True}
+
+
+class KnowledgeEdit(BaseModel):
+    question: str
+    answer: str
+    tags: str = ""
+
+
+@router.put("/knowledge/{kid}")
+def edit_knowledge(
+    kid: int, body: KnowledgeEdit, store: Store = Depends(get_store),
+    _: Principal = Depends(require_admin),
+):
+    """改写条目。改完退回 draft（见 `Store.update_knowledge`）。"""
+    if not store.update_knowledge(
+        kid, question=body.question, answer=body.answer, tags=body.tags,
+    ):
+        raise HTTPException(400, "条目不存在，或问题与答案不能为空")
+    return {"ok": True, "flagged": forbidden.check(body.answer)}
 
 
 @router.delete("/knowledge/{kid}")
@@ -1114,7 +1154,7 @@ async def import_knowledge(
     raw = (await request.body()).decode("utf-8-sig", errors="replace")
     if not raw.strip():
         raise HTTPException(400, "没有收到内容")
-    added, skipped = 0, 0
+    added, skipped, flagged = 0, 0, 0
     for line in raw.splitlines():
         if not line.strip():
             continue
@@ -1129,9 +1169,11 @@ async def import_knowledge(
             continue
         if store.add_knowledge(q, a, source=source, status="draft"):
             added += 1
+            if forbidden.check(a):
+                flagged += 1
         else:
             skipped += 1
-    return {"ok": True, "added": added, "skipped": skipped}
+    return {"ok": True, "added": added, "skipped": skipped, "flagged": flagged}
 
 
 class TakeOver(BaseModel):
