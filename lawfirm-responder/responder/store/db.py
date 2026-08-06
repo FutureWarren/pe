@@ -443,6 +443,34 @@ class Store:
             ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
+    def set_note(self, key: str, text: str) -> None:
+        """运维小记：给远程排障留一行能读到的证据（复用 ops_commands 表）。
+
+        key 以 `_` 开头存放，与真正的指令 id 区分开，不影响幂等判断。
+        """
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO ops_commands(id, result, created_at) VALUES(?,?,?)"
+                " ON CONFLICT(id) DO UPDATE SET result=excluded.result,"
+                " created_at=excluded.created_at",
+                (f"_{key}", text[:300], datetime.now().isoformat()),
+            )
+
+    def get_note(self, key: str) -> str:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT result FROM ops_commands WHERE id=?", (f"_{key}",)
+            ).fetchone()
+        return (row["result"] if row else "") or ""
+
+    def count_commands_done(self) -> int:
+        """真正执行过的指令条数（不含 `_` 开头的小记）。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM ops_commands WHERE id NOT LIKE '\\_%' ESCAPE '\\'"
+            ).fetchone()
+        return int(row["n"] or 0)
+
     def command_done(self, command_id: str) -> bool:
         with self._conn() as conn:
             row = conn.execute(

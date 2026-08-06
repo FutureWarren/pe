@@ -266,3 +266,44 @@ def test_add_lawyer_does_not_steal_an_existing_notify_target(env):
     write_commands(repo, [{"id": "c1", "op": "add_lawyer", "userid": "zhang"}])
     Runner(settings, store, sender=Snd()).run_pending()
     assert settings.default_notify_userid == "wei"
+
+
+# ------------------------------------------- 「没收到」必须能远程分辨出原因
+def test_delivery_failure_is_recorded_where_it_can_be_read(env):
+    """律所侧没有服务器日志。发失败只写日志，现象就只剩「什么都没收到」，
+    跟「功能还没上线」分不开——今天正是卡在这一步。"""
+    repo, store, settings = env
+    write_commands(repo, [{"id": "c1", "op": "report"}])
+
+    class Refuses:
+        last_error = "message/send: 81013 user not found"
+
+        def send_direct_text(self, userid, text):
+            return False
+
+    Runner(settings, store, sender=Refuses()).run_pending()
+    assert "81013" in store.get_note("ops_error")
+
+
+def test_successful_delivery_clears_the_error(env):
+    repo, store, settings = env
+    store.set_note("ops_error", "上一次的旧错误")
+    write_commands(repo, [{"id": "c1", "op": "report"}])
+    Runner(settings, store, sender=Snd()).run_pending()
+    assert store.get_note("ops_error") == ""
+
+
+def test_notes_do_not_count_as_executed_commands(env):
+    """小记跟指令共用一张表，但不能把「执行了几条」这个数搞乱。"""
+    _, store, settings = env
+    store.set_note("ops_error", "x")
+    assert store.count_commands_done() == 0
+
+
+def test_underscore_ids_are_reserved_for_notes(env):
+    """指令占用 `_` 前缀会跟小记互相覆盖，直接不执行。"""
+    repo, store, settings = env
+    write_commands(repo, [{"id": "_ops_error", "op": "report"}])
+    snd = Snd()
+    assert Runner(settings, store, sender=snd).run_pending() == []
+    assert not snd.direct

@@ -70,6 +70,12 @@ def create_app() -> FastAPI:
             # 放在这个免鉴权端点上，是因为控制台要带令牌头、手机上打不开；
             # 一个整数不含任何客户信息，代价是零。
             "enter_events": store.count_event_messages(),
+            # 运维指令执行情况。「什么都没收到」有两种完全不同的原因，
+            # 这两个数把它们分开：ops_done=0 → 指令还没跑（新版没上或没到点）；
+            # ops_done>0 且 ops_error 非空 → 跑了，但企微把消息拒了（码在 error 里）。
+            # 没有这两个数，远程排障只能靠猜。
+            "ops_done": store.count_commands_done(),
+            "ops_error": store.get_note("ops_error"),
         }
 
     return app

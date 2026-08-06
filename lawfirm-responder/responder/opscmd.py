@@ -80,7 +80,9 @@ class Runner:
         for item in data.get("commands", []) or []:
             cid = str(item.get("id", "")).strip()
             op = str(item.get("op", "")).strip()
-            if not cid or not op or self.store.command_done(cid):
+            # `_` 前缀留给运维小记（见 Store.set_note），指令不许占用——
+            # 否则一条 id 为 `_ops_error` 的指令会跟小记互相覆盖
+            if not cid or cid.startswith("_") or not op or self.store.command_done(cid):
                 continue
             rollback = None
             try:
@@ -132,13 +134,22 @@ class Runner:
         返回值不是装饰性的：重置令牌那条指令靠它决定要不要回滚。
         """
         if not target or self.sender is None:
+            self.store.set_note("ops_error", "没有收件人（名册为空且未配兜底接收人）")
             logger.warning("运维指令结果无处可发：%s", text[:120])
             return False
         try:
-            return self.sender.send_direct_text(target, f"【系统维护】\n{text}") is not False
-        except Exception:
+            ok = self.sender.send_direct_text(target, f"【系统维护】\n{text}") is not False
+        except Exception as e:
             logger.exception("运维指令结果发送失败")
+            self.store.set_note("ops_error", f"发送异常：{str(e)[:160]}")
             return False
+        # 失败原因要留在能被远程读到的地方：律所侧没有服务器日志，
+        # 不落这一笔，「没收到」就永远只是「没收到」。
+        self.store.set_note(
+            "ops_error",
+            "" if ok else (getattr(self.sender, "last_error", "") or "企微拒绝发送"),
+        )
+        return ok
 
     # ---------------------------------------------------------- 指令
     def _op_reset_admin_token(self, item: dict):

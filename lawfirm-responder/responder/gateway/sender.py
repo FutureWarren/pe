@@ -20,6 +20,9 @@ class WeComSender:
         self.settings = settings or get_settings()
         self._token: str = ""
         self._token_expiry: float = 0.0
+        # 最近一次发送失败的企微原始错误（码 + 文案）。运维侧够不着服务器日志，
+        # 这个字段是「消息没送到」唯一能被远程看见的证据。
+        self.last_error: str = ""
 
     def _access_token(self) -> str:
         if self._token and time.time() < self._token_expiry:
@@ -48,10 +51,17 @@ class WeComSender:
             ).json()
             if resp.get("errcode"):
                 logger.error("wecom send failed: %s %s", path, resp)
+                # 错误码必须能被人看见。发失败以前只进日志，而律所侧没有服务器——
+                # 现象就只剩下「什么都没收到」，跟「功能没上线」分不开。
+                # 企微这几个码含义天差地别（60011 没权限 / 81013 不在应用可见范围
+                # / 40056 agentid 不对），看到码就知道该改哪儿。
+                self.last_error = f"{path}: {resp.get('errcode')} {resp.get('errmsg', '')}"[:200]
                 return False
+            self.last_error = ""
             return True
-        except Exception:
+        except Exception as e:
             logger.exception("wecom send error: %s", path)
+            self.last_error = f"{path}: {str(e)[:160]}"
             return False
 
     def send_group_text(self, chat_id: str, text: str) -> bool:
