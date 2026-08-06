@@ -966,6 +966,15 @@ function openStatusPanel() {
         </button>
         <div id="hoResult" class="meta" style="margin-top:8px"></div>
       </div>` : ""}
+      <div class="srow admin-only"><div class="k">访问令牌</div>
+        <div class="v">换成一句记得住的话，或复制免输入链接存成书签</div>
+        <button class="btn-outline" style="margin-top:8px" onclick="copyLoginLink()">
+          ${ico("clipboard")}复制免输入登录链接
+        </button>
+        <button class="btn-outline" style="margin-top:8px" onclick="askChangeToken()">
+          ${ico("lock")}修改访问令牌
+        </button>
+      </div>
       <div class="srow admin-only"><div class="k">程序版本</div>
         <div class="v" id="verLine">${h.commit ? esc(h.commit) : "—"}</div>
         <button class="btn-outline" style="margin-top:8px" onclick="askUpdate()">
@@ -1097,6 +1106,62 @@ async function addServicers() {
     if (a.error) lines.push(`　接口报错：${esc(a.error)}`);
   }
   el.innerHTML = lines.join("<br>");
+}
+
+/* 免输入登录链接：把令牌放进 # 片段存成书签，点一下直接进。
+   放 # 而不是 ? 是有原因的——# 后面的内容不会随请求发到服务器，
+   因此不会落进任何访问日志。 */
+async function copyLoginLink() {
+  const url = `${location.origin}/ui#t=${encodeURIComponent(token)}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast("链接已复制，存成书签即可免输入");
+  } catch (e) {
+    /* 手机浏览器常拒绝后台写剪贴板：退而展示出来让用户自己长按复制 */
+    openSheet(`<h2>免输入登录链接</h2>
+      <p style="font-size:14px;color:var(--muted);margin:10px 0">
+        长按下面这段全选复制，存成书签，以后点一下直接进。
+        <b>这条链接等同于密码，别转发给外人。</b></p>
+      <textarea readonly rows="3" style="width:100%;font-size:13px"
+        onclick="this.select()">${esc(url)}</textarea>`);
+  }
+}
+
+/* 修改访问令牌：允许改成一句记得住的话（服务端有连续输错锁定兜底），
+   但不允许取消——这台机器在公网上，控制台里是全部客户咨询的原文。 */
+function askChangeToken() {
+  openSheet(`
+    <h2>修改访问令牌</h2>
+    <p style="font-size:15px;margin:12px 0 8px">建议用一句好记的话，
+      比如 <code>songhu-jiufeng-88</code>。至少 12 位，掺一个「-」或数字。</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
+      改完这台设备会自动用新令牌，其他设备需要重新输入一次。</p>
+    <input id="newToken" type="text" autocomplete="off" placeholder="新的访问令牌"
+      style="width:100%;padding:12px;font-size:16px">
+    <div id="tokenErr" class="meta" style="color:var(--danger);margin-top:8px"></div>
+    <button class="btn-primary xl" style="margin-top:12px" onclick="doChangeToken()">
+      确认修改
+    </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+      onclick="closeSheet()">取消</button>`);
+}
+async function doChangeToken() {
+  const v = document.getElementById("newToken").value.trim();
+  const err = document.getElementById("tokenErr");
+  err.textContent = "";
+  try {
+    await api("/admin-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: v }),
+    });
+  } catch (e) {
+    err.textContent = e.detail || "修改失败，请重试";
+    return;
+  }
+  token = v; lsSet("admin_token", v);
+  closeSheet();
+  toast("令牌已更新，本机已自动切换");
 }
 
 /* 升级到最新版：服务器自己去仓库拉代码并重启。

@@ -94,3 +94,91 @@ def test_explicit_config_is_never_overwritten(tmp_path):
     TestClient(app).get("/console/me", headers={
         "X-Admin-Token": "sec123", "Host": "evil.example.com"})
     assert settings.public_base_url == "https://ai.songhu.com"
+
+
+# ---------------------------------------------------------- 令牌可改成一句话
+# 律所方的诉求：一串随机字符记不住。允许改成短语的前提是有连续输错锁定——
+# 否则为了扛住每秒几千次猜测，就只能逼人抄那串字符，而它最后一定会被抄进
+# 某个记事本或聊天记录里，反而更不安全。
+def _auth_app(tmp_path, token="tok-original-123"):
+    from fastapi import FastAPI
+
+    from responder.config import Settings
+    from responder.console import api as console_api
+    from responder.console.api import router as console_router
+    from responder.service import Pipeline
+    from responder.store.db import Store
+
+    console_api._fails.clear()  # 用例之间不共享锁定状态
+    db = str(tmp_path / "auth.db")
+    settings = Settings(mode="shadow", db_path=db, admin_token=token)
+    store = Store(db)
+    app = FastAPI()
+    app.state.store = store
+    app.state.pipeline = Pipeline(store, None, settings)
+    app.include_router(console_router)
+    return app, settings
+
+
+def test_token_can_be_changed_to_a_memorable_phrase(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app, settings = _auth_app(tmp_path)
+    c = TestClient(app)
+    r = c.post("/console/admin-token", json={"token": "jiufeng-88-pinggao"},
+               headers={"X-Admin-Token": "tok-original-123"})
+    assert r.status_code == 200
+    assert settings.admin_token == "jiufeng-88-pinggao"
+    # 新令牌立即生效，旧的立即失效
+    assert c.get("/console/me", headers={"X-Admin-Token": "jiufeng-88-pinggao"}).status_code == 200
+
+
+def test_weak_tokens_are_rejected(tmp_path):
+    """songhu123 是攻击者会试的第一个——律所域名就是 songhulaw。"""
+    from fastapi.testclient import TestClient
+
+    app, _ = _auth_app(tmp_path)
+    c = TestClient(app)
+    h = {"X-Admin-Token": "tok-original-123"}
+    for bad in ("songhu123", "12345678", "songhulaw2026", "abcdefghijkl"):
+        r = c.post("/console/admin-token", json={"token": bad}, headers=h)
+        assert r.status_code == 400, bad
+
+
+def test_token_cannot_be_emptied(tmp_path):
+    """取消令牌 = 公网上任何人都能读全部客户咨询原文，还能触发升级（代码执行）。"""
+    from fastapi.testclient import TestClient
+
+    app, settings = _auth_app(tmp_path)
+    r = TestClient(app).post("/console/admin-token", json={"token": ""},
+                             headers={"X-Admin-Token": "tok-original-123"})
+    assert r.status_code == 400
+    assert settings.admin_token == "tok-original-123"
+
+
+def test_repeated_wrong_tokens_get_locked_out(tmp_path):
+    """短语能当密码用，靠的就是这条：在线爆破 15 分钟只有 8 次机会。"""
+    from fastapi.testclient import TestClient
+
+    app, _ = _auth_app(tmp_path)
+    c = TestClient(app)
+    for _ in range(8):
+        assert c.get("/console/me", headers={"X-Admin-Token": "guess"}).status_code == 401
+    r = c.get("/console/me", headers={"X-Admin-Token": "guess"})
+    assert r.status_code == 429
+    # 锁定期间连正确令牌也挡——否则攻击者可以边试边看是不是「只有这个不报 429」
+    assert c.get("/console/me", headers={"X-Admin-Token": "tok-original-123"}).status_code == 429
+
+
+def test_successful_login_clears_the_counter(tmp_path):
+    """输错几次又想起来了，不该被自己的手滑锁在门外。"""
+    from fastapi.testclient import TestClient
+
+    app, _ = _auth_app(tmp_path)
+    c = TestClient(app)
+    for _ in range(5):
+        c.get("/console/me", headers={"X-Admin-Token": "guess"})
+    assert c.get("/console/me", headers={"X-Admin-Token": "tok-original-123"}).status_code == 200
+    for _ in range(5):
+        c.get("/console/me", headers={"X-Admin-Token": "guess"})
+    assert c.get("/console/me", headers={"X-Admin-Token": "tok-original-123"}).status_code == 200

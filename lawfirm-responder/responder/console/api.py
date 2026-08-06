@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import logging
 import secrets
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +66,34 @@ _LOCALHOST = {"127.0.0.1", "::1", "localhost", "testclient"}
 _MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
 
+# 连续输错的锁定窗口。有了它，令牌才允许是「记得住的一句话」而不是一串乱码：
+# 在线爆破每 15 分钟只能试 8 次，一句十二位的短语就已经远远够用。
+# 没有它，为了扛住每秒几千次的猜测，就只能逼律所抄一串随机字符——
+# 而那串字符最后一定会被抄进某个记事本里，反而更不安全。
+_MAX_FAILS, _LOCK_SECONDS = 8, 900
+_fails: dict[str, list[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+def _check_lock(request: Request) -> None:
+    now = time.time()
+    hits = [t for t in _fails.get(_client_ip(request), []) if now - t < _LOCK_SECONDS]
+    _fails[_client_ip(request)] = hits
+    if len(hits) >= _MAX_FAILS:
+        wait = int((_LOCK_SECONDS - (now - hits[0])) / 60) + 1
+        raise HTTPException(429, f"连续输错太多次，请 {wait} 分钟后再试")
+
+
+def _note_fail(request: Request) -> None:
+    _fails.setdefault(_client_ip(request), []).append(time.time())
+
+
 def get_principal(
     request: Request, x_admin_token: str | None = Header(default=None)
 ) -> Principal:
@@ -75,21 +104,25 @@ def get_principal(
     """
     supplied = x_admin_token or ""
     admin_token = request.app.state.pipeline.settings.admin_token
+    _check_lock(request)
     if not admin_token:
         host = request.client.host if request.client else ""
         if host in _LOCALHOST:
             return Principal(role="admin", name="本机开发")
         raise HTTPException(401, "服务未配置访问令牌，仅允许本机访问")
     if hmac.compare_digest(supplied, admin_token):
+        _fails.pop(_client_ip(request), None)
         return Principal(role="admin", name="管理员")
     if supplied:
         law = request.app.state.store.get_lawyer_by_token_hash(_hash_token(supplied))
         if law is not None:
+            _fails.pop(_client_ip(request), None)
             return Principal(
                 role="admin" if law["role"] == "admin" else "lawyer",
                 userid=law["userid"],
                 name=law["name"] or law["userid"],
             )
+    _note_fail(request)
     raise HTTPException(401, "missing or invalid X-Admin-Token")
 
 
@@ -554,6 +587,44 @@ def set_mode(body: ModeSwitch, request: Request, _: Principal = Depends(require_
     settings.mode = body.mode
     persisted = persist_setting("RESPONDER_MODE", body.mode)
     return {"ok": True, "mode": body.mode, "persisted": persisted}
+
+
+class TokenChange(BaseModel):
+    token: str
+
+
+# 律所名相关的词：这些是攻击者会试的第一批，长度再够也不能用
+_WEAK_WORDS = ("songhu", "松沪", "songhulaw", "lawfirm", "12345678", "password", "admin")
+
+
+@router.post("/admin-token")
+def set_admin_token(
+    body: TokenChange, request: Request, _: Principal = Depends(require_admin)
+):
+    """把访问令牌改成一句记得住的话。即时生效并写回 .env。
+
+    为什么允许改成「短语」而不是坚持一串随机字符：那串随机字符最后一定会被
+    抄进某个记事本或聊天记录里，反而更不安全。配合上面的连续输错锁定
+    （15 分钟最多 8 次），一句十二位的短语在线上已经猜不动了。
+
+    但两条底线不让：不能取消（这台机器在公网上，控制台里是全部客户咨询原文，
+    升级按钮等于服务器代码执行），不能用律所名 + 数字（那是第一个被试的）。
+    """
+    t = (body.token or "").strip()
+    if len(t) < 12:
+        raise HTTPException(400, "至少 12 位。可以用一句话，比如 songhu-jiufeng-88")
+    low = t.lower()
+    if any(w in low for w in _WEAK_WORDS) and len(t) < 16:
+        raise HTTPException(400, "含律所名/常见词的令牌请至少 16 位，或换个词")
+    if t.isdigit() or t.isalpha():
+        raise HTTPException(400, "别用纯数字或纯字母，掺个「-」或数字就行")
+
+    settings = request.app.state.pipeline.settings
+    settings.admin_token = t
+    persisted = persist_setting("RESPONDER_ADMIN_TOKEN", t)
+    _fails.clear()
+    logger.info("admin token changed by %s", _client_ip(request))
+    return {"ok": True, "persisted": persisted}
 
 
 @router.post("/update")
