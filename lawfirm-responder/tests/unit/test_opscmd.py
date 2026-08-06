@@ -307,3 +307,38 @@ def test_underscore_ids_are_reserved_for_notes(env):
     snd = Snd()
     assert Runner(settings, store, sender=snd).run_pending() == []
     assert not snd.direct
+
+
+def test_reset_without_recipient_stays_pending_for_retry(env):
+    """「没能通知到任何人」是待办，不是完成。
+
+    踩过这个坑：名册还空着时这条指令跑了一轮、什么也没做、却被记成做完；
+    等收件人配好之后它再也不会执行，人就一直等不到那条令牌。
+    """
+    repo, store, settings = env
+    settings.default_notify_userid = ""
+    write_commands(repo, [{"id": "c1", "op": "reset_admin_token"}])
+    snd = Snd()
+
+    Runner(settings, store, sender=snd).run_pending()
+    assert not store.command_done("c1"), "留着，等有收件人了再跑"
+
+    # 收件人配好之后，同一条指令应该自己跑起来，不需要换 id 重提
+    settings.default_notify_userid = "future"
+    Runner(settings, store, sender=snd).run_pending()
+    assert store.command_done("c1")
+    assert settings.admin_token != "old-token-xyz"
+    assert snd.direct and settings.admin_token in snd.direct[-1][1]
+
+
+def test_report_lists_each_kf_account(env):
+    """客服账号可能不止一个，而应用未必对每个都有权限（企微 48007）。
+
+    客户扫到的要是那个没权限的账号，AI 根本收不到消息——现象是
+    「客户说没人理」，从我们这边什么都看不出来。所以逐个报接待人数。
+    """
+    repo, store, settings = env
+    write_commands(repo, [{"id": "c1", "op": "report"}])
+    snd = Snd()
+    Runner(settings, store, sender=snd, kf_client=FakeKf(servicers=("a", "b"))).run_pending()
+    assert "客服账号「在线咨询」接待人 2 位" in snd.direct[0][1]

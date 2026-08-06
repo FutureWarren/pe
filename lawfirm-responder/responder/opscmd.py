@@ -164,10 +164,15 @@ class Runner:
         发送失败就回滚。宁可这条指令白跑一轮，也不能留下一扇锁死的门。
         """
         if not self._target(item) or self.sender is None:
+            # 返回一个空回滚，为的是**不把这条指令记成已执行**：
+            # 「没能通知到任何人」是待办，不是完成。踩过这个坑——名册还空着时
+            # 这条指令跑了一轮、什么也没做、却被记成做完，等收件人配好之后
+            # 它再也不会执行，人就一直等不到那条令牌。
             return (
                 "没有可送达的接收人，令牌**未改动**。\n"
                 "请先在指令里指定 to（企微 userid），"
-                "或配置 RESPONDER_DEFAULT_NOTIFY_USERID。"
+                "或配置 RESPONDER_DEFAULT_NOTIFY_USERID。",
+                lambda: None,
             )
         old = self.settings.admin_token
         token = _new_token()
@@ -242,11 +247,20 @@ class Runner:
         laws = self.store.list_lawyers(active_only=True)
         groups = self.store.list_groups()
         kf_ok = bool(self.kf_client and self.kf_client.available())
-        return "\n".join([
+        lines = [
             f"运行模式：{s.mode}",
             f"微信客服通道：{'正常' if kf_ok else '未配置'}",
             f"进线事件累计：{self.store.count_event_messages()} 条",
             f"律师名册：{len(laws)} 位",
             f"会话档案：{len(groups)} 个",
             f"对外地址：{s.public_base_url or '（未记录）'}",
-        ])
+        ]
+        # 客服账号可能不止一个，而应用未必对每一个都有权限（48007）。
+        # 客户扫到的要是那个没权限的账号，AI 根本收不到他的消息——
+        # 而现象是「客户说没人理」，从我们这边什么都看不出来。所以逐个报。
+        if kf_ok:
+            for a in self.kf_client.account_list():
+                kfid = a.get("open_kfid", "")
+                n = len(self.kf_client.servicer_list(kfid))
+                lines.append(f"  客服账号「{a.get('name', '') or kfid}」接待人 {n} 位")
+        return "\n".join(lines)
