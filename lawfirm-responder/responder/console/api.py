@@ -1039,6 +1039,72 @@ def metrics(
     return out
 
 
+class TakeOver(BaseModel):
+    userid: str = ""  # 留空 = 转给操作者自己
+
+
+@router.post("/groups/{group_id}/takeover")
+def take_over(
+    group_id: str, body: TakeOver, request: Request,
+    store: Store = Depends(get_store), p: Principal = Depends(get_principal),
+):
+    """把这通会话转给律师人工接待——律师由此进入客户和 AI 聊天的那个窗口。
+
+    自动转接只在 P0/紧急时触发（`service._maybe_handoff`），但律师常常是
+    看完交接单**自己判断**这单该接。没有这个按钮，他就只能打电话——
+    而打电话正是整条链路上最脆的一环，也正是转接要取代的东西。
+
+    转接之后：会话出现在他企业微信的「微信客服」工作台，历史消息齐全，
+    他直接回复即可；AI 由 `gate:handed-off` 自动闭嘴，不会抢话。
+    """
+    pipeline = request.app.state.pipeline
+    group = store.get_group(group_id)
+    if group is None:
+        raise HTTPException(404, "会话不存在")
+    if not p.is_admin and group_id not in _own_group_ids(store, p):
+        raise HTTPException(404, "会话不存在")
+    target = (body.userid or p.userid or "").strip()
+    if not target:
+        raise HTTPException(400, "请指定接手的律师（管理员操作需要选人）")
+    if not group.kf_open_kfid:
+        raise HTTPException(400, "只有微信客服会话支持转接（抖音侧走官方接待）")
+
+    client = getattr(pipeline, "kf_client", None)
+    if client is None or not client.available():
+        raise HTTPException(400, "微信客服未配置，或当前是影子模式")
+    # 接待人校验放在给客户发话之前：话发出去客户就真的在等了
+    try:
+        if target not in set(client.servicer_list(group.kf_open_kfid)):
+            raise HTTPException(
+                400, "该律师不是这个客服账号的接待人，企微会拒绝转接。"
+                     "请在「状态」面板点「把名册律师加为接待人」",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("servicer check failed: %s", group_id)
+        raise HTTPException(400, "取接待人列表失败，请稍后重试") from None
+
+    from responder.compliance.guard import guard
+    from responder.models import Action
+    from responder.reply import templates
+
+    checked = guard(
+        templates.handing_over(seed=group_id), Action.HANDOFF,
+        templates.safe_fallback(group),
+    )
+    pipeline._send_group(group, group_id, checked.text)
+    if not client.transfer(group.kf_open_kfid, group.kf_external_userid, target):
+        raise HTTPException(400, "企微拒绝了转接，请检查接待人配置后重试")
+    store.set_handoff(group_id, target)
+    store.save_reply(
+        f"takeover-{group_id}-{int(time.time())}", group_id, checked.text,
+        "live", checked.passed, category="handoff",
+    )
+    logger.info("manual takeover: %s → %s", group_id, target)
+    return {"ok": True, "userid": target}
+
+
 @router.get("/export/leads")
 def export_leads(
     request: Request, range: str = "today", fmt: str = "xlsx",

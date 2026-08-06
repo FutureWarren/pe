@@ -370,3 +370,47 @@ def test_add_servicers_needs_a_roster_first(tmp_path):
     r = TestClient(_probe_app(store, settings, ProbeKf())).post("/console/kf/servicers/add")
     assert r.status_code == 400
     assert "名册" in r.json()["detail"]
+
+
+# ------------------------------------------------ 手动转接：律师自己决定接手
+# 自动转接只在 P0/紧急时触发，但律师常常是看完交接单**自己判断**这单该接。
+# 没有这条路，他就只剩打电话——而打电话正是转接要取代的那一环。
+def test_lawyer_can_take_over_a_conversation(tmp_path):
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    store.upsert_group(kf_group())
+    kf = ProbeKf(servicers=("wei",))
+    app = _probe_app(store, p.settings, kf)
+    r = TestClient(app).post(
+        f"/console/groups/{GID}/takeover", json={"userid": "wei"},
+    )
+    assert r.status_code == 200
+    assert kf.transfers == [(OPEN_KFID, EXT_USER, "wei")]
+    assert store.get_group(GID).handoff_userid == "wei"
+    assert kf.sent, "转之前要先跟客户说一句，否则他对着静默干等"
+
+
+def test_takeover_refuses_when_lawyer_is_not_a_servicer(tmp_path):
+    """企微会拒，而且是在客户已经收到「转给律师了」之后——所以先查再说话。"""
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    store.upsert_group(kf_group())
+    kf = ProbeKf(servicers=("zhang",))
+    r = TestClient(_probe_app(store, p.settings, kf)).post(
+        f"/console/groups/{GID}/takeover", json={"userid": "wei"},
+    )
+    assert r.status_code == 400
+    assert "接待人" in r.json()["detail"]
+    assert not kf.sent, "话不能先发出去"
+
+
+def test_takeover_rejects_unknown_group(tmp_path):
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    r = TestClient(_probe_app(store, p.settings, ProbeKf())).post(
+        "/console/groups/kf:nope:nobody/takeover", json={"userid": "wei"},
+    )
+    assert r.status_code == 404

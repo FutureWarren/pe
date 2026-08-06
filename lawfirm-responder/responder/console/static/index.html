@@ -550,10 +550,21 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
       <button class="chip" data-range="7d" onclick="setRange('7d')">近 7 天</button>
       <button class="chip" data-range="month" onclick="setRange('month')">本月</button>
       <button class="chip" data-range="all" onclick="setRange('all')">全部</button>
+      <!-- 管理员的主视图其实是那张表，见 exportLeads()。
+           注释必须写成 HTML 注释：这一段是静态 HTML，不是 JS 模板字符串，
+           写成 ${''/* */} 会被原样打印到按钮上（已经在真机上丢过一次脸）。 -->
       <button class="btn-outline admin-only" style="margin-left:auto"
-        onclick="exportLeads()">${'' /* 见 exportLeads：管理员的主视图是那张表 */}
+        onclick="exportLeads()">
         <svg class="ico"><use href="#i-clipboard"/></svg>导出客户档案
       </button>
+    </div>
+    <!-- 只在真有事要人看时出现：语音/图片消息、紧急情形。
+         常驻的待办列表会让管理员一打开就觉得「这些都要我处理？」——角色搞反了。 -->
+    <div class="card" style="margin-bottom:10px;border-left:3px solid var(--warn)"
+         id="pendingCard" hidden>
+      <div class="eyebrow" style="margin:0 0 2px">需要人看一眼</div>
+      <div class="meta">AI 读不了的消息（语音/图片）和紧急情形，其余都已自动派单</div>
+      <div id="pendingList" style="margin-top:8px"></div>
     </div>
     <div class="card admin-only" style="margin-bottom:10px" id="staffCard" hidden>
       <div class="eyebrow" style="margin:0 0 2px">员工处理情况</div>
@@ -639,9 +650,10 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
   <button class="navbtn" id="nav-leads" onclick="setTab('leads', true)" style="position:relative">
     <svg class="ico"><use href="#i-flame"/></svg><span>线索</span><span class="nbadge" id="leadBadge" hidden></span>
   </button>
-  <button class="navbtn" id="nav-todo" onclick="setTab('todo', true)">
-    <svg class="ico"><use href="#i-clipboard"/></svg><span>待办</span><span class="nbadge" id="todoBadge" hidden></span>
-  </button>
+  <!-- 「待办」不再是一个常驻页签（律所方 2026-08）：线索自动派单，
+       没有需要人工排队认领的东西。但它兜住的那几类**不能丢**——语音/图片
+       消息 AI 读不了、紧急情形需要人当场看一眼。这些改为在看板顶部
+       只在「有」的时候出现一张卡（renderPending），没有就完全不占地方。 -->
   <button class="navbtn admin-only" id="nav-groups" onclick="setTab('groups', true)">
     <svg class="ico"><use href="#i-users"/></svg><span>会话</span>
   </button>
@@ -703,7 +715,7 @@ if (location.hash) {
   try { history.replaceState(null, "", location.pathname); } catch (e) {}
 }
 let me = null; // /console/me 的结果：{role, userid, name}
-let tab = "todo", logView = "replies", groupsCache = [], loadedOnce = {};
+let tab = "board", logView = "replies", groupsCache = [], loadedOnce = {};
 let lastSuccess = null, offline = false, logReq = 0;
 const expanded = new Set(), lastSig = {}, repliesFb = {};
 
@@ -897,13 +909,7 @@ function toggleEye() {
 function applyRole() {
   document.body.dataset.role = me ? me.role : "";
   // 律师身份若停在管理页（如上次会话是管理员），拉回待办
-  if (me && me.role !== "admin" && (tab === "groups" || tab === "team")) setTab("todo");
-  // 管理员落在看板：他要的是「今天怎么样、谁在跟、跟得如何」，
-  // 而「待办」是干活的人的页面——所主任打开就看见一列待办事项，
-  // 第一反应是「这些都要我处理？」，那是把角色搞反了。
-  if (me && me.role === "admin" && tab === "todo" && !lsGet("tab_touched")) {
-    setTab("board");
-  }
+  if (me && me.role !== "admin" && (tab === "groups" || tab === "team")) setTab("leads");
 }
 async function whoami() {
   me = await api("/me");
@@ -1321,6 +1327,7 @@ async function loadTodo() {
 }
 function paintTodoBadge(n) {
   const badge = document.getElementById("todoBadge");
+  if (!badge) return;  // 待办页签取消后这个角标就不存在了
   badge.hidden = n === 0;
   badge.textContent = n > 99 ? "99+" : n;
 }
@@ -1337,18 +1344,60 @@ async function doneTodo(id) {
     await api(`/todo/${id}/done`, { method: "POST" });
     if (card) { card.style.transition = "opacity .2s, transform .2s"; card.style.opacity = "0"; card.style.transform = "translateY(-6px)"; }
     lastSig.todo = null;
-    setTimeout(loadTodo, 220);
+    setTimeout(() => { loadTodo(); renderPending(); }, 220);
     toast("已标记处理", true, async () => {
       await api(`/todo/${id}/reopen`, { method: "POST" });
       lastSig.todo = null;
-      loadTodo();
+      loadTodo(); renderPending();
     });
-  } catch (e) { toast("操作失败，请重试", false); lastSig.todo = null; loadTodo(); }
+  } catch (e) {
+    toast("操作失败，请重试", false); lastSig.todo = null; loadTodo(); renderPending();
+  }
 }
 
 /* ============ 会话原文（复核依据） ============ */
+/* 律师要「进到客户和 AI 聊天的那个窗口里」，靠的就是这一下。
+   自动转接只在 P0/紧急时发生，但律师常常看完交接单自己判断这单该接——
+   没有这个按钮，他就只剩打电话，而打电话正是转接要取代的那一环。 */
+async function takeOver(gid) {
+  openSheet(`
+    <h2>转给我接手？</h2>
+    <p style="font-size:15px;margin:12px 0 8px">这通会话会出现在您企业微信的
+      <b>「微信客服」工作台</b>，历史消息齐全，您直接回复即可，客户在原窗口就能看到。</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
+      转接后 AI 自动闭嘴，不会跟您抢话。转之前会先跟客户说一句，
+      免得他对着一段静默干等。</p>
+    <div id="toErr" class="meta" style="color:var(--danger);margin-bottom:8px"></div>
+    <button class="btn-primary xl" id="toBtn" data-act="dotakeover" data-gid="${esc(gid)}">
+      确认转给我
+    </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+      onclick="closeSheet()">取消</button>`);
+}
+async function doTakeOver(gid) {
+  const btn = document.getElementById("toBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "转接中…"; }
+  try {
+    await api(`/groups/${encodeURIComponent(gid)}/takeover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  } catch (e) {
+    const el = document.getElementById("toErr");
+    if (el) el.textContent = e.detail || "转接失败，请重试";
+    if (btn) { btn.disabled = false; btn.textContent = "确认转给我"; }
+    return;
+  }
+  closeSheet();
+  toast("已转接，请到企业微信「微信客服」里接着聊");
+}
+
 async function openConversation(gid) {
   openSheet(`<h2>完整对话</h2><div class="sub">${esc(groupName(gid))}</div>
+    <button class="btn-outline" style="margin:10px 0" data-act="takeover" data-gid="${esc(gid)}">
+      <svg class="ico"><use href="#i-users"/></svg>转给我接手（在企微里直接跟客户聊）
+    </button>
     <div id="convoBody">${skeleton()}</div>`);
   let list;
   try { list = await api(`/conversation?group_id=${encodeURIComponent(gid)}`); }
@@ -2095,7 +2144,34 @@ function renderStaff(staff, label) {
       平均响应 = 派单到首次标记「已联系」的间隔</div>`;
 }
 
+/* 「需要人看一眼」：待办页签取消后，它兜住的那几类不能跟着消失——
+   语音/图片消息 AI 读不了，紧急情形需要人当场看。有才显示，没有就不占地方。 */
+async function renderPending() {
+  const card = document.getElementById("pendingCard");
+  if (!card) return;
+  let list = [];
+  try { list = await api("/todo"); } catch (e) { return; }
+  list = list.filter(r => r.status !== "done");
+  paintTodoBadge(list.length);
+  if (!list.length) { card.hidden = true; return; }
+  card.hidden = false;
+  document.getElementById("pendingList").innerHTML = list.slice(0, 6).map(r => {
+    const q = r.question
+      || (r.summary || "").split("\n").find(l => l.startsWith("客户问题："))?.slice(5)
+      || r.summary || "";
+    return `
+      <div class="row" style="padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:8px">
+        ${r.urgent ? `<span class="badge bad">紧急</span>` : ""}
+        <span style="flex:1;min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(q)}</span>
+        <button class="btn-text muted" data-act="convo" data-gid="${esc(r.group_id)}">查看</button>
+        <button class="btn-tonal" onclick="doneTodo(${r.id})">已处理</button>
+      </div>`;
+  }).join("") + (list.length > 6
+    ? `<div class="meta" style="margin-top:6px">另有 ${list.length - 6} 条</div>` : "");
+}
+
 async function loadBoard() {
+  renderPending();
   const t = document.getElementById("tiles");
   if (!loadedOnce.board) t.innerHTML = skeleton();
   document.querySelectorAll("[data-range]").forEach(b =>
@@ -2309,6 +2385,8 @@ document.addEventListener("click", e => {
   if (!el) return;
   const { act, gid, uid, lead } = el.dataset;
   if (act === "convo") openConversation(gid);
+  else if (act === "takeover") takeOver(gid);
+  else if (act === "dotakeover") doTakeOver(gid);
   else if (act === "assign") doAssign(Number(lead), uid);
   else if (act === "sendlogin") sendLogin(uid);
   else if (act === "copylogin") copyLogin(uid);
@@ -2490,10 +2568,12 @@ function setTab(t, byUser = false) {
   // 用户自己点过之后就别再自动跳转（管理员默认落看板只该发生在他没选择过时）
   if (byUser) lsSet("tab_touched", "1");
   tab = t;
-  for (const k of ["todo", "leads", "log", "board", "groups", "team"]) {
+  // 待办已不是页签（见导航处注释），但区块留在 DOM 里以复用其渲染函数
+  for (const k of ["leads", "log", "board", "groups", "team"]) {
     document.getElementById("tab-" + k).hidden = k !== t;
     document.getElementById("nav-" + k).classList.toggle("on", k === t);
   }
+  document.getElementById("tab-todo").hidden = true;  // 区块留着但永不显示
   refresh();
 }
 async function refresh() {
@@ -2502,7 +2582,6 @@ async function refresh() {
     if (!groupsCache.length) {
       try { groupsCache = await api("/groups"); } catch (e) { /* 各板块自行处理 */ }
     }
-    if (tab === "todo") await loadTodo();
     else refreshTodoBadge(); // 角标跨页告警，不在待办页也保持新鲜
     // 定时刷新不重置翻页：律师翻到第 3 页正在看，60 秒后被拽回第一页
     // 且滚动位置丢失，是纯粹的骚扰。已翻页时只刷角标。
