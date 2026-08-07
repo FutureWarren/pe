@@ -9,6 +9,7 @@
 
 import hashlib
 import hmac
+import json
 import logging
 import secrets
 import time
@@ -45,6 +46,31 @@ def console_ui() -> HTMLResponse:
     """
     return HTMLResponse(
         _UI_FILE.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
+    )
+
+
+@ui_router.get("/g/{group_id:path}", include_in_schema=False)
+def conversation_deeplink(group_id: str) -> HTMLResponse:
+    """交接单里那条「看完整对话」。
+
+    原本用的是 `/ui#g=<会话id>`，在企业微信里点开返回 `{"detail":"Not Found"}`
+    ——**片段标识符 `#` 被客户端转义成了 `%23`**，于是服务器看到的路径变成
+    `/ui%23g=...`，自然 404。这类问题在浏览器里测不出来（浏览器不会转义 `#`），
+    只有在真机上点一次才会现形。
+
+    换成一段普通路径就没有可被转义的特殊字符了。页面本身仍是同一个文件，
+    只是把会话 id 交给前端去打开。
+    """
+    # json.dumps 会转义引号，但**不转义 `</script>`**——URL 里带上它就能
+    # 跳出脚本块执行任意代码。这条路径是从企微消息里点进来的，
+    # 谁都可以构造一条链接发给律师。`<` 一律转义掉。
+    safe = json.dumps(group_id, ensure_ascii=False).replace("<", "\\u003c")
+    html = _UI_FILE.read_text(encoding="utf-8").replace(
+        "</head>", f"<script>window.__deepLinkGroup = {safe};</script></head>", 1,
+    )
+    return HTMLResponse(
+        html,
         headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
     )
 

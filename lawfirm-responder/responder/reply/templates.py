@@ -307,6 +307,31 @@ def intake_probe(
     return text.replace("{L}", L)
 
 
+def office_fact(
+    group: GroupProfile, seed: str = "", settings: Settings | None = None
+) -> str:
+    """所在哪儿、怎么走、几点上班——一句话能给的，就当场给。
+
+    这条不进模型：地址是确定的事实，让模型复述只会多一个说错的机会。
+    末尾带一个下一步（约时间），因为「知道地址」离「真的来」还差一步，
+    而问路的人本来就是最接近成交的那一批。
+    """
+    settings = settings or get_settings()
+    addr = settings.office_address
+    if not addr:
+        # 没配地址就别硬编——说错地址比不说更糟，客户白跑一趟
+        return (
+            f"我们是{settings.office_name}。具体地址和到所时间我确认一下再回您，"
+            "您也可以先说说情况，我这边同步帮您理一理。"
+        )
+    variants = [
+        f"我们在{addr}。\n您方便的话说个时间，我提前跟律师约好，来了直接聊，不用等。",
+        f"地址是{addr}。\n您要是打算过来，先跟我说一声，我这边给您排个时间，省得白跑。",
+        f"{settings.office_name}，{addr}。\n您定个方便的时间，我帮您安排好再过来。",
+    ]
+    return _pick(variants, seed)
+
+
 def safe_fallback(group: GroupProfile) -> str:
     """合规拦截后的兜底回复：只承接，不含任何实质内容。固定文本，不走变体。"""
     L = _lawyer(group)

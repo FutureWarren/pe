@@ -107,6 +107,15 @@ def generate(
             return text + "\n" + templates.next_step(group, seed=msg.msg_id)
         return text
 
+    # 所务事实（地址/怎么走/几点上班）：答案在配置里，直接给，不进模型。
+    # 让模型复述一个确定的地址，只是多一个说错的机会——而客户白跑一趟
+    # 是这条链上最难挽回的失误之一。
+    if any(r.startswith("office-fact:") for r in decision.reasons):
+        return guard(
+            templates.office_fact(group, seed=msg.msg_id, settings=settings),
+            Action.ANSWER, fallback,
+        )
+
     # 客服开场引导：确定性话术，不含法律实质内容，不进模型。
     # 开场白不接索要电话——刚打上照面就问电话，客户只会退出去。
     if decision.category == Category.GREETING:

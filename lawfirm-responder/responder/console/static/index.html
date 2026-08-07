@@ -732,7 +732,10 @@ let token = lsGet("admin_token") || "";
 /* 深链参数：t=登录令牌（不进服务器日志故走 # 片段）、g=直接打开的会话。
    交接单里那条「看完整对话」就靠 g —— 律师点一下直达，不用登录翻找。 */
 const _hash = new URLSearchParams(location.hash.slice(1));
-const deepLinkGroup = _hash.get("g") || "";
+/* /g/<会话id> 会把它注入到 window（见 console/api.py）——企业微信会把 `#`
+   转义成 %23，靠片段传参在真机上直接 404，所以主路径是普通路径段。
+   仍兼容旧的 #g= 链接：已经发出去的交接单里还是那个形式。 */
+const deepLinkGroup = window.__deepLinkGroup || _hash.get("g") || "";
 if (_hash.get("t")) {
   token = decodeURIComponent(_hash.get("t"));
   lsSet("admin_token", token);

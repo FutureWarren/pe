@@ -199,8 +199,11 @@ def format_notification(
     # public_base_url 没配时退回原文案（本机开发/未定域名）。
     base = (settings or get_settings()).public_base_url.rstrip("/")
     if base:
+        # 走 /g/<id> 而不是 /ui#g=<id>：企业微信会把 `#` 转义成 %23，
+        # 于是服务器收到的路径是 `/ui%23g=...` → 404。真机上点一次才现形，
+        # 浏览器里永远测不出来（浏览器不转义 `#`）。
         gid = quote(group.group_id, safe="")
-        lines += ["", f"看完整对话：{base}/ui#g={gid}"]
+        lines += ["", f"看完整对话：{base}/g/{gid}"]
     else:
         lines += ["", f"完整对话见控制台 · 会话「{group.name or group.group_id}」"]
     return "\n".join(lines)
@@ -217,6 +220,27 @@ def _notified_within(previous: dict | None, seconds: int) -> bool:
     except (ValueError, TypeError):
         return False
     return age.total_seconds() < seconds
+
+
+def tier_upgraded(previous: dict | None, tier: str) -> bool:
+    """这一轮客户从「弱意愿」升成了「强意愿」吗。
+
+    存在的理由（律所方 2026-08，真机测试后）：客户是**边聊边变强**的。
+    先留个电话（40 分，弱），接着问赔多少、问地址、问怎么走——每一步都在加分，
+    但旧的通知策略只认「意向档位（冷/温/热）」升级，而这三步全在「温」里，
+    于是客服**永远只会收到那一条弱意愿提醒**，客户后来变得多热都无人知晓。
+
+    「弱 → 强」这一跳必须再响一次：那正是客服该放下手头事去接的时刻。
+    反向（强 → 弱）不通知，也不改已推过的判断——分数会波动，
+    而「刚才说很急现在又不急了」这种噪音推给人只会消耗信任。
+    """
+    if tier != priority.P0 or not previous:
+        return False
+    # 之前没推送过就不叫「升级」——那只是这条线索第一次被看见，
+    # 加个「升级」前缀反而让客服以为错过了什么。
+    if not previous.get("notified_at"):
+        return False
+    return (previous.get("priority") or "").upper() != priority.P0
 
 
 def should_notify(
@@ -286,6 +310,19 @@ def dispatch(
     )
     if lead is None:
         return lead
+    # 「弱 → 强」再响一次。判定必须在评分**之后**，因为分数是这一轮才算出来的。
+    # 客户边聊边变强（留电话 40 → 问赔多少 +15 → 问地址…），旧策略只认冷/温/热
+    # 三档意向，这些变化全在「温」里，于是客服永远只收到最早那条弱意愿提醒。
+    upgraded = tier_upgraded(previous, (lead.get("priority") or "").upper())
+    if upgraded and not notify:
+        notify = True
+        # 刚才为省成本跳过了模型归纳，而这条恰恰是最该有摘要的一条：
+        # 客服要凭它决定现在放下手头的事去接
+        if summarize is None:
+            lead = build_and_store(
+                store, group, history, settings=settings, summarize=True,
+                previous=previous, urgent=urgent,
+            ) or lead
     # 派单在通知之前：交接单要推给被派到的律师，而不是笼统的接待人。
     # 名册为空时 ensure 回落旧链路（会话承办人/全局兜底），行为与旧版完全一致。
     to, newly_assigned = assignment.ensure(store, group, lead, settings)
@@ -295,7 +332,11 @@ def dispatch(
         return lead
     lead = store.get_lead(group.group_id) or lead  # 取回含指派信息的最新版
     if sender and to:
-        if sender.send_direct_text(to, format_notification(lead, group, settings)):
+        text = format_notification(lead, group, settings)
+        if upgraded:
+            # 第二条提醒必须一眼看出跟第一条不一样，否则客服会当成重复推送划走
+            text = "【升级】这位客户刚从弱意愿变成强意愿——\n\n" + text
+        if sender.send_direct_text(to, text):
             store.mark_lead_notified(group.group_id)
             # 瞬态标记（不入库）：告诉调用方「这一轮真的推送了」。
             # service 据此跳过同一条消息的逐条提醒——律师不该为一件事收到两条 DM。

@@ -65,7 +65,9 @@ class Pipeline:
 
         只复核规则判「default-silence」的样本（漏答方向）；高优先级规则命中不交模型改判。
         """
-        action, category, urgent, reasons = rules.classify(msg.content, msg.msg_type)
+        action, category, urgent, reasons = rules.classify(
+            msg.content, msg.msg_type, is_one_on_one=group.is_kf,
+        )
         if (
             action == Action.SILENCE
             and "default-silence" in reasons
@@ -282,6 +284,22 @@ class Pipeline:
         # 当场推的问题是客户才说了一句「在吗」——那张单上什么也没有，
         # 三十秒后他讲完案情还得再推一张。
         if not urgent_kf and signals.detect(msg.content)[0] == signals.COLD:
+            # 这一条本身不出单，但**分数要照算**。客户是边聊边变强的：
+            # 留了电话（40 分）之后接着问「赔多少」「地址在哪」，
+            # 每一句都在加分——旧写法在这里直接 return，于是那些后续加分
+            # 一次都没被记进去，客服看到的永远是他刚留电话那一刻的样子。
+            # summarize=False：不烧模型，纯规则重算，成本接近零。
+            # 走 dispatch 而不是直接重算：这样「弱 → 强」那一跳能当场推给客服，
+            # 而那一跳恰恰最可能发生在这类看似平淡的追问里。
+            if self.store.get_lead(msg.group_id) is not None:
+                try:
+                    row = lead.dispatch(
+                        self.store, group, convo, self.sender,
+                        settings=self.settings, summarize=False,
+                    )
+                    return bool(row and row.get("_notified_now"))
+                except Exception:
+                    logger.exception("lead rescore failed: %s", msg.group_id)
             return False
         try:
             # 用门控后的 sender：影子模式只入库不外发（与律师提醒口径一致）

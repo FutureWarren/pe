@@ -43,10 +43,22 @@ ANGRY_PATTERNS = [
 ]
 
 # ---------------------------------------------------------------- 报价试探
+# 「多少钱」问的是谁的钱——这一条区分不出来，代价极大。
+# 真机测试：客户问「赔偿大概多少钱」，被判成费用咨询，于是 AI 回了一段
+# 「费用得律师了解情况后才能给准数」。客户问的是**他能拿到多少**，
+# 我们答的是**我们收多少**，答非所问且显得像在推销。
+# 这恰恰是人身损害、劳动争议里最常被问的一句话。
+CLIENT_MONEY = re.compile(
+    r"(赔偿|赔付|理赔|补偿|补偿金|赔多少|能赔|该赔|获赔|"
+    r"工资|欠款|欠薪|加班费|双倍|经济补偿|抚养费|赡养费|彩礼|"
+    r"伤残|误工|营养费|护理费|精神损失|保险|"
+    r"能(拿|要|争取|追)(回|到)|拿得?回|要得?回|追得?回)"
+)
+
 FEE_PATTERNS = [
     r"(多少钱|几多钱|什么价|啥价)",
     r"(收费|费用|价格|报价|价位)(是|大概|多少|怎么|如何|标准)?",
-    r"律师费",
+    r"(律师费|代理费|咨询费|服务费|办案费)",
     r"(便宜|优惠|打折|折扣|少收|减免)(点|一点|些)?",
     r"(分期|先办后付|风险代理)",
     r"(尾款|余款)",
@@ -128,7 +140,7 @@ GENERAL_TOPIC = (
     r"赔偿|误工费|精神损失|伤残鉴定|工伤|辞退|裁员|欠薪|加班费|仲裁|社保|"
     # 劳动争议是本所主业，词表按客户的说法补全：真机测试里「拖欠工资」四个字
     # 竟然不在词表里，于是「公司拖欠工资怎么办」被判成默认沉默——最该答的问题答不了
-    r"拖欠工资|欠工资|克扣工资|压工资|工资(没|未|不)发|经济补偿|补偿金|双倍工资|"
+    r"拖欠.{0,4}工资|欠工资|克扣工资|压工资|工资(没|未|不)发|经济补偿|补偿金|双倍工资|"
     r"(未|没)签(劳动)?合同|竞业|试用期|调岗|降薪|劳务派遣|离职|年终奖|"
     r"合同(违约|无效|解除)?|违约金|定金|订金|借条|欠条|利息|诉讼时效|担保|抵押|"
     r"起诉|上诉|申诉|开庭流程|立案(条件|流程|标准)|证据|举证|管辖|强制执行|失信|"
@@ -137,8 +149,14 @@ GENERAL_TOPIC = (
     r"名誉权|隐私|网暴|造谣|骚扰|家暴|保护令|监护|收养)"
 )
 QUESTION_HINT = (
-    r"([?？]|吗[。!！~～]?$|呢[。!！~～]?$|如何|怎么(办|判|算|赔|分|处理|规定)|"
-    r"什么(条件|标准|流程|规定|后果)|有什么|需要什么|能不能|可不可以|可以.{0,8}吗|"
+    # 「怎么X」「什么X」原本是**封闭枚举**，于是「怎么认定」「什么责任」这类
+    # 一个字不在表里就整条掉出去——真机测试里「交通事故责任怎么认定」被判成
+    # 默认沉默。客户的说法是无穷的，穷举必然漏；这里改成开放式：
+    # 只要是「怎么/什么/哪些…」的问法就算提问。多召回的代价只是多答一句，
+    # 而且后面还有合规闸门和模型的示弱出口兜着；漏掉的代价是客户被晾在那儿。
+    r"([?？]|吗[。!！~～]?$|呢[。!！~～]?$|如何|怎[么样]|咋(办|弄|整|说)|"
+    r"什么|哪些|哪个|哪种|多久|多长|多大|"
+    r"有什么|需要什么|能不能|可不可以|可以.{0,8}吗|"
     r"要不要|该不该|算不算|是不是|一般(判|赔|怎么|多久|多长)|大概(多久|多长|几年)|"
     # 「我能拿到多少赔偿」这类问的是客户能拿多少，不是我们收多少——
     # 律师费问法（多少钱/收费）在更前面的费用层已经拦掉了，这里不会误伤
@@ -147,6 +165,17 @@ QUESTION_HINT = (
 )
 
 GENERAL_EXCLUDE_SELF_CASE = re.compile(CASE_SELF_REF)
+
+# 所务事实：地址、怎么走、上班时间。这些答案就在配置里躺着，
+# 却曾经被当成「没读懂」丢给承接——真机测试里客户问「地址在什么地方」，
+# AI 回「我都记着呢，会连同前面说的一起转给律师」。
+# 客户要的是一句话就能给的东西，我们却让他等一个律师回电话。
+# **能当场答的绝不推给人**：每一次推诿都是一次流失。
+OFFICE_FACT = re.compile(
+    r"(地址|地方|哪儿|哪里|在哪|位置|怎么走|怎么去|怎么过去|路线|坐几号线|"
+    r"地铁|停车|门牌|几楼|楼层|导航|上班时间|营业时间|几点(上|下)?班|"
+    r"周末|周六|周日|休息(吗|么)|开门)"
+)
 
 _URGENT = [re.compile(p) for p in URGENT_PATTERNS]
 _ANGRY = [re.compile(p) for p in ANGRY_PATTERNS]
@@ -235,8 +264,15 @@ def _match_any(patterns: list[re.Pattern], text: str) -> str | None:
     return None
 
 
-def classify(content: str, msg_type: str = "text") -> tuple[Action, Category, bool, list[str]]:
-    """返回 (action, category, urgent, reasons)。"""
+def classify(
+    content: str, msg_type: str = "text", *, is_one_on_one: bool = False,
+) -> tuple[Action, Category, bool, list[str]]:
+    """返回 (action, category, urgent, reasons)。
+
+    is_one_on_one：客服/私信这类进线窗口。只影响所务事实那一层——
+    在案件群里「地址发我一下」多半问的是**法院**的地址，把律所地址甩过去
+    是自信地答错；而在进线窗口里问地址的，几乎一定是想来找我们。
+    """
     text = (content or "").strip()
 
     if msg_type != "text" or not text:
@@ -262,8 +298,18 @@ def classify(content: str, msg_type: str = "text") -> tuple[Action, Category, bo
     if _match_any(_WANT_LAWYER_CONTACT, text):
         return Action.HANDOFF, Category.CONTACT, False, ["want-lawyer-contact"]
 
+    # 费用层只管「我们收多少」。客户问「他能拿到多少赔偿」是法律问题，
+    # 不是费用问题——除非他同时提到律师费，那才是真在问我们。
     if hit := _match_any(_FEE, text):
-        return Action.HANDOFF, Category.FEE, False, [f"fee:{hit}"]
+        ours = re.search(
+            r"(律师费|代理费|你们(收|要)|咨询费|服务费|请律师.{0,4}(要|得|多少))", text
+        )
+        if ours or not CLIENT_MONEY.search(text):
+            return Action.HANDOFF, Category.FEE, False, [f"fee:{hit}"]
+        # 走到这儿＝他问的是自己能拿多少。这本来就是个法律问题，
+        # 直接接住；掉回默认沉默等于问了一句最该答的话却没人应。
+        if not GENERAL_EXCLUDE_SELF_CASE.search(text):
+            return Action.ANSWER, Category.GENERAL_LAW, False, ["client-money-question"]
 
     if hit := _match_any(_CASE, text):
         return Action.HANDOFF, Category.CASE_STATUS, False, [f"case:{hit}"]
@@ -271,11 +317,20 @@ def classify(content: str, msg_type: str = "text") -> tuple[Action, Category, bo
     if hit := _match_any(_CONTACT, text):
         return Action.HANDOFF, Category.CONTACT, False, [f"contact:{hit}"]
 
+    # 所务事实（地址/怎么走/上班时间）：能当场答的绝不推给人。
+    # 放在自指兜底之前——「你们地址在哪」不含自指，但「我到你们那儿怎么走」含，
+    # 而后者同样只是想知道路线，推给律师毫无道理。
+    if is_one_on_one and (hit := OFFICE_FACT.search(text)):
+        return Action.ANSWER, Category.OTHER, False, [f"office-fact:{hit.group(0)}"]
+
     # 兜底：凡是自指本案（我的案子/我这个事…）一律承接，不针对本案作答
     if GENERAL_EXCLUDE_SELF_CASE.search(text):
         return Action.HANDOFF, Category.CASE_STATUS, False, ["self-case-ref"]
 
-    if _GENERAL_TOPIC.search(text) and _QUESTION.search(text):
+    # 「客户自己的钱」本身就是一个法律话题：赔多少、能不能要回来、
+    # 补偿怎么算——问的都是权利，不是我们的收费。词表里未必逐个收录，
+    # 但只要问的是他能拿多少，就该接住。
+    if (_GENERAL_TOPIC.search(text) or CLIENT_MONEY.search(text)) and _QUESTION.search(text):
         # 含「我的案子」类自指的，即便话题通用也走承接，避免针对本案下结论
         if GENERAL_EXCLUDE_SELF_CASE.search(text):
             return Action.HANDOFF, Category.CASE_STATUS, False, ["general-but-self-case"]

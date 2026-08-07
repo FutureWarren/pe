@@ -214,7 +214,7 @@ def test_brief_ends_with_a_tappable_link_not_a_dead_end():
            "key_facts": "[]", "factors": "[]", "intent": "hot"}
 
     text = format_notification(row, g, Settings(public_base_url="https://ai.example.com"))
-    assert "https://ai.example.com/ui#g=kf%3Awk1%3AwmAbc" in text, "冒号必须转义，否则链接断在中间"
+    assert "https://ai.example.com/g/kf%3Awk1%3AwmAbc" in text, "冒号必须转义，否则链接断在中间"
     assert "见控制台" not in text
 
 
