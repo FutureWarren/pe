@@ -305,3 +305,37 @@ def test_export_shows_the_real_channel(env):
     assert len(rows) > 1, "这条该已经被评为线索"
     header, first = rows[0], rows[1]
     assert first[header.index("来源")] == "美团"
+
+
+# ---------------------------------------------------------------- 主动发起
+def test_pending_lists_who_is_waiting_to_be_spoken_to(env):
+    """主动发起的话全靠这个接口。客户聊一半不说话了，系统会生成一句挽留——
+    可那句话排进发件箱之后没有任何人会来取，除非客户自己再开口，
+    而他要是再开口，挽留本身就没意义了。"""
+    c, store, _ = env
+    send(c, content="公司拖欠我三个月工资")  # 建档并产生回复
+    c.post("/channel/ack", json={"ids": [x["id"] for x in store.pending_outbound(
+        "ch:meituan:u-1", 50)], "channel": "meituan"}, headers=HEAD)
+    # 之后系统主动生成一句（挽留/跟进），客户并没有再说话
+    store.queue_outbound("ch:meituan:u-1", ["刚才的事您还需要了解吗"],
+                         channel="meituan")
+
+    rows = c.get("/channel/pending", params={"channel": "meituan"},
+                 headers=HEAD).json()["conversations"]
+
+    assert [r["external_id"] for r in rows] == ["u-1"]
+    assert rows[0]["count"] == 1
+
+
+def test_pending_skips_conversations_with_no_external_id(env):
+    """老数据可能没有渠道字段。跳过一条，别让那头拿到一个发不出去的目标。"""
+    c, store, _ = env
+    store.queue_outbound("kf:wk:someone", ["您好"], channel="meituan")
+    rows = c.get("/channel/pending", params={"channel": "meituan"},
+                 headers=HEAD).json()["conversations"]
+    assert rows == []
+
+
+def test_pending_requires_the_token(env):
+    c, _, _ = env
+    assert c.get("/channel/pending", params={"channel": "meituan"}).status_code == 401

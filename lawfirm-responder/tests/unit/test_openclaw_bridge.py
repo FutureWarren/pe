@@ -141,3 +141,57 @@ def test_the_openclaw_specific_bits_are_all_in_one_class():
     used = {line.split("hand.", 1)[1].split("(", 1)[0]
             for line in flow.splitlines() if "hand." in line}
     assert used == {"parse_inbound", "send"}, f"手的接口应当只有两个方法，实际用到 {used}"
+
+
+# ------------------------------------------------------------ 主动发起
+class PollBrain(FakeBrain):
+    def __init__(self, waiting, outbox):
+        super().__init__()
+        self._waiting = waiting
+        self._outbox = outbox
+
+    def pending(self, channel=""):
+        return list(self._waiting)
+
+    def outbox(self, external_id, channel=""):
+        return list(self._outbox.get(external_id, []))
+
+
+def test_proactive_messages_get_delivered_without_the_customer_speaking():
+    """客户聊一半不说话了，系统会生成一句挽留。可对外部渠道来说，
+    那句话排进发件箱之后没有任何人会来取——除非客户自己再开口，
+    而他要是再开口，挽留本身就没意义了。"""
+    brain = PollBrain(
+        [{"external_id": "u1", "channel": "meituan", "count": 1}],
+        {"u1": [{"id": 7, "text": "刚才的事您还需要了解吗"}]},
+    )
+    hand = FakeHand()
+
+    assert bridge.deliver_pending(brain, hand) == 1
+    assert hand.sent == [("u1", "刚才的事您还需要了解吗")]
+    assert brain.acked == [7]
+
+
+def test_proactive_send_failure_is_not_acked():
+    brain = PollBrain(
+        [{"external_id": "u1", "channel": "meituan", "count": 1}],
+        {"u1": [{"id": 7, "text": "在吗"}]},
+    )
+    hand = FakeHand(fail_after=0)
+
+    assert bridge.deliver_pending(brain, hand) == 0
+    assert brain.acked == []
+
+
+def test_a_conversation_without_an_external_id_is_skipped_not_crashed():
+    """老数据可能没有 ext_user_id。跳过一条，别拖垮整轮。"""
+    brain = PollBrain([{"external_id": "", "count": 3}], {})
+    assert bridge.deliver_pending(brain, FakeHand()) == 0
+
+
+def test_unreachable_brain_during_poll_does_not_crash_the_loop():
+    class Dead(FakeBrain):
+        def pending(self, channel=""):
+            raise TimeoutError("连不上")
+
+    assert bridge.deliver_pending(Dead(), FakeHand()) == 0

@@ -184,6 +184,36 @@ def outbox(
             "replies": _outbox_payload(store, gid, max(0, min(take, 20)))}
 
 
+@router.get("/pending")
+def pending(
+    request: Request, channel: str = "", limit: int = 50,
+    x_channel_token: str = Header(default=""),
+):
+    """现在有哪些客户在等我们说话。
+
+    **主动发起的那几句全靠这个接口。** 客户聊了一半不说话了，系统会生成
+    一句挽留；可对外部渠道来说，那句话排进发件箱之后没有任何人会来取——
+    除非客户自己再开口，而他要是再开口，挽留本身就没意义了。
+    所以那头必须定期来问一声「谁在等」，不能只在收到消息时才来。
+    """
+    settings = get_settings()
+    _auth(settings, x_channel_token)
+    ch = _check_channel(channel) if channel else ""
+    store = request.app.state.store
+    if ch:
+        store.touch_channel(ch)
+    rows = store.pending_outbound_targets(ch, limit=max(1, min(limit, 200)))
+    return {"ok": True, "conversations": [
+        {
+            "group_id": r["group_id"],
+            "external_id": r.get("ext_user_id") or "",
+            "channel": r.get("ext_channel") or ch,
+            "count": r["n"],
+        }
+        for r in rows if r.get("ext_user_id")
+    ]}
+
+
 class Ack(BaseModel):
     ids: list[int]
     channel: str = ""

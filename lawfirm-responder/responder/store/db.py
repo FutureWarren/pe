@@ -662,6 +662,32 @@ class Store:
             )
             return cur.rowcount
 
+    def pending_outbound_targets(
+        self, channel: str = "", limit: int = 50,
+    ) -> list[dict]:
+        """哪些会话有话still没送出去。
+
+        存在的理由是**主动发起**的那几句：客户聊了一半不说话了，
+        `worker._sweep_winback` 会生成一句挽留——可对外部渠道来说，
+        那句话排进发件箱之后**没有任何人会来取**，除非客户自己再开口。
+        而客户再开口的话，挽留本身就没意义了。这个接口让那头能主动来问
+        「现在有谁在等我说话」。
+        """
+        sql = (
+            "SELECT o.group_id, g.ext_user_id, g.ext_channel, COUNT(*) AS n,"
+            " MIN(o.created_at) AS oldest"
+            " FROM outbox o LEFT JOIN groups g ON g.group_id = o.group_id"
+            " WHERE o.delivered_at IS NULL"
+        )
+        args: list = []
+        if channel:
+            sql += " AND o.channel=?"
+            args.append(channel)
+        sql += " GROUP BY o.group_id ORDER BY oldest LIMIT ?"
+        args.append(limit)
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(sql, tuple(args)).fetchall()]
+
     def stale_outbound(self, older_than: datetime) -> list[dict]:
         """排了很久还没人来取的——那头多半已经挂了，而客户还在等。"""
         with self._conn() as conn:

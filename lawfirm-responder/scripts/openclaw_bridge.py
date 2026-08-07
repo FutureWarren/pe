@@ -44,6 +44,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 logger = logging.getLogger("openclaw-bridge")
@@ -98,6 +99,26 @@ class Brain:
             "name": name,
             "label": CHANNEL_LABEL,
         }, self._head)
+        return data.get("replies", []) or []
+
+    def pending(self, channel: str = "") -> list[dict]:
+        """谁在等我们说话。挽留、跟进这类**主动发起**的话全靠它。"""
+        url = f"{self.base}/channel/pending?channel={channel or CHANNEL}"
+        req = urllib.request.Request(url)
+        for k, v in self._head.items():
+            req.add_header(k, v)
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            data = json.loads(r.read().decode("utf-8", "replace") or "{}")
+        return data.get("conversations", []) or []
+
+    def outbox(self, external_id: str, channel: str = "") -> list[dict]:
+        url = (f"{self.base}/channel/outbox?channel={channel or CHANNEL}"
+               f"&external_id={urllib.parse.quote(external_id)}")
+        req = urllib.request.Request(url)
+        for k, v in self._head.items():
+            req.add_header(k, v)
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            data = json.loads(r.read().decode("utf-8", "replace") or "{}")
         return data.get("replies", []) or []
 
     def ack(self, ids: list[int]) -> None:
@@ -200,6 +221,61 @@ def handle_one(brain: Brain, hand: OpenClawAdapter, payload: dict) -> dict:
     return {"ok": True, "sent": len(sent_ids), "queued": len(replies)}
 
 
+def deliver_pending(brain: Brain, hand: OpenClawAdapter) -> int:
+    """把「客户没说话、但我们该说话」的那几句送出去。返回送出条数。
+
+    没有这一步，挽留话术会静静躺在发件箱里直到客户自己再开口——
+    而他要是再开口，挽留就没有意义了。这是**主动发起**唯一的出口。
+    """
+    sent = 0
+    try:
+        waiting = brain.pending()
+    except Exception as e:
+        logger.warning("取待发清单失败：%s", e)
+        return 0
+    for convo in waiting:
+        external_id = convo.get("external_id") or ""
+        if not external_id:
+            continue
+        try:
+            replies = brain.outbox(external_id)
+        except Exception:
+            continue
+        ok_ids = []
+        for i, r in enumerate(replies):
+            if i and SEND_GAP_SECONDS > 0:
+                time.sleep(SEND_GAP_SECONDS)
+            if not hand.send(external_id, r.get("text", "")):
+                break
+            ok_ids.append(r.get("id"))
+        if ok_ids:
+            sent += len(ok_ids)
+            try:
+                brain.ack([i for i in ok_ids if isinstance(i, int)])
+            except Exception:
+                logger.warning("销账失败，这几条下轮会重发")
+    return sent
+
+
+def poll_loop(interval: int = 30) -> None:
+    """只轮询、不收 webhook。**美团这类平台就该用这个模式**——
+    那边没有 webhook 可推，消息是被抓下来的，主动发起也只能靠定期问。
+    """
+    brain, hand = Brain(), OpenClawAdapter()
+    last_beat = 0.0
+    while True:
+        try:
+            n = deliver_pending(brain, hand)
+            if n:
+                logger.info("主动送出 %s 条", n)
+            if time.monotonic() - last_beat > HEARTBEAT_SECONDS:
+                last_beat = time.monotonic()
+                brain.heartbeat()
+        except Exception:
+            logger.exception("轮询一轮失败，继续下一轮")
+        time.sleep(max(5, interval))
+
+
 def serve(port: int = LISTEN_PORT) -> None:
     """收 OpenClaw 的 webhook。用标准库，不给那台机器再装一堆依赖。"""
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -222,11 +298,13 @@ def serve(port: int = LISTEN_PORT) -> None:
             except Exception as e:
                 logger.exception("处理失败")
                 out = {"ok": False, "reason": str(e)[:200]}
-            # 心跳搭车发：没有它，「今天没客户」和「三天前就挂了」长得一模一样
+            # 心跳搭车发：没有它，「今天没客户」和「三天前就挂了」长得一模一样。
+            # 顺手把主动发起的话也送掉——挽留那几句没人来取就永远发不出去。
             if time.monotonic() - last_beat[0] > HEARTBEAT_SECONDS:
                 last_beat[0] = time.monotonic()
                 try:
                     brain.heartbeat()
+                    deliver_pending(brain, hand)
                 except Exception:
                     pass
             body = json.dumps(out, ensure_ascii=False).encode()
@@ -273,10 +351,16 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="OpenClaw ↔ 律所大脑 桥接")
     p.add_argument("--probe", action="store_true", help="连通性自检")
     p.add_argument("--send-test", metavar="TO", help="给这个会话试发一条")
+    p.add_argument("--poll", action="store_true",
+                   help="只轮询不收 webhook（美团这类抓取式渠道用这个）")
+    p.add_argument("--interval", type=int, default=30, help="轮询间隔秒")
     p.add_argument("--port", type=int, default=LISTEN_PORT)
     args = p.parse_args(argv)
     if args.probe:
         return probe()
+    if args.poll:
+        poll_loop(args.interval)
+        return 0
     if args.send_test:
         ok = OpenClawAdapter().send(args.send_test, "连通性测试，请忽略。")
         print("✓ 发出去了" if ok else "✗ 没发出去，检查 OPENCLAW_SEND_URL / SHAPE")
