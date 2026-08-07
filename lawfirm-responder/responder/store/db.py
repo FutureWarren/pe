@@ -148,6 +148,34 @@ CREATE TABLE IF NOT EXISTS ops_commands (
     result TEXT DEFAULT '',
     created_at TEXT
 );
+-- 外部渠道发件箱（见 gateway/channel.py）。微信客服和抖音都有推送接口，
+-- 我们主动把话发出去；美团这类平台没有，只能靠 RPA 在那头替我们打字。
+-- 所以回复先落这张表，等 RPA 下一次来取。**不能只靠 HTTP 同步返回**：
+-- 那头一次超时，这句话就永远消失了，而客户还在等。
+CREATE TABLE IF NOT EXISTS outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id TEXT NOT NULL,
+    channel TEXT DEFAULT '',
+    msg_id TEXT DEFAULT '',
+    text TEXT NOT NULL,
+    seq INTEGER DEFAULT 0,          -- 同一条回复拆成的第几段，取件时保序
+    created_at TEXT,
+    delivered_at TEXT               -- NULL = 还没送出去
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_pending
+    ON outbox(group_id, delivered_at, id);
+-- 各渠道的心跳。**失败是静默的**：RPA 那台机器弹个更新窗口就卡住了，
+-- 客户在美团上等了三天，而我们后台一片安静、什么都不会报错。
+-- 这张表存在的唯一理由，就是让「没有动静」本身变成一个能报警的信号。
+CREATE TABLE IF NOT EXISTS channel_state (
+    channel TEXT PRIMARY KEY,
+    label TEXT DEFAULT '',          -- 给人看的渠道名，如「美团-静安店」
+    last_seen_at TEXT,              -- 那头最后一次来过（含空转心跳）
+    last_inbound_at TEXT,           -- 最后一次真的带进来一条客户消息
+    inbound_total INTEGER DEFAULT 0,
+    alerted_at TEXT,                -- 上次报警时刻，避免每轮重复轰炸
+    created_at TEXT
+);
 """
 
 # 旧库平滑升级：新增列在此登记，启动时按需 ALTER（SQLite 无 IF NOT EXISTS 列语法）
@@ -162,6 +190,11 @@ _ADDED_COLUMNS = {
         "kf_external_userid": "TEXT DEFAULT ''",
         # 抖音私信会话的对方标识（open_id）
         "douyin_open_id": "TEXT DEFAULT ''",
+        # 外部渠道会话（RPA 搬运）：渠道标识 + 对方在该渠道的标识。
+        # ext_channel 同时是**线索来源**——没有它，所有从微信客服进来的人
+        # 在后台长得一模一样，投了三个月也说不清哪个渠道该加钱。
+        "ext_channel": "TEXT DEFAULT ''",
+        "ext_user_id": "TEXT DEFAULT ''",
         # 会话已转给哪位律师人工接待（见 docs/kf-handoff.md）。
         # 转接发生在律师「发言之前」，靠发言触发的 human-takeover 兜不住，
         # 必须显式记状态，否则 AI 会抢在律师前面回话。
@@ -247,8 +280,8 @@ class Store:
                 """INSERT INTO groups (group_id,name,client_status,case_type,case_stage,
                    lawyer_name,lawyer_userid,backup_userid,ai_enabled,robot_webhook,
                    bot_webhook,bot_webhook_at,kf_open_kfid,kf_external_userid,
-                   douyin_open_id,handoff_userid,handoff_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   douyin_open_id,ext_channel,ext_user_id,handoff_userid,handoff_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(group_id) DO UPDATE SET
                    name=excluded.name, client_status=excluded.client_status,
                    case_type=excluded.case_type, case_stage=excluded.case_stage,
@@ -260,6 +293,8 @@ class Store:
                    kf_open_kfid=excluded.kf_open_kfid,
                    kf_external_userid=excluded.kf_external_userid,
                    douyin_open_id=excluded.douyin_open_id,
+                   ext_channel=excluded.ext_channel,
+                   ext_user_id=excluded.ext_user_id,
                    handoff_userid=excluded.handoff_userid,
                    handoff_at=excluded.handoff_at""",
                 (
@@ -268,6 +303,7 @@ class Store:
                     g.robot_webhook, g.bot_webhook,
                     g.bot_webhook_at.isoformat() if g.bot_webhook_at else None,
                     g.kf_open_kfid, g.kf_external_userid, g.douyin_open_id,
+                    g.ext_channel, g.ext_user_id,
                     g.handoff_userid,
                     g.handoff_at.isoformat() if g.handoff_at else None,
                 ),
@@ -581,6 +617,105 @@ class Store:
         sql += " ORDER BY hits DESC, id DESC LIMIT ?"
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(sql, (*args, limit)).fetchall()]
+
+    # ------------------------------------------------------ 外部渠道发件箱
+    def queue_outbound(
+        self, group_id: str, texts: list[str], *, channel: str = "", msg_id: str = "",
+    ) -> int:
+        """把要对客户说的话排进发件箱，等那头的 RPA 来取。返回排了几条。"""
+        rows = [t for t in (x.strip() for x in texts) if t]
+        if not rows:
+            return 0
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            conn.executemany(
+                "INSERT INTO outbox(group_id, channel, msg_id, text, seq, created_at)"
+                " VALUES(?,?,?,?,?,?)",
+                [(group_id, channel, msg_id, t, i, now) for i, t in enumerate(rows)],
+            )
+        return len(rows)
+
+    def pending_outbound(self, group_id: str, limit: int = 20) -> list[dict]:
+        """取出还没送达的，按入队顺序。**只读不销账**——销账要等那头确认发出去了。
+
+        顺序不是装饰性的：分条回复的第二句接着第一句说，倒过来客户会看不懂。
+        """
+        with self._conn() as conn:
+            return [
+                dict(r) for r in conn.execute(
+                    "SELECT id, text, msg_id, seq FROM outbox"
+                    " WHERE group_id=? AND delivered_at IS NULL"
+                    " ORDER BY id LIMIT ?",
+                    (group_id, limit),
+                ).fetchall()
+            ]
+
+    def ack_outbound(self, ids: list[int]) -> int:
+        """那头确认发出去了才销账。没确认的下次照样取得到——宁可重发也不能丢。"""
+        rows = [int(i) for i in ids if str(i).lstrip("-").isdigit()]
+        if not rows:
+            return 0
+        with self._conn() as conn:
+            cur = conn.executemany(
+                "UPDATE outbox SET delivered_at=? WHERE id=? AND delivered_at IS NULL",
+                [(datetime.now().isoformat(), i) for i in rows],
+            )
+            return cur.rowcount
+
+    def stale_outbound(self, older_than: datetime) -> list[dict]:
+        """排了很久还没人来取的——那头多半已经挂了，而客户还在等。"""
+        with self._conn() as conn:
+            return [
+                dict(r) for r in conn.execute(
+                    "SELECT channel, COUNT(*) AS n, MIN(created_at) AS oldest"
+                    " FROM outbox WHERE delivered_at IS NULL AND created_at < ?"
+                    " GROUP BY channel",
+                    (older_than.isoformat(),),
+                ).fetchall()
+            ]
+
+    # ------------------------------------------------------ 渠道心跳
+    def touch_channel(
+        self, channel: str, *, inbound: bool = False, label: str = "",
+    ) -> None:
+        """记一次「那头还活着」。inbound=True 表示这次真带进来一条客户消息。
+
+        空转心跳和真实进线要分开记：一个渠道可以「连着」但一整天没人说话，
+        那是正常的；而「连都连不上」是故障。混成一个数就分不清了。
+        """
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO channel_state(channel, label, last_seen_at,"
+                " last_inbound_at, inbound_total, created_at)"
+                " VALUES(?,?,?,?,?,?)"
+                " ON CONFLICT(channel) DO UPDATE SET"
+                " last_seen_at=excluded.last_seen_at,"
+                " label=CASE WHEN excluded.label != '' THEN excluded.label"
+                "            ELSE channel_state.label END,"
+                " last_inbound_at=CASE WHEN ? THEN excluded.last_inbound_at"
+                "                      ELSE channel_state.last_inbound_at END,"
+                " inbound_total=channel_state.inbound_total + ?,"
+                # 有动静了就清掉报警时刻，下次再断还能再报一次
+                " alerted_at=CASE WHEN ? THEN NULL ELSE channel_state.alerted_at END",
+                (channel, label, now, now if inbound else None, 1 if inbound else 0,
+                 now, int(inbound), 1 if inbound else 0, int(inbound)),
+            )
+
+    def list_channel_state(self) -> list[dict]:
+        with self._conn() as conn:
+            return [
+                dict(r) for r in conn.execute(
+                    "SELECT * FROM channel_state ORDER BY channel"
+                ).fetchall()
+            ]
+
+    def mark_channel_alerted(self, channel: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE channel_state SET alerted_at=? WHERE channel=?",
+                (datetime.now().isoformat(), channel),
+            )
 
     def get_knowledge(self, kid: int) -> dict | None:
         with self._conn() as conn:

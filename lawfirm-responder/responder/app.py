@@ -11,6 +11,7 @@ from responder.console.api import router as console_router
 from responder.console.api import ui_router
 from responder.engine import llm
 from responder.gateway.callback import router as callback_router
+from responder.gateway.channel import router as channel_router
 from responder.gateway.douyin import DouyinClient
 from responder.gateway.sender import WeComSender
 from responder.gateway.wecom_kf import KfClient
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.state.pipeline = pipeline
     app.state.worker = worker
     app.include_router(callback_router)
+    app.include_router(channel_router)
     app.include_router(console_router)
     app.include_router(ui_router)
 

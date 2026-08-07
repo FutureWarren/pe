@@ -71,6 +71,19 @@ class Settings(BaseSettings):
     # 抖音会话建档后线索简报的默认接收人（抖音侧没有「接待人」可查）
     douyin_default_notify_userid: str = ""
 
+    # ---- 外部渠道接入（RPA 等自动化工具搬运，见 gateway/channel.py 与 docs/channels.md）
+    channel_enabled: bool = True
+    # 接入令牌。**必须与 admin_token 分开**：RPA 跑在一台随时可能被人碰的
+    # 桌面电脑上，令牌等于摊在那儿；共用一个，控制台就跟着一起丢了。
+    # 留空 = 不开放接入口（默认拒绝，不是默认放行）。
+    channel_token: str = ""
+    # 一条回复排进发件箱多久没人来取就报警。RPA 那头卡住是**静默失败**：
+    # 客户在等，而我们后台一片安静。这个数就是「静悄悄」的容忍上限。
+    channel_stale_alert_minutes: int = 15
+    # 一个渠道多久完全没动静就报警（含空转心跳）。比上面那个宽得多：
+    # 半天没客户说话是正常的，半天连不上才是故障。
+    channel_silent_alert_hours: int = 6
+
     # ---- 会话转接（见 docs/kf-handoff.md）
     # 强意愿线索直接把会话转给分到的律师，他在企微客服工作台接着聊，
     # 省掉「打电话」这个最容易断的环节。

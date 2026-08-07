@@ -64,11 +64,34 @@ def _when(iso: str) -> str:
         return iso or ""
 
 
-def _source(group_id: str) -> str:
+# 渠道标识 → 给人看的名字。表里写「meituan」没人看得懂，
+# 而这一列是管理员判断「钱该往哪加」的唯一依据。
+_CHANNEL_CN = {
+    "meituan": "美团", "dianping": "点评", "xhs": "小红书",
+    "douyin": "抖音", "wechat": "微信", "baidu": "百度",
+    "shipinhao": "视频号", "web": "官网", "offline": "线下",
+}
+
+
+def _source(group_id: str, group=None) -> str:
+    """线索从哪来。
+
+    优先用会话档案上记的渠道：所有从微信客服进来的人在库里长得一模一样，
+    光看 group_id 只能答出「微信客服」——而视频号来的、官网来的、名片扫的
+    是完全不同的三笔生意，分不开就说不清哪个渠道该加钱。
+    """
+    channel = getattr(group, "ext_channel", "") if group else ""
+    if channel:
+        label = _CHANNEL_CN.get(channel, channel)
+        return label
     if group_id.startswith("kf:"):
         return "微信客服"
     if group_id.startswith(("dy:", "dyim:")):
         return "抖音"
+    if group_id.startswith("ch:"):
+        # 档案缺渠道字段（老数据）时从 group_id 里兜一层
+        part = group_id.split(":")[1] if group_id.count(":") >= 2 else ""
+        return _CHANNEL_CN.get(part, part or "外部渠道")
     return "群聊"
 
 
@@ -105,7 +128,7 @@ def build_rows(
         computed = {
             "created_at": _when(row.get("created_at", "")),
             "_name": (group.name if group else "") or row.get("contact", "") or "—",
-            "_source": _source(gid),
+            "_source": _source(gid, group),
             "_facts": "；".join(str(f) for f in facts),
             "_lawyer": names.get(row.get("assigned_userid", ""), "") or "未派单",
             "_status": _STATUS_CN.get(row.get("status", ""), row.get("status", "")),

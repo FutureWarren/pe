@@ -602,6 +602,19 @@ class Pipeline:
         """
         webhook = self._reply_webhook(group)
         max_parts = self.settings.split_max_parts
+        if group.is_external:
+            # 外部渠道（RPA 搬运）没有推送接口：话排进发件箱，等那头来取。
+            # **不在这里等那头**——它可能正卡在一个更新弹窗上，而这个函数
+            # 跑在消息处理链里，一等就把整条链堵死。
+            chunks = (
+                sanitize.split_messages(text, max_parts)
+                if self.settings.split_messages
+                else [text]
+            )
+            n = self.store.queue_outbound(
+                group_id, chunks, channel=group.ext_channel,
+            )
+            return n > 0, n
         if group.is_douyin:
             # 抖音先按配额收敛，再按话术拆条——顺序反了会拆出发不出去的尾巴
             budget = self._douyin_budget(group_id)

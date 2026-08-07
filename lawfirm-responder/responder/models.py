@@ -55,6 +55,11 @@ class GroupProfile(BaseModel):
     # 抖音企业号私信会话：对方的 open_id。与微信客服同属「一对一」，
     # 但发送侧受平台配额限制（24 小时窗口 / 6 条），见 gateway/douyin.py
     douyin_open_id: str = ""
+    # 外部渠道会话（美团/小红书/…）：由 RPA 之类的自动化工具搬运收发。
+    # 判断层与微信客服完全同构，差异只在「怎么把字发出去」——外部渠道没有
+    # 推送接口，回复排进发件箱等那头来取（见 gateway/channel.py）。
+    ext_channel: str = ""  # 渠道标识，如 meituan / xhs
+    ext_user_id: str = ""  # 对方在该渠道的标识
     # 会话已转人工接待：接手的律师 userid 与转接时刻（见 docs/kf-handoff.md）
     handoff_userid: str = ""
     handoff_at: datetime | None = None
@@ -69,14 +74,25 @@ class GroupProfile(BaseModel):
         return bool(self.douyin_open_id)
 
     @property
+    def is_external(self) -> bool:
+        """外部渠道会话（由 RPA 等自动化工具搬运收发）。"""
+        return bool(self.ext_channel and self.ext_user_id)
+
+    @property
     def is_kf(self) -> bool:
         """一对一客服会话。与群聊的关键差异：AI 是第一响应人而非补位者，
         故不等待、不对开场白沉默（见 engine/decision.py）。
 
-        抖音私信在判断层与微信客服完全同构（都是客户主动找上门的一对一窗口），
-        故一并归入 is_kf——差异只在「怎么把字发出去」，那在发送层处理。
+        抖音私信、以及 RPA 搬运的外部渠道，在判断层与微信客服完全同构
+        （都是客户主动找上门的一对一窗口），故一并归入 is_kf——差异只在
+        「怎么把字发出去」，那在发送层处理。这条同构是整套多渠道方案的地基：
+        **每多一个渠道只该多一只「手」，判断、评分、合规、派单一行都不该动。**
         """
-        return bool(self.kf_open_kfid and self.kf_external_userid) or self.is_douyin
+        return (
+            bool(self.kf_open_kfid and self.kf_external_userid)
+            or self.is_douyin
+            or self.is_external
+        )
 
 
 class IncomingMessage(BaseModel):

@@ -27,6 +27,14 @@ from responder.models import Action, ClientStatus, GroupProfile, IncomingMessage
 from responder.notify import escalation
 from responder.reply import templates
 
+
+def _fmt_when(iso: str) -> str:
+    """ISO 时间戳不是给人读的——告警是要人当场看懂并行动的。"""
+    try:
+        return datetime.fromisoformat(iso).strftime("%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return iso or "（时间未知）"
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,8 +128,74 @@ class Worker:
         self._sweep_customer_memory(now)
         self._sweep_lead_sla(now)
         self._sweep_winback(now)
+        self._sweep_channel_health(now)
         self._maybe_auto_update(now)
         self._maybe_daily_digest(now)
+
+    def _sweep_channel_health(self, now: datetime) -> None:
+        """外部渠道的死活自查。
+
+        这是整套多渠道方案里最容易被省掉、也最不该省的一块。RPA 跑在一台
+        普通电脑上：系统弹个更新窗口、浏览器改版、被人误关——它就停了。
+        **而停了是没有任何动静的**：客户在美团上问了话没人理，我们后台一片安静，
+        日志里连一行错误都没有。等发现时已经过去三天。
+
+        两个不同的故障，分开报：
+          1. **话发不出去**——回复排进发件箱很久没人来取，客户正在等（分钟级）。
+          2. **人没了**——整个渠道连心跳都没有（小时级）。半天没客户说话是
+             正常的，半天连不上不是。
+
+        报过一次就记下来，等那头恢复了自动清零——否则每 10 秒轰炸一次，
+        很快就没人看了，而下一次真出事时也一样没人看。
+        """
+        s = self.pipeline.settings
+        if not s.channel_enabled or self.sender is None:
+            return
+        target = s.default_notify_userid or s.bot_default_notify_userid
+        if not target:
+            return
+        try:
+            state = {c["channel"]: c for c in self.store.list_channel_state()}
+            alarms: list[str] = []
+
+            stuck = self.store.stale_outbound(
+                now - timedelta(minutes=max(1, s.channel_stale_alert_minutes))
+            )
+            for row in stuck:
+                ch = row["channel"] or "（未标渠道）"
+                if (state.get(ch) or {}).get("alerted_at"):
+                    continue
+                alarms.append(
+                    f"「{ch}」有 {row['n']} 条回复排队发不出去，最早一条在"
+                    f" {_fmt_when(row['oldest'])}——客户正在那头等着。"
+                    "多半是那台跑自动化的电脑卡住了，去看一眼。"
+                )
+
+            silent_for = timedelta(hours=max(1, s.channel_silent_alert_hours))
+            for ch, row in state.items():
+                if row.get("alerted_at") or not row.get("last_seen_at"):
+                    continue
+                if any(ch in a for a in alarms):
+                    continue  # 已经因为发不出去报过了，别重复说
+                try:
+                    last = datetime.fromisoformat(row["last_seen_at"])
+                except (TypeError, ValueError):
+                    continue
+                if now - last > silent_for:
+                    hours = int((now - last).total_seconds() // 3600)
+                    alarms.append(
+                        f"「{row.get('label') or ch}」已经 {hours} 小时没有任何动静了。"
+                        "这不是「今天没客户」——连心跳都断了，那头应该是停了。"
+                    )
+
+            for text in alarms:
+                if self.sender.send_direct_text(target, f"【渠道告警】\n{text}") is not False:
+                    ch = text.split("「", 1)[-1].split("」", 1)[0]
+                    for key, row in state.items():
+                        if key == ch or row.get("label") == ch:
+                            self.store.mark_channel_alerted(key)
+        except Exception:
+            logger.exception("channel health sweep failed")
 
     def _maybe_daily_digest(self, now: datetime) -> None:
         """每天固定时间给管理员推一份战报。
