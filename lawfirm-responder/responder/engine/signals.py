@@ -90,5 +90,9 @@ def scan(history: list[dict]) -> tuple[str, str, list[str]]:
         level, names = detect(m.get("content", ""))
         levels.append(level)
         hits.update(names)
-        contact = contact or extract_contact(m.get("content", ""))
+        # 取**最后**一个号码，不是第一个。客户后来改了口
+        # （「刚才那个打不通，用这个 139…」，或换了个人的号），
+        # 我们却把最早那个抄在交接单上——律师打的是一个作废的号码，
+        # 而系统看起来一切正常。以他最后给的为准。
+        contact = extract_contact(m.get("content", "")) or contact
     return rank(*levels), contact, sorted(hits)

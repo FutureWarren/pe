@@ -220,6 +220,10 @@ _ADDED_COLUMNS = {
         "sla_nudged": "INTEGER DEFAULT 0",
         # 律师跟进备注：打完电话记两句，下次跟进不从零开始
         "notes": "TEXT DEFAULT ''",
+        # 上次推送时这条线索的样子。只记 notified_at 判不出「有没有新东西」，
+        # 于是老客户换了话题、换了号码，客服那边还停在上一版。
+        "notified_score": "INTEGER DEFAULT 0",
+        "notified_contact": "TEXT DEFAULT ''",
     },
 }
 
@@ -1273,9 +1277,16 @@ class Store:
             )
 
     def mark_lead_notified(self, group_id: str) -> None:
+        """记下「推送时这条线索长什么样」，供下次判断值不值得再推一条。
+
+        只记时间是不够的：老客户隔半小时又来，说的是另一件事、留了另一个号，
+        而系统看到「刚推过」就闭嘴了——客服那边永远停在上一版。
+        存下当时的分数与联系方式，变化够大才再响一次。
+        """
         with self._conn() as conn:
             conn.execute(
-                "UPDATE leads SET notified_at=? WHERE group_id=?",
+                "UPDATE leads SET notified_at=?, notified_score=score,"
+                " notified_contact=contact WHERE group_id=?",
                 (datetime.now().isoformat(), group_id),
             )
 

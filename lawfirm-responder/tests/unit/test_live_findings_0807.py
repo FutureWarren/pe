@@ -282,3 +282,122 @@ def test_a_lawyer_speaking_in_a_group_does_not_mark_it_handed_off():
     p.handle(IncomingMessage(msg_id="s1", group_id="g1", sender_id="wei",
                              sender_is_staff=True, content="我看一下"))
     assert store.get_group("g1").handoff_userid == ""
+
+
+# ------------------------------------------------------ 八、老客户回访不能静默
+def _returning(tmp_path, first, second, gap_minutes=35):
+    """上午聊过一次并推送过，隔 gap_minutes 又来聊第二通。返回第二通推了几条。"""
+    from datetime import datetime, timedelta
+
+    from responder.config import Settings
+    from responder.models import IncomingMessage
+    from responder.service import Pipeline
+    from responder.store.db import Store
+
+    class Snd:
+        def __init__(self):
+            self.dm = []
+
+        def send_direct_text(self, u, t):
+            self.dm.append(t)
+            return True
+
+        def send_group_text(self, *a, **k):
+            return True
+
+        def send_robot_text(self, *a, **k):
+            return True
+
+    s = Settings(mode="live", db_path=str(tmp_path / "r.db"), llm_provider="none",
+                 split_messages=False, default_notify_userid="wei")
+    store = Store(s.db_path)
+    gid = "kf:wk:back"
+    store.upsert_group(GroupProfile(
+        group_id=gid, kf_open_kfid="wk", kf_external_userid="back",
+        client_status=ClientStatus.PROSPECT, lawyer_userid="wei",
+    ))
+    snd = Snd()
+    p = Pipeline(store, snd, s)
+    now = datetime.now()
+    for i, t in enumerate(first):
+        m = IncomingMessage(msg_id=f"a{i}", group_id=gid, sender_id="back", content=t,
+                            created_at=now - timedelta(minutes=gap_minutes + 5 - i))
+        store.save_message(m)
+        p.handle(m)
+    assert snd.dm, "第一通就该推一张单"
+    snd.dm.clear()
+    for i, t in enumerate(second):
+        m = IncomingMessage(msg_id=f"b{i}", group_id=gid, sender_id="back", content=t,
+                            created_at=now - timedelta(minutes=5 - i))
+        store.save_message(m)
+        p.handle(m)
+    return snd.dm, store.get_lead(gid)
+
+
+def test_a_returning_customer_with_a_new_phone_gets_pushed_again(tmp_path):
+    """真机 2026-08-07：老客户隔半小时回来，说的是另一件事、留了另一个号，
+    而系统看到「刚推过、意向档位没变」就一条不推——客服那边永远停在上一版：
+    案由是错的、电话是作废的、摘要是上午那件事。这不是防打扰，是丢单。"""
+    dm, lead = _returning(
+        tmp_path,
+        ["我出了交通事故想咨询", "15221896203"],
+        ["拖欠工资", "这种能起诉吗？", "拖欠我3个月工资，3万多", "13919992880"],
+    )
+    assert dm, "换了号码、换了案由，客服必须知道"
+    assert "新联系方式" in dm[0]
+    assert lead["contact"] == "13919992880"
+
+
+def test_the_latest_phone_wins_not_the_first(tmp_path):
+    """客户后来改了口（「刚才那个打不通，用这个」），我们却把最早那个抄在
+    交接单上——律师打的是一个作废的号码，而系统看起来一切正常。"""
+    from responder.engine import signals
+
+    history = [
+        {"content": "我的号码 15221896203", "sender_is_staff": False},
+        {"content": "那个打不通，用 13919992880", "sender_is_staff": False},
+    ]
+    assert signals.scan(history)[1] == "13919992880"
+
+
+def test_a_quiet_returning_customer_does_not_spam(tmp_path):
+    """反过来也要成立：客户回来只说了句无关紧要的，不该再推一条。
+    防打扰的初衷是对的，错的只是判据。"""
+    dm, _ = _returning(
+        tmp_path,
+        ["我出了交通事故想咨询", "15221896203"],
+        ["嗯", "好的", "知道了"],
+    )
+    assert dm == []
+
+
+def test_renotify_reasons_are_distinguishable():
+    """第二条提醒必须一眼看出跟第一条不一样，否则客服会当成重复推送划走。"""
+    from responder import lead as lead_mod
+
+    prev = {"notified_at": "2026-08-07T14:00:00", "priority": "P1",
+            "notified_score": 40, "notified_contact": "138"}
+    assert lead_mod.worth_renotifying(prev, {"priority": "P0", "score": 60,
+                                             "contact": "138"}) == "upgrade"
+    assert lead_mod.worth_renotifying(prev, {"priority": "P1", "score": 40,
+                                             "contact": "139"}) == "contact"
+    assert lead_mod.worth_renotifying(prev, {"priority": "P1", "score": 60,
+                                             "contact": "138"}) == "score"
+    # 分数只涨一点点不值得打扰一次
+    assert lead_mod.worth_renotifying(prev, {"priority": "P1", "score": 45,
+                                             "contact": "138"}) == ""
+    # 反向不推：分数会波动，「刚才急现在不急了」推给人只消耗信任
+    assert lead_mod.worth_renotifying(
+        {"notified_at": "x", "priority": "P0", "notified_score": 80,
+         "notified_contact": "138"},
+        {"priority": "P1", "score": 40, "contact": "138"},
+    ) == ""
+
+
+def test_never_notified_leads_are_not_treated_as_renotify():
+    from responder import lead as lead_mod
+
+    assert lead_mod.worth_renotifying(None, {"priority": "P0", "score": 90}) == ""
+    assert lead_mod.worth_renotifying(
+        {"priority": "P1", "notified_at": None}, {"priority": "P0", "score": 90}
+    ) == ""

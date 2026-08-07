@@ -226,6 +226,52 @@ def _notified_within(previous: dict | None, seconds: int) -> bool:
     return age.total_seconds() < seconds
 
 
+# 分数涨多少才值得再响一次。低于此只更新入库，不打扰人——
+# 客户多说一句「沟通深入 +5」不该换来一条推送；而 15 分意味着
+# 至少一个硬信号出现了（问收费 +15、要加微信 +20、想面谈 +30…）。
+RENOTIFY_SCORE_DELTA = 15
+
+
+def worth_renotifying(previous: dict | None, lead: dict) -> str:
+    """老客户又来了，这一版值不值得再推一条？返回原因，不值得则返回空串。
+
+    **为什么不能只看「刚推过」就闭嘴**（真机 2026-08-07）：
+    老客户隔半小时回来，说的是另一件事（上午问交通事故，下午问拖欠工资）、
+    还留了另一个号码。旧策略看到「距上次推送不到两小时、意向档位没变」
+    就一条不推，于是客服那边永远停在上一版——案由是错的、电话是作废的、
+    摘要是上午那件事。这不是「防打扰」，这是丢单。
+
+    三种变化值得再响一次，都是**客服拿到会做出不同动作**的变化：
+      1. 弱 → 强：该放下手头的事去接了；
+      2. 联系方式变了或刚拿到：打的号不一样，这是最实的一种变化；
+      3. 分数涨了一截：出现了新的硬信号（问收费、要加微信、想面谈…）。
+
+    反向一律不推：分数会波动，「刚才急现在不急了」推给人只消耗信任。
+    """
+    if not previous or not previous.get("notified_at"):
+        return ""  # 没推过就不叫「再推」，走 should_notify 的常规判断
+    tier = (lead.get("priority") or "").upper()
+    if tier == priority.P0 and (previous.get("priority") or "").upper() != priority.P0:
+        return "upgrade"
+    now_contact = (lead.get("contact") or "").strip()
+    was_contact = (previous.get("notified_contact") or previous.get("contact") or "").strip()
+    if now_contact and now_contact != was_contact:
+        return "contact"
+    was_score = previous.get("notified_score") or 0
+    if not was_score:  # 老数据没有快照，退回用当时的分数
+        was_score = previous.get("score") or 0
+    if (lead.get("score") or 0) - was_score >= RENOTIFY_SCORE_DELTA:
+        return "score"
+    return ""
+
+
+_RENOTIFY_PREFIX = {
+    "upgrade": "【升级】这位客户刚从弱意愿变成强意愿——",
+    "contact": "【新联系方式】这位客户刚留了新的号码——",
+    "score": "【有新进展】这位客户又说了些要紧的——",
+}
+
+
 def tier_upgraded(previous: dict | None, tier: str) -> bool:
     """这一轮客户从「弱意愿」升成了「强意愿」吗。
 
@@ -317,7 +363,8 @@ def dispatch(
     # 「弱 → 强」再响一次。判定必须在评分**之后**，因为分数是这一轮才算出来的。
     # 客户边聊边变强（留电话 40 → 问赔多少 +15 → 问地址…），旧策略只认冷/温/热
     # 三档意向，这些变化全在「温」里，于是客服永远只收到最早那条弱意愿提醒。
-    upgraded = tier_upgraded(previous, (lead.get("priority") or "").upper())
+    reason = worth_renotifying(previous, lead)
+    upgraded = bool(reason)
     if upgraded and not notify:
         notify = True
         # 刚才为省成本跳过了模型归纳，而这条恰恰是最该有摘要的一条：
@@ -337,9 +384,9 @@ def dispatch(
     lead = store.get_lead(group.group_id) or lead  # 取回含指派信息的最新版
     if sender and to:
         text = format_notification(lead, group, settings)
-        if upgraded:
+        if reason:
             # 第二条提醒必须一眼看出跟第一条不一样，否则客服会当成重复推送划走
-            text = "【升级】这位客户刚从弱意愿变成强意愿——\n\n" + text
+            text = _RENOTIFY_PREFIX[reason] + "\n\n" + text
         if sender.send_direct_text(to, text):
             store.mark_lead_notified(group.group_id)
             # 瞬态标记（不入库）：告诉调用方「这一轮真的推送了」。
