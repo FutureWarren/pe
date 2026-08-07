@@ -55,6 +55,12 @@
       "why": "demo 前先看一眼战报长什么样——默认早九点才推，等到明早就来不及改了"
     },
     {
+      "id": "2026-08-07-predemo-report",
+      "op": "report",
+      "to": "future",
+      "why": "demo 当天开场前的体检：确认服务器已拉到最新版、客服通道正常、名册与接待人都在"
+    },
+    {
       "id": "2026-08-06-backfill-memory",
       "op": "backfill_memory",
       "to": "future",
