@@ -9,7 +9,7 @@ import pytest
 
 from responder.config import Settings
 from responder.engine import rules
-from responder.models import Action, Category, GroupProfile
+from responder.models import Action, Category, ClientStatus, GroupProfile
 from responder.reply import templates
 
 
@@ -154,3 +154,131 @@ def test_deeplink_cannot_inject_script_through_the_group_id():
     r = TestClient(app).get("/g/" + '</script><script>alert(1)</script>')
     assert r.status_code == 200
     assert "<script>alert(1)</script>" not in r.text
+
+
+# ------------------------------------------------------ 六、持续作答（首轮筛查）
+def in_consult(text):
+    return rules.classify(text, is_one_on_one=True, in_consultation=True)
+
+
+@pytest.mark.parametrize("text", [
+    "那我该准备什么材料",
+    "如果对方不赔怎么办",
+    "责任认定书下来了能改吗",
+    "调解不成还能怎么走",
+    "这个要多久才有结果",
+])
+def test_follow_up_questions_keep_getting_answered(text):
+    """筛查的主体是追问，而**追问几乎从不重复话题词**：客户开头说了
+    「交通事故」，后面问的每一句都不含法律词，于是全部落进默认沉默。
+    可这些正是最该答的——客户每答一句，交给客服的那张单就厚一分。"""
+    action, category, _, reasons = in_consult(text)
+    assert action is Action.ANSWER, f"{text} 落到了 {reasons}"
+    assert category is Category.GENERAL_LAW
+
+
+@pytest.mark.parametrize("text,expect_urgent", [
+    ("我被拘留了怎么办", True),
+    ("明天就开庭了怎么办", True),
+])
+def test_urgent_still_wins_inside_a_consultation(text, expect_urgent):
+    """放宽的是「答不答」，不是「什么都能答」。紧急情形一律先安抚 + 叫人。"""
+    action, category, urgent, _ = in_consult(text)
+    assert (action, urgent) == (Action.HANDOFF, expect_urgent)
+    assert category is Category.URGENT
+
+
+@pytest.mark.parametrize("text", ["你们律师费多少", "这个案子代理费怎么算"])
+def test_fees_are_still_never_answered_inside_a_consultation(text):
+    """AI 绝不报价，这条护栏不因为「要多聊」而松动。"""
+    action, category, _, _ = in_consult(text)
+    assert (action, category) == (Action.HANDOFF, Category.FEE)
+
+
+def test_live_case_progress_is_still_handed_off():
+    """「我的案子什么时候出结果」——我们真的不知道，编一个比不答更糟。"""
+    action, category, _, _ = in_consult("我的案子什么时候能出结果")
+    assert (action, category) == (Action.HANDOFF, Category.CASE_STATUS)
+
+
+def test_chitchat_is_still_silence_inside_a_consultation():
+    for text in ("谢谢", "好的", "嗯嗯"):
+        assert in_consult(text)[0] is Action.SILENCE, text
+
+
+def test_consultation_mode_needs_the_customer_to_have_said_something():
+    """只打了个招呼就放宽，等于对着一句「在吗」大谈法律——
+    那不是热情，是没听懂。"""
+    import tempfile
+
+    from responder.config import Settings
+    from responder.service import Pipeline
+    from responder.store.db import Store
+
+    s = Settings(db_path=tempfile.mktemp(suffix=".db"))
+    p = Pipeline(Store(s.db_path), None, s)
+    g = GroupProfile(group_id="kf:a:b", kf_open_kfid="a", kf_external_userid="b",
+                     client_status=ClientStatus.PROSPECT)
+    assert p._in_consultation(g, [{"content": "你好", "sender_is_staff": False}]) is False
+    assert p._in_consultation(
+        g, [{"content": "我出了交通事故，对方全责但不肯赔", "sender_is_staff": False}]
+    ) is True
+
+
+def test_signed_clients_do_not_get_the_relaxed_mode():
+    """已委托客户由律师全程跟，AI 不该替他答本案。"""
+    import tempfile
+
+    from responder.config import Settings
+    from responder.service import Pipeline
+    from responder.store.db import Store
+
+    s = Settings(db_path=tempfile.mktemp(suffix=".db"))
+    p = Pipeline(Store(s.db_path), None, s)
+    g = GroupProfile(group_id="kf:a:b", kf_open_kfid="a", kf_external_userid="b",
+                     client_status=ClientStatus.SIGNED)
+    assert p._in_consultation(
+        g, [{"content": "我出了交通事故，对方全责但不肯赔", "sender_is_staff": False}]
+    ) is False
+
+
+# ------------------------------------------------------ 七、回一句就接管
+def test_replying_in_the_window_is_the_takeover():
+    """律所方要的「在企微里回一个字就接管」：客服本来就要打字，
+    那句话本身就是接管动作——不用开控制台、不用点按钮。"""
+    import tempfile
+
+    from responder.config import Settings
+    from responder.models import IncomingMessage
+    from responder.service import Pipeline
+    from responder.store.db import Store
+
+    s = Settings(db_path=tempfile.mktemp(suffix=".db"), mode="live")
+    store = Store(s.db_path)
+    gid = "kf:wk:c1"
+    store.upsert_group(GroupProfile(
+        group_id=gid, kf_open_kfid="wk", kf_external_userid="c1",
+        client_status=ClientStatus.PROSPECT,
+    ))
+    p = Pipeline(store, None, s)
+    p.handle(IncomingMessage(msg_id="s1", group_id=gid, sender_id="wei",
+                             sender_is_staff=True, content="我来跟您说"))
+    assert store.get_group(gid).handoff_userid == "wei"
+
+
+def test_a_lawyer_speaking_in_a_group_does_not_mark_it_handed_off():
+    """群聊里律师发言是常态，把群标成「已转接」会让 AI 从此在群里失声。"""
+    import tempfile
+
+    from responder.config import Settings
+    from responder.models import IncomingMessage
+    from responder.service import Pipeline
+    from responder.store.db import Store
+
+    s = Settings(db_path=tempfile.mktemp(suffix=".db"), mode="live")
+    store = Store(s.db_path)
+    store.upsert_group(GroupProfile(group_id="g1", name="客户群"))
+    p = Pipeline(store, None, s)
+    p.handle(IncomingMessage(msg_id="s1", group_id="g1", sender_id="wei",
+                             sender_is_staff=True, content="我看一下"))
+    assert store.get_group("g1").handoff_userid == ""

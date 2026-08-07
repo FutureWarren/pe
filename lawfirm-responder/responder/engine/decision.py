@@ -123,7 +123,14 @@ def decide(
     # 律师前面回话，客户会看到两个"人"同时在说话。
     if group.handoff_userid and group.handoff_at is not None:
         waited = (now - group.handoff_at).total_seconds()
-        if waited < settings.handoff_reclaim_seconds:
+        # 接手的人正在说话，就别按「超时没人接」把客户收回来——
+        # 那会变成客服聊到一半，AI 突然插进来抢话。回收是给「转过去却没人理」
+        # 准备的兜底，不是一个到点必响的闹钟。
+        being_handled = (
+            seconds_since_last_staff_reply is not None
+            and seconds_since_last_staff_reply <= waited
+        )
+        if waited < settings.handoff_reclaim_seconds or being_handled:
             decision.reasons.append(f"gate:handed-off({group.handoff_userid})")
             return decision
         # 超时仍没人接手：把客户交回 AI。转接引入的最坏情况是「被转给一个

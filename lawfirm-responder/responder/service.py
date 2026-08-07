@@ -67,6 +67,7 @@ class Pipeline:
         """
         action, category, urgent, reasons = rules.classify(
             msg.content, msg.msg_type, is_one_on_one=group.is_kf,
+            in_consultation=self._in_consultation(group, history),
         )
         if (
             action == Action.SILENCE
@@ -95,6 +96,30 @@ class Pipeline:
                 reasons = reasons + [f"llm-refine({refined.confidence:.2f}):{refined.reason}"]
         return action, category, urgent, reasons
 
+    def _in_consultation(self, group: GroupProfile, history: list[dict]) -> bool:
+        """这通对话已经进入咨询状态了吗。
+
+        进入之后，判据从「命中话题词」放宽为「这是不是一个问句」——
+        因为**追问几乎从不重复话题词**：客户开头说了「交通事故」，接着问
+        「那我该准备什么材料」「如果对方不赔怎么办」，一个法律词都没有，
+        于是全部落进默认沉默。而这些正是筛查最需要的对话：
+        客户每答一句，案情就清楚一分，交给客服的那张单就厚一分。
+
+        三个前提：
+          1. **一对一进线窗口**——群聊里承办律师在场，AI 是补位不是主答；
+          2. **未成交客户**——已委托的客户由律师全程跟，AI 不该替他答本案；
+          3. **客户确实把事说出来过**——只打了个招呼就放宽，等于对着
+             一句「在吗」大谈法律，那不是热情，是没听懂。
+        """
+        if not (group.is_kf and group.client_status == ClientStatus.PROSPECT):
+            return False
+        if group.handoff_userid:
+            return False  # 已转人工，AI 不再作答
+        return any(
+            rules.has_substance(m.get("content", ""))
+            for m in history if not m.get("sender_is_staff")
+        )
+
     # ------------------------------------------------------------ 主流程
     def handle(self, msg: IncomingMessage, *, seconds_unanswered: float = 0.0) -> Decision:
         self.store.save_message(msg)
@@ -107,6 +132,13 @@ class Pipeline:
         )
         # 律师自己的发言只用于更新接管状态，不进判断（沉默同样入判断日志）
         if msg.sender_is_staff:
+            # 客服/律师在这通对话里说了一句话 = 他接手了。就地记成正式转接。
+            # 律所方要的「在企业微信里回一个字就接管」就是这条：不用开控制台、
+            # 不用点按钮——他本来就要打字，那句话本身就是接管动作。
+            # 只对一对一进线窗口生效：群聊里律师发言是常态，不该把群标记成已转接。
+            if group.is_kf and not group.handoff_userid and msg.sender_id:
+                self.store.set_handoff(msg.group_id, msg.sender_id)
+                logger.info("takeover by reply: %s → %s", msg.group_id, msg.sender_id)
             decision = Decision(
                 msg_id=msg.msg_id, group_id=msg.group_id,
                 action=Action.SILENCE, category="chitchat",

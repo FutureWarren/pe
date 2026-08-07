@@ -125,7 +125,13 @@ def test_has_more_pagination(tmp_path):
 
 
 def test_servicer_message_triggers_takeover(tmp_path):
-    """真人客服/律师发言（origin=5）→ 记为 staff，随后客户消息被接管门拦下。"""
+    """真人客服/律师发言（origin=5）→ 记为 staff，随后客户消息被接管门拦下。
+
+    2026-08 起这一步更进一步：一对一窗口里客服说的第一句话直接记成**正式转接**
+    （律所方要的「在企微里回一个字就接管」）。所以拦下它的从限时的
+    human-takeover 变成了持久的 handed-off——AI 不再是「安静一会儿」，
+    而是这通对话已经归人了。
+    """
     store, kf, worker = make_env(tmp_path, [
         {"msg_list": [
             kf_msg("s1", "我来给您解释一下", origin=ORIGIN_SERVICER, servicer="wei"),
@@ -135,7 +141,10 @@ def test_servicer_message_triggers_takeover(tmp_path):
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
     assert kf.sent == []  # 人工刚说过话，AI 不抢答
     reasons = [d["reasons"] for d in store.list_decisions(GID)]
-    assert any("gate:human-takeover" in r for r in reasons)
+    assert any(
+        "gate:human-takeover" in r or "gate:handed-off" in r for r in reasons
+    ), reasons
+    assert store.get_group(GID).handoff_userid == "wei"  # 说一句话就算接手
 
 
 def test_system_message_ignored(tmp_path):

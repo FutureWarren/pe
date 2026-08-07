@@ -171,11 +171,24 @@ GENERAL_EXCLUDE_SELF_CASE = re.compile(CASE_SELF_REF)
 # AI 回「我都记着呢，会连同前面说的一起转给律师」。
 # 客户要的是一句话就能给的东西，我们却让他等一个律师回电话。
 # **能当场答的绝不推给人**：每一次推诿都是一次流失。
-OFFICE_FACT = re.compile(
-    r"(地址|地方|哪儿|哪里|在哪|位置|怎么走|怎么去|怎么过去|路线|坐几号线|"
-    r"地铁|停车|门牌|几楼|楼层|导航|上班时间|营业时间|几点(上|下)?班|"
-    r"周末|周六|周日|休息(吗|么)|开门)"
+# 强线索：出现即认定问的是所里的事
+_OFFICE_STRONG = re.compile(
+    r"(地址|位置|门牌|几楼|楼层|停车|导航|坐几号线|地铁|"
+    r"上班时间|营业时间|几点(上|下)?班|周末|周六|周日|开门)"
 )
+# 弱线索：得配上「你们/所里」之类才算。真机里差点吃掉「调解不成还能怎么走」——
+# 那是问程序往下怎么走，不是问路。答成地址就成了笑话。
+_OFFICE_WEAK = re.compile(r"(怎么走|怎么去|怎么过去|路线|在哪|哪儿|什么地方)")
+_OFFICE_REF = re.compile(r"(你们|贵所|律所|所里|事务所|公司|办公|过去|过来|上门|面谈|当面)")
+
+
+def office_fact_hit(text: str) -> str:
+    """问的是不是所里的地址/怎么走/几点上班。返回命中的词，没命中返回空串。"""
+    if m := _OFFICE_STRONG.search(text):
+        return m.group(0)
+    if (m := _OFFICE_WEAK.search(text)) and _OFFICE_REF.search(text):
+        return m.group(0)
+    return ""
 
 _URGENT = [re.compile(p) for p in URGENT_PATTERNS]
 _ANGRY = [re.compile(p) for p in ANGRY_PATTERNS]
@@ -266,12 +279,26 @@ def _match_any(patterns: list[re.Pattern], text: str) -> str | None:
 
 def classify(
     content: str, msg_type: str = "text", *, is_one_on_one: bool = False,
+    in_consultation: bool = False,
 ) -> tuple[Action, Category, bool, list[str]]:
     """返回 (action, category, urgent, reasons)。
 
     is_one_on_one：客服/私信这类进线窗口。只影响所务事实那一层——
     在案件群里「地址发我一下」多半问的是**法院**的地址，把律所地址甩过去
     是自信地答错；而在进线窗口里问地址的，几乎一定是想来找我们。
+
+    in_consultation：这通对话已经进入咨询状态（客户此前把事说出来了）。
+    **这是首轮筛查能不能成立的关键开关**，业务依据见 CLAUDE.md。
+
+    通用法律话题原本靠关键词白名单命中，可**追问几乎从不重复话题词**：
+    客户开头说了「交通事故」，接着问的是「那我该准备什么材料」「如果对方
+    不赔怎么办」「责任认定书下来了能改吗」——一个话题词都没有，于是全部
+    落进默认沉默。而这些恰恰是筛查最需要的对话：客户每答一句，
+    案情就清楚一分，交给客服的那张单就厚一分。
+
+    进入咨询状态后，判据从「命中话题词」放宽为「这是不是一个问句」。
+    上面几层（紧急/费用/案件进展/找人）一个都没放松，模型那边也仍然
+    只给一般性框架并保留示弱出口。
     """
     text = (content or "").strip()
 
@@ -320,11 +347,16 @@ def classify(
     # 所务事实（地址/怎么走/上班时间）：能当场答的绝不推给人。
     # 放在自指兜底之前——「你们地址在哪」不含自指，但「我到你们那儿怎么走」含，
     # 而后者同样只是想知道路线，推给律师毫无道理。
-    if is_one_on_one and (hit := OFFICE_FACT.search(text)):
-        return Action.ANSWER, Category.OTHER, False, [f"office-fact:{hit.group(0)}"]
+    if is_one_on_one and (hit := office_fact_hit(text)):
+        return Action.ANSWER, Category.OTHER, False, [f"office-fact:{hit}"]
 
-    # 兜底：凡是自指本案（我的案子/我这个事…）一律承接，不针对本案作答
-    if GENERAL_EXCLUDE_SELF_CASE.search(text):
+    # 兜底：凡是自指本案（我的案子/我这个事…）一律承接，不针对本案作答。
+    # **例外：首轮咨询窗口。** 这条护栏是为案件群写的——那里案子是活的、
+    # 有承办律师在跟，替他对本案下结论是越界。而一个刚扫码进来的陌生人，
+    # 说的每一句话都是「我这个事」；在这里恪守它，等于对着来咨询的人
+    # 一个问题都不答，首轮筛查根本无法成立。
+    # 已成交客户不适用本例外（律师全程在跟），由 in_consultation 在上游把关。
+    if GENERAL_EXCLUDE_SELF_CASE.search(text) and not in_consultation:
         return Action.HANDOFF, Category.CASE_STATUS, False, ["self-case-ref"]
 
     # 「客户自己的钱」本身就是一个法律话题：赔多少、能不能要回来、
@@ -335,6 +367,12 @@ def classify(
         if GENERAL_EXCLUDE_SELF_CASE.search(text):
             return Action.HANDOFF, Category.CASE_STATUS, False, ["general-but-self-case"]
         return Action.ANSWER, Category.GENERAL_LAW, False, ["general-law-question"]
+
+    # 咨询进行中：是个问句就接住，不再要求命中话题词。
+    # 追问从不重复话题词——「那我该准备什么材料」里一个法律词都没有，
+    # 可它正是筛查最想听到的那句话。
+    if in_consultation and _QUESTION.search(text):
+        return Action.ANSWER, Category.GENERAL_LAW, False, ["consult:follow-up"]
 
     # 礼貌语（谢谢王律师/辛苦各位了…）：明确沉默，且不进 LLM 复核
     if _COURTESY.match(text):

@@ -206,6 +206,10 @@ def format_notification(
         lines += ["", f"看完整对话：{base}/g/{gid}"]
     else:
         lines += ["", f"完整对话见控制台 · 会话「{group.name or group.group_id}」"]
+    if group.is_kf and not group.handoff_userid:
+        # 接管方式必须写在单子上。功能做了却没人知道，等于没做——
+        # 而这句话省掉的正是「打开控制台、找到会话、点接管」那三步。
+        lines.append("要接手就直接在企业微信「微信客服」里回他一句，AI 会自动让开。")
     return "\n".join(lines)
 
 
