@@ -38,8 +38,10 @@ RPA（影刀、龙虾这类）能替人点那些按钮。但**它只该是一只
 **多接一个渠道，不多一个合规缺口。**
 """
 
+import hashlib
 import logging
 import re
+import time
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -71,6 +73,22 @@ def _check_channel(channel: str) -> str:
     if not _CHANNEL_RE.match(ch):
         raise HTTPException(400, "渠道标识只能用小写字母、数字、下划线、连字符")
     return ch
+
+
+def _fallback_msg_id(gid: str, content: str) -> str:
+    """对方给不出平台消息 id 时，自己造一个**跨进程稳定**的。
+
+    原来用的是内置 `hash()`——Python 每次启动都会换随机种子，
+    于是服务器一重启，那头重投的同一条消息就变成了「新消息」，
+    客户会被回第二遍。而这类工具本来就以重投为常态。
+
+    用 sha1 保证稳定，再掺一个分钟级时间桶：几秒内的重投一定去重，
+    而客户过一会儿真的又发一句一样的话（「在吗」「在吗」）仍然答得上。
+    宁可多答一句，不可把客户晾在那儿。
+    """
+    bucket = int(time.time()) // 60
+    digest = hashlib.sha1(f"{gid}|{content}|{bucket}".encode()).hexdigest()[:16]
+    return f"{gid}:auto:{digest}"
 
 
 def group_id_for(channel: str, external_id: str) -> str:
@@ -137,7 +155,7 @@ def inbound(
     content = (body.content or "").strip()
     if content:
         msg = IncomingMessage(
-            msg_id=body.msg_id.strip() or f"{gid}:{abs(hash(content)) % 10**12}",
+            msg_id=body.msg_id.strip() or _fallback_msg_id(gid, content),
             group_id=gid,
             sender_id=external_id if not body.is_staff else "staff",
             sender_is_staff=body.is_staff,

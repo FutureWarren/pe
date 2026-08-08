@@ -320,6 +320,14 @@ class Store:
             return None
         d = dict(row)
         d["ai_enabled"] = bool(d["ai_enabled"])
+        # NULL → ""：库里但凡有一行的文本列是 NULL（手工改过库、
+        # 早年某次 ALTER 没带 DEFAULT、导入脚本写了 None），
+        # 这里就会抛校验错——而它在**每条客户消息**的处理链上，
+        # 结果是那个客户从此一句话也收不到，控制台打开那一页也是 500。
+        # 一行坏数据不该有这么大的爆炸半径。
+        for key, field in GroupProfile.model_fields.items():
+            if d.get(key) is None and field.annotation is str:
+                d[key] = ""
         return GroupProfile(**d)
 
     def set_memory(self, group_id: str, text: str) -> None:

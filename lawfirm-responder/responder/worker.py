@@ -295,6 +295,12 @@ class Worker:
             return
         if group.client_status != ClientStatus.PROSPECT:
             return
+        # 已经有人接手了就别插话。今天「客服回一句就算接管」上线之后，
+        # 这条从罕见变成常见：客服接过去、聊了两句、客户暂时没回，
+        # 而挽留正好在这时候踩着人家的对话发出去——客户会看到两个「人」
+        # 一前一后说话，客服则完全不知道系统替他说了什么。
+        if group.handoff_userid:
+            return
         convo = self.store.recent_messages(group_id, s.lead_history_window)
         if signals.scan(convo)[1]:
             return  # 已经留了联系方式，没什么好挽的

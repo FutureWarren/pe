@@ -401,3 +401,82 @@ def test_never_notified_leads_are_not_treated_as_renotify():
     assert lead_mod.worth_renotifying(
         {"priority": "P1", "notified_at": None}, {"priority": "P0", "score": 90}
     ) == ""
+
+
+# ------------------------------------------------------ 九、demo 前自查发现
+def test_no_winback_after_a_human_took_over(tmp_path):
+    """今天「客服回一句就算接管」上线之后，这条从罕见变成常见：
+    客服接过去、聊了两句、客户暂时没回，挽留正好在这时候踩着发出去——
+    客户看到两个「人」一前一后说话，而客服完全不知道系统替他说了什么。"""
+    from responder.config import Settings
+    from responder.service import Pipeline
+    from responder.store.db import Store
+    from responder.worker import Worker
+
+    class Snd:
+        def __init__(self):
+            self.sent = []
+
+        def send_direct_text(self, *a, **k):
+            return True
+
+        def send_group_text(self, gid, text):
+            self.sent.append(text)
+            return True
+
+        def send_robot_text(self, *a, **k):
+            return True
+
+    s = Settings(mode="live", db_path=str(tmp_path / "w.db"), llm_provider="none")
+    store = Store(s.db_path)
+    gid = "kf:wk:c"
+    store.upsert_group(GroupProfile(
+        group_id=gid, kf_open_kfid="wk", kf_external_userid="c",
+        client_status=ClientStatus.PROSPECT,
+    ))
+    snd = Snd()
+    w = Worker(Pipeline(store, snd, s), store, sender=snd)
+    store.set_handoff(gid, "wei")
+
+    w._winback_one(gid)
+
+    assert snd.sent == [], "已经有人接手了，AI 不该再插话"
+
+
+def test_channel_fallback_msg_id_is_stable_across_processes():
+    """内置 hash() 每次启动换随机种子。服务器一重启，那头重投的同一条消息
+    就变成了「新消息」，客户被回第二遍——而这类工具本来就以重投为常态。"""
+    import pathlib as _pl
+    import subprocess
+    import sys
+
+    root = str(_pl.Path(__file__).resolve().parents[2])
+    code = (
+        f"import sys; sys.path.insert(0, {root!r});"
+        "from responder.gateway.channel import _fallback_msg_id;"
+        "print(_fallback_msg_id('ch:meituan:u1', '在吗'))"
+    )
+    outs = {
+        subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        .stdout.strip()
+        for _ in range(3)
+    }
+    assert len(outs) == 1, f"跨进程不稳定：{outs}"
+
+
+def test_a_null_column_does_not_blow_up_the_whole_conversation(tmp_path):
+    """库里但凡有一行文本列是 NULL，get_group 就抛校验错——而它在**每条
+    客户消息**的处理链上。结果是那个客户从此一句话也收不到，
+    控制台打开那一页也是 500。一行坏数据不该有这么大的爆炸半径。"""
+    from responder.store.db import Store
+
+    store = Store(str(tmp_path / "n.db"))
+    store.upsert_group(GroupProfile(group_id="kf:a:b", name="客户"))
+    with store._conn() as conn:
+        conn.execute(
+            "UPDATE groups SET lawyer_name=NULL, ext_channel=NULL, memory=NULL"
+            " WHERE group_id='kf:a:b'"
+        )
+
+    g = store.get_group("kf:a:b")
+    assert g is not None and g.lawyer_name == "" and g.ext_channel == ""
