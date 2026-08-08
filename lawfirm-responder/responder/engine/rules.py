@@ -64,7 +64,25 @@ FEE_PATTERNS = [
     r"(尾款|余款)",
     r"还要(交|付|给).{0,6}(钱|费)",
     r"(要|得|是不是要)?加(钱|价|收费?)",
+    # 按比例/按方式的问法。原来这一层也是封闭枚举，于是「你们收多少个点」
+    # 「这个案子你们怎么收」整条掉出费用层——而进入咨询态后它不再落
+    # default-silence（那里还有模型复核兜一道），是直接被判成通用法律问题
+    # 交给模型正面作答。报价问题被当成法律问题回答，是这条链上最贵的误判。
+    r"[几多]少?\s*(个)?点",
+    r"[几多]成",
+    r"(你们|您们|所里|律所|律师)\s*(怎么|如何|按什么|咋)\s*(收|算|报|要)",
+    r"(收费|费用|价钱|价位)\s*(方式|标准|模式|怎么|如何)",
+    r"(风险|后付|按结果)\s*(代理|收费|付)",
+    r"(前期|先)\s*(要|得|需要)?\s*(交|付|给|出)\s*(多少|钱|费)",
 ]
+
+# 只要同时出现「你们/所里/律师」和「收钱」类动词，就按费用承接。
+# 枚举必然漏（这一层已经被漏穿过一次），而多承接一句的代价只是少答一个问题，
+# 报价一次的代价是合规事故。
+FEE_BROAD = re.compile(
+    r"(你们|您们|所里|律所|贵所|律师)[^。！？!?]{0,10}"
+    r"(收|要钱|收钱|报价|价|费|点|成|付|给多少)"
+)
 
 # ---------------------------------------------------------------- 案件特定
 CASE_SELF_REF = (
@@ -171,25 +189,49 @@ GENERAL_EXCLUDE_SELF_CASE = re.compile(CASE_SELF_REF)
 # AI 回「我都记着呢，会连同前面说的一起转给律师」。
 # 客户要的是一句话就能给的东西，我们却让他等一个律师回电话。
 # **能当场答的绝不推给人**：每一次推诿都是一次流失。
-# 强线索：出现即认定问的是所里的事
-_OFFICE_STRONG = re.compile(
-    r"(地址|位置|门牌|几楼|楼层|停车|导航|坐几号线|地铁|"
+# 位置/时间类词。**它们几乎全是双关的**——这一层第一版写宽了，结果
+# 「周末加班没有加班费」「我在停车场被撞了」「地铁上被人偷了手机」
+# 全被当成问路，AI 张口就报律所地址。而劳动争议正是本所主业，
+# 也就是说最常见的客户问题恰好最容易踩中。
+_OFFICE_WORD = re.compile(
+    r"(地址|位置|门牌|几楼|楼层|坐几号线|路线|导航|停车|地铁|"
+    r"怎么走|怎么去|怎么过去|在哪|哪儿|哪里|什么地方|"
     r"上班时间|营业时间|几点(上|下)?班|周末|周六|周日|开门)"
 )
-# 弱线索：得配上「你们/所里」之类才算。真机里差点吃掉「调解不成还能怎么走」——
-# 那是问程序往下怎么走，不是问路。答成地址就成了笑话。
-_OFFICE_WEAK = re.compile(r"(怎么走|怎么去|怎么过去|路线|在哪|哪儿|什么地方)")
-_OFFICE_REF = re.compile(r"(你们|贵所|律所|所里|事务所|公司|办公|过去|过来|上门|面谈|当面)")
+# 只有这几个短问句可以「裸命中」——整句就是在问路，没有别的解释。
+_OFFICE_BARE = re.compile(
+    r"^[^。！？!?]{0,6}(地址|门牌|几楼|楼层|坐几号线)[^。！？!?]{0,8}$"
+)
+# 「你们/所里」这类指向**我们**的词。刻意不含「公司」——客户嘴里的「公司」
+# 十次有九次是他自己那家用人单位（「去哪儿告我们公司」）；
+# 也不含裸的「过去/过来」（「我过去问过他」）。
+_OFFICE_REF = re.compile(
+    r"(你们|您们|贵所|律所|所里|事务所|办公室|办公地|"
+    r"上门|面谈|当面|到所|过来一趟|去一趟|登门)"
+)
 
 
 def office_fact_hit(text: str) -> str:
-    """问的是不是所里的地址/怎么走/几点上班。返回命中的词，没命中返回空串。"""
-    if m := _OFFICE_STRONG.search(text):
+    """问的是不是**所里**的地址/怎么走/几点上班。返回命中的词，没命中返回空串。
+
+    三道闸，缺一不可地窄：
+      1. **只要这句话里有法律话题，一律不算问路。** 「周末加班没有加班费」
+         问的是加班费，不是我们周末上不上班。法律问题永远优先——
+         答错成地址不只是没帮上忙，是当着客户的面证明没听懂。
+      2. 有「你们/所里」这类指向我们的词 + 一个位置/时间词 → 算。
+      3. 没有指向词时，只有整句就是在问地址的短问句才算（「地址在什么地方」
+         「在几楼」）。其余一概不算。
+    """
+    if _GENERAL_TOPIC.search(text):
+        return ""
+    if (m := _OFFICE_WORD.search(text)) and _OFFICE_REF.search(text):
         return m.group(0)
-    if (m := _OFFICE_WEAK.search(text)) and _OFFICE_REF.search(text):
+    if _OFFICE_BARE.match(text.strip()) and (m := _OFFICE_WORD.search(text)):
         return m.group(0)
     return ""
 
+_GENERAL_TOPIC = re.compile(GENERAL_TOPIC)
+_QUESTION = re.compile(QUESTION_HINT)
 _URGENT = [re.compile(p) for p in URGENT_PATTERNS]
 _ANGRY = [re.compile(p) for p in ANGRY_PATTERNS]
 _FEE = [re.compile(p) for p in FEE_PATTERNS]
@@ -255,8 +297,6 @@ def is_bare_greeting(text: str) -> bool:
     这种时候该回一句招呼，不是回一句承接。
     """
     return bool(_BARE_HELLO.match((text or "").strip()))
-_GENERAL_TOPIC = re.compile(GENERAL_TOPIC)
-_QUESTION = re.compile(QUESTION_HINT)
 
 # 纯闲聊快速通道（可读性优先，不追求穷尽——默认路径本就是沉默）
 _CHITCHAT = re.compile(
@@ -327,7 +367,9 @@ def classify(
 
     # 费用层只管「我们收多少」。客户问「他能拿到多少赔偿」是法律问题，
     # 不是费用问题——除非他同时提到律师费，那才是真在问我们。
-    if hit := _match_any(_FEE, text):
+    if (hit := _match_any(_FEE, text)) or (
+        hit := (FEE_BROAD.pattern if FEE_BROAD.search(text) else None)
+    ):
         ours = re.search(
             r"(律师费|代理费|你们(收|要)|咨询费|服务费|请律师.{0,4}(要|得|多少))", text
         )

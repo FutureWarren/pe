@@ -234,6 +234,10 @@ class Settings(BaseSettings):
     # 控制台/ingest 访问令牌：公网部署必填（deploy.sh 自动生成）。
     # 为空时不鉴权（仅限本机开发）；企微回调路由不受此限（有签名校验）。
     admin_token: str = ""
+    # 反向代理跳数。0 = 不信任 X-Forwarded-For（默认，也是直连公网时唯一安全的值）。
+    # 配成 1 表示前面有一层自己的 nginx，取 XFF **最右边**那一跳。
+    # 采信最左边等于不设防：那一段完全由客户端自己写。
+    trusted_proxy_hops: int = 0
 
 
 @lru_cache

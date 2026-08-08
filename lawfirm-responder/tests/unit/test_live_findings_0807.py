@@ -62,7 +62,7 @@ def test_open_ended_questions_are_answered_not_dropped(text):
 
 # ------------------------------------------------------ 三、能当场答的别推给人
 @pytest.mark.parametrize("text", [
-    "地址在什么地方", "你们地址在哪", "怎么过去", "在几楼", "周末上班吗",
+    "地址在什么地方", "你们地址在哪", "到你们那儿怎么走", "在几楼", "你们周末上班吗",
 ])
 def test_office_facts_are_answered_on_the_spot(text):
     """真机里客户问「地址在什么地方」，AI 回「我都记着呢，会转给律师」——
@@ -70,6 +70,24 @@ def test_office_facts_are_answered_on_the_spot(text):
     action, _, _, reasons = kf(text)
     assert action is Action.ANSWER
     assert any(r.startswith("office-fact:") for r in reasons), reasons
+
+
+@pytest.mark.parametrize("text", [
+    "周末加班没有加班费",          # 问的是加班费，不是我们周末上不上班
+    "公司不给我交社保，还让我周六上班",
+    "我在停车场被撞了",
+    "地铁上被人偷了手机",
+    "导航记录能当证据吗",
+    "他上班时间玩手机被辞退合理吗",
+    "去哪儿告我们公司",            # 「公司」是他的用人单位，不是我们
+    "调解不成还能怎么走",
+])
+def test_location_words_inside_a_legal_question_are_not_directions(text):
+    """这一层第一版写宽了：位置/时间类词几乎全是双关的，结果劳动争议
+    最常见的那些问题——而那正是本所主业——全被当成问路，AI 张口报地址。
+    答错成地址不只是没帮上忙，是当着客户的面证明没听懂。"""
+    _, _, _, reasons = in_consult(text)
+    assert not any(r.startswith("office-fact:") for r in reasons), reasons
 
 
 def test_office_facts_only_apply_to_one_on_one_windows():

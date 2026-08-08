@@ -750,7 +750,14 @@ const expanded = new Set(), lastSig = {}, repliesFb = {};
 
 /* ============ 基础设施 ============ */
 async function api(path, opts = {}) {
-  opts.headers = Object.assign({ "X-Admin-Token": token }, opts.headers || {});
+  /* 带 body 却没写 Content-Type 时自动补 JSON。FastAPI 会把没有类型的 body
+     当成表单，直接 422——而前端只会看到一个「操作失败」，看不出原因。
+     知识库那四个按钮（通过/停用/改写/新增）就是这么全军覆没的：
+     功能都在，接口都对，就是一个请求头没写。
+     显式写了的（比如批量导入的 text/plain）优先，不被覆盖。 */
+  const auto = (typeof opts.body === "string" && !/^\s*[\w-]+\//.test(opts.body))
+    ? { "Content-Type": "application/json" } : {};
+  opts.headers = Object.assign({ "X-Admin-Token": token }, auto, opts.headers || {});
   let r;
   try {
     r = await fetch("/console" + path, opts);

@@ -327,6 +327,13 @@ def should_notify(
     return False
 
 
+def _any_recipient(store: Store, group: GroupProfile, settings: Settings) -> bool:
+    """这条线索最终有没有人能收到。只做判断，不改任何状态。"""
+    if group.lawyer_userid or settings.default_notify_userid:
+        return True
+    return any(x.get("userid") for x in store.list_lawyers(active_only=True))
+
+
 def dispatch(
     store: Store, group: GroupProfile, history: list[dict], sender, *,
     settings: Settings | None = None, force: bool = False, urgent: bool = False,
@@ -353,6 +360,11 @@ def dispatch(
         previous, intent, gap_seconds=settings.lead_session_gap_seconds,
         include_cold=settings.notify_all_leads,
     )
+    # 没有任何收件人时，notified_at 永远写不下去，于是 should_notify 每条消息
+    # 都返回 True → 每条客户消息都白烧一次模型归纳，而没有人会看到结果。
+    # 先探一次收件人，探不到就不归纳（线索照常入库，规则字段照常刷新）。
+    if notify and not _any_recipient(store, group, settings):
+        summarize = False
     lead = build_and_store(
         store, group, history, settings=settings,
         summarize=notify if summarize is None else summarize,
@@ -382,6 +394,19 @@ def dispatch(
     if not notify:
         return lead
     lead = store.get_lead(group.group_id) or lead  # 取回含指派信息的最新版
+    if not to:
+        # **该推却没有收件人**：名册为空、兜底接收人没配、会话档案也没有承办人。
+        # 原来这里是句无声的空转——线索照样入库评分，控制台里一切正常，
+        # 而那张交接单一个人也收不到，日志里连一行都没有。
+        # 这正是 2026-08-06 记下的那类最贵的 bug，代码路径当时并没有真堵上。
+        logger.error(
+            "线索 %s 已就绪却无人可推（名册为空且未配 default_notify_userid），"
+            "交接单未发出", group.group_id,
+        )
+        store.set_note(
+            "lead_no_recipient",
+            f"{datetime.now():%m-%d %H:%M} 线索 {group.group_id} 无收件人",
+        )
     if sender and to:
         text = format_notification(lead, group, settings)
         if reason:

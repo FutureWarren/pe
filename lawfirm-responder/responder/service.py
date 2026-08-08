@@ -452,8 +452,18 @@ class Pipeline:
         # 本次会话已经聊开了（超过两句）就不必再提上次——上下文里有的是内容
         if len(recent) > 2:
             return ""
-        last = self.store.last_customer_message_at(group.group_id)
-        if last and (datetime.now() - last).total_seconds() < gap:
+        # 「上一条客户发言」必须**排除刚进来的这一条**。
+        # 原来查的是 last_customer_message_at()，而 handle() 一进门就把当前消息
+        # 存了库——于是间隔恒等于零，永远判成「还在同一通对话里」，
+        # 客户记忆这一整层从上线起一次都没注入过。功能在、数据在、就是不生效，
+        # 而且没有任何迹象：日志里看不出，控制台里也看不出。
+        if len(recent) < 2:
+            return ""  # 这是他有史以来第一句话，没有「上次」可言
+        try:
+            prev = datetime.fromisoformat(recent[-2]["created_at"])
+        except (KeyError, ValueError, TypeError):
+            return ""
+        if (datetime.now() - prev).total_seconds() < gap:
             return ""  # 还在同一通对话里
         return memory.format_customer_memory(group.memory)
 
@@ -748,7 +758,11 @@ class Pipeline:
 
             checked = guard(body, Action.HANDOFF, templates.safe_fallback(group))
             return checked.text
-        decision.urgent = True
+        # **不要在这里改 decision.urgent。** 这里的「紧急」只是想让升级提醒
+        # 走加急通道，可 decision 随后要交给线索评分——urgent 会加 25 分、
+        # 把 urgency 拍成 high、并让优先级直接置 P0，于是客户只是把同一句话
+        # 说了三遍，客服就收到一张【强意愿】·紧急·1 小时内联系 的假单，
+        # 还顺带解锁了会话转接。用一个独立标记，别污染判断本身。
         decision.reasons.append("followup:suppressed-escalated")
         return None
 

@@ -124,13 +124,19 @@ class Worker:
             )
         except Exception:
             logger.exception("escalate_overdue failed")
-        self._sweep_idle_leads(now)
-        self._sweep_customer_memory(now)
-        self._sweep_lead_sla(now)
-        self._sweep_winback(now)
-        self._sweep_channel_health(now)
-        self._maybe_auto_update(now)
-        self._maybe_daily_digest(now)
+        # 逐个隔离：这些定时事务彼此无关，一个炸了不该把后面的一起带走。
+        # 尤其自动升级排在后面——它挂掉意味着**服务器再也拉不到新版本**，
+        # 而那正是我们唯一能远程修东西的通道。
+        for sweep in (
+            self._sweep_idle_leads, self._sweep_customer_memory,
+            self._sweep_lead_sla, self._sweep_winback,
+            self._sweep_channel_health, self._maybe_auto_update,
+            self._maybe_daily_digest,
+        ):
+            try:
+                sweep(now)
+            except Exception:
+                logger.exception("定时事务失败: %s", sweep.__name__)
 
     def _sweep_channel_health(self, now: datetime) -> None:
         """外部渠道的死活自查。
@@ -361,11 +367,21 @@ class Worker:
                 item = self.q.get(timeout=1.0)
             except queue.Empty:
                 item = None
+            # **异常绝不能逃出这个循环。** 逃出去线程就死了，而它是死得
+            # 无声无息的：队列照常收消息，只是再也没人取——所有客户从此
+            # 一句回复都收不到，控制台看着一切正常，日志里只有最初那一条
+            # traceback。这是整个系统里爆炸半径最大的一处。
             if item is not None:
-                self._dispatch(item)
+                try:
+                    self._dispatch(item)
+                except Exception:
+                    logger.exception("worker dispatch failed, 继续下一条: %r", item)
             if time.time() - last_tick >= self.poll_seconds:
                 last_tick = time.time()
-                self.tick()
+                try:
+                    self.tick()
+                except Exception:
+                    logger.exception("worker tick failed, 继续下一轮")
 
     def _process_new(self, msg: IncomingMessage) -> None:
         try:

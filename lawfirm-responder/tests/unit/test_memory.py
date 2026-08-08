@@ -234,12 +234,33 @@ def test_sweep_writes_memory_after_the_conversation_goes_quiet(tmp_path):
 
 
 def test_returning_customer_gets_the_memory_injected(tmp_path):
+    """**这个测试原来传的是空对话列表**，而真实调用里那份列表永远至少有一条
+    ——刚进来的这句本身。于是判据（离上一条客户发言多久）被空列表绕过，
+    测试常绿而线上一次都没注入过。造一段真实的回访对话来测。
+    """
     store, settings, gid = _returning_customer(tmp_path)
     store.set_memory(gid, "上次咨询：5 天前 · 案由：劳动仲裁 · 他说过：拖欠三个月工资")
+    long_ago = (datetime.now() - timedelta(days=5)).isoformat()
+    convo = [
+        {"content": "公司拖欠我三个月工资", "sender_is_staff": False,
+         "msg_type": "text", "created_at": long_ago},
+        {"content": "我又来问问", "sender_is_staff": False,
+         "msg_type": "text", "created_at": datetime.now().isoformat()},
+    ]
     p = Pipeline(store, None, settings)
-    text = p._customer_memory(store.get_group(gid), [])
+    text = p._customer_memory(store.get_group(gid), convo)
     assert "劳动仲裁" in text
     assert "不要再问一遍" in text  # 明确告诉模型别重复提问
+
+
+def test_memory_needs_a_previous_visit_not_just_an_empty_list(tmp_path):
+    """有史以来第一句话没有「上次」可言。"""
+    store, settings, gid = _returning_customer(tmp_path)
+    store.set_memory(gid, "上次咨询：5 天前 · 案由：劳动仲裁")
+    p = Pipeline(store, None, settings)
+    only_now = [{"content": "你好", "sender_is_staff": False, "msg_type": "text",
+                 "created_at": datetime.now().isoformat()}]
+    assert p._customer_memory(store.get_group(gid), only_now) == ""
 
 
 def test_memory_not_injected_mid_conversation(tmp_path):

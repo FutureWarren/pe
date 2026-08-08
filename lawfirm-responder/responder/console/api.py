@@ -104,10 +104,30 @@ _fails: dict[str, list[float]] = {}
 
 
 def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """请求方 IP。**默认不信 X-Forwarded-For。**
+
+    原来无条件采信 XFF 的第一段，于是每次换一个头就换一个「IP」，
+    锁定形同虚设——而「令牌可以是一句记得住的话」这个决定，
+    正是以这道锁挡住在线爆破为前提的。护栏没了，十二位口令挡不住
+    每秒几千次的猜测，而门后是全部客户咨询原文和一个能拉代码重启的接口。
+
+    只有显式配了 `trusted_proxy_hops` 才解析 XFF，且**从右往左数**——
+    右边那几跳是自己的代理写的，左边是客户端自称的，采信左边等于不设防。
+    """
+    s = getattr(request.app.state, "pipeline", None)
+    hops = getattr(getattr(s, "settings", None), "trusted_proxy_hops", 0) or 0
+    if hops > 0:
+        parts = [p.strip() for p in
+                 request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if len(parts) >= hops:
+            return parts[-hops]
     return request.client.host if request.client else "?"
+
+
+# 全站失败计数：IP 也能换（僵尸网络、代理池），所以另设一道与 IP 无关的闸。
+# 正常使用打不到这个数——一个所里的人一天输错几次令牌到头了。
+_GLOBAL_MAX_FAILS = 60
+_global_fails: list[float] = []
 
 
 def _check_lock(request: Request) -> None:
@@ -117,10 +137,14 @@ def _check_lock(request: Request) -> None:
     if len(hits) >= _MAX_FAILS:
         wait = int((_LOCK_SECONDS - (now - hits[0])) / 60) + 1
         raise HTTPException(429, f"连续输错太多次，请 {wait} 分钟后再试")
+    _global_fails[:] = [t for t in _global_fails if now - t < _LOCK_SECONDS]
+    if len(_global_fails) >= _GLOBAL_MAX_FAILS:
+        raise HTTPException(429, "登录尝试过于频繁，请稍后再试")
 
 
 def _note_fail(request: Request) -> None:
     _fails.setdefault(_client_ip(request), []).append(time.time())
+    _global_fails.append(time.time())
 
 
 def get_principal(
@@ -564,12 +588,28 @@ def upsert_group(
 ):
     if profile.group_id != group_id:
         raise HTTPException(400, "group_id 不一致")
-    # bot_webhook 由机器人回调自动写入、不在编辑表单里，整档覆盖时要保留，
-    # 否则改一次「承办律师」就把群聊通道的发送地址抹掉了
     existing = store.get_group(group_id)
-    if existing is not None and not profile.bot_webhook:
-        profile.bot_webhook = existing.bot_webhook
-        profile.bot_webhook_at = existing.bot_webhook_at
+    if existing is not None:
+        # **只允许改编辑表单上的那几项，其余一律从库里原样保留。**
+        #
+        # 这里踩过一个能把会话彻底打死的坑：前端只发 10 个字段，而这个端点
+        # 收的是完整 GroupProfile，缺的字段全部取默认空串写回库。于是管理员
+        # 在「会话」页改一下承办律师、点保存，就把 kf_open_kfid /
+        # kf_external_userid / douyin_open_id / ext_channel / ext_user_id
+        # 一起抹了——`is_kf` 变假，发送层退回「往一个不存在的群发消息」，
+        # **客户从此一句回复也收不到，而控制台里判断和回复照常入库、看着一切正常**。
+        # 建档逻辑对已存在的档案直接 return，所以它永远不会自愈。
+        # handoff_userid 被抹掉更直接：正在人工接待的会话，AI 当场回来抢话。
+        #
+        # 白名单而不是黑名单：以后再加渠道字段，不会又漏一次。
+        editable = {
+            "name", "client_status", "case_type", "case_stage",
+            "lawyer_name", "lawyer_userid", "backup_userid",
+            "ai_enabled", "robot_webhook",
+        }
+        profile = existing.model_copy(
+            update={k: v for k, v in profile.model_dump().items() if k in editable}
+        )
     store.upsert_group(profile)
     return {"ok": True}
 
