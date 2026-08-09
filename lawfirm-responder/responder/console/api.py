@@ -1452,6 +1452,25 @@ def _issue_token(store: Store, userid: str) -> str:
     return token
 
 
+@router.post("/groups/{group_id}/release")
+def release_to_ai(
+    group_id: str, store: Store = Depends(get_store),
+    _: Principal = Depends(require_admin),
+):
+    """把会话收回给 AI（撤销「已转人工」）。
+
+    存在的理由是**手上得有个开关**：转接是自动发生的，而它一旦卡住，
+    客户那头看到的是一个死掉的窗口——发什么都没人应。等超时回收是三十分钟，
+    对一个正在打字的客户来说太久了。这个按钮让人当场把它救回来。
+    """
+    group = store.get_group(group_id)
+    if group is None:
+        raise HTTPException(404, "会话不存在")
+    store.set_handoff(group_id, "")
+    logger.info("released back to AI: %s", group_id)
+    return {"ok": True}
+
+
 @router.delete("/lawyers/{userid}")
 def delete_lawyer(
     userid: str, store: Store = Depends(get_store),

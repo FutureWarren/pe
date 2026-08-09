@@ -185,3 +185,31 @@ def test_a_lawyer_without_open_leads_can_be_removed(tmp_path):
 def test_removing_an_unknown_lawyer_is_a_404(tmp_path):
     c, _, _ = _console(tmp_path)
     assert c.delete("/console/lawyers/nobody").status_code == 404
+
+
+# ------------------------------------------------------ 四、别让窗口死掉
+def test_the_lawyer_speaking_once_does_not_silence_the_ai_forever():
+    """原判据是「律师在转接之后说过话」，而它一旦成立就**永远成立**——
+    转接越久 waited 越大，差值只会越拉越开。真机后果：律师接手时说了一句，
+    第二天客户再来发「你好」，AI 依然一个字不回，对着一个死掉的窗口。"""
+    d = _decide_after_handoff(86400, staff_spoke_ago=3600)   # 一天前转的，一小时前律师说过话
+    assert d.should_speak is True, d.reasons
+
+
+def test_the_ai_still_yields_while_the_lawyer_is_actually_there():
+    """刚说过话就是「正在跟」，这时候 AI 必须让开。"""
+    d = _decide_after_handoff(86400, staff_spoke_ago=60)
+    assert d.should_speak is False
+
+
+def test_release_button_hands_the_conversation_back_to_the_ai(tmp_path):
+    """转接是自动发生的，一旦卡住客户看到的就是个死窗口。等三十分钟超时回收
+    对一个正在打字的客户太久了——手上得有个当场能救的开关。"""
+    c, store, _ = _console(tmp_path)
+    gid = "kf:wk:cust"
+    store.upsert_group(GroupProfile(group_id=gid, kf_open_kfid="wk",
+                                    kf_external_userid="cust"))
+    store.set_handoff(gid, "wei")
+
+    assert c.post(f"/console/groups/{gid}/release").status_code == 200
+    assert store.get_group(gid).handoff_userid == ""

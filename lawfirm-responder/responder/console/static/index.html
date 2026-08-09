@@ -1434,6 +1434,10 @@ async function openConversation(gid) {
     <button class="btn-outline" style="margin:10px 0" data-act="takeover" data-gid="${esc(gid)}">
       <svg class="ico"><use href="#i-users"/></svg>转给我接手（在企微里直接跟客户聊）
     </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin:-4px 0 8px"
+            data-act="release" data-gid="${esc(gid)}">
+      <svg class="ico"><use href="#i-refresh"/></svg>收回给 AI（人接不上时用）
+    </button>
     <div id="convoBody">${skeleton()}</div>`);
   let list;
   try { list = await api(`/conversation?group_id=${encodeURIComponent(gid)}`); }
@@ -1817,6 +1821,12 @@ function editLawyer(userid) {
       </label>`}
     </div>
     <button class="btn-primary xl" onclick="saveLawyer(${isNew})">保存</button>`);
+}
+async function releaseToAi(gid) {
+  try { await api(`/groups/${encodeURIComponent(gid)}/release`, { method: "POST" }); }
+  catch (e) { toast(e.detail || "操作失败，请重试", false); return; }
+  toast("已收回给 AI，它会立刻继续接待");
+  groupsCache = []; refresh();
 }
 function askDeleteLawyer(userid) {
   const l = (teamCache || []).find(x => x.userid === userid) || {};
@@ -2589,6 +2599,7 @@ document.addEventListener("click", e => {
   else if (act === "copylogin") copyLogin(uid);
   else if (act === "editlawyer") editLawyer(uid);
   else if (act === "dellawyer") askDeleteLawyer(uid);
+  else if (act === "release") releaseToAi(gid);
   else if (act === "kbok") setKbStatus(Number(el.dataset.kid), "approved");
   else if (act === "kboff") setKbStatus(Number(el.dataset.kid), "retired");
   else if (act === "kbedit") editKnowledge(Number(el.dataset.kid));

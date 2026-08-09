@@ -123,12 +123,17 @@ def decide(
     # 律师前面回话，客户会看到两个"人"同时在说话。
     if group.handoff_userid and group.handoff_at is not None:
         waited = (now - group.handoff_at).total_seconds()
-        # 接手的人正在说话，就别按「超时没人接」把客户收回来——
-        # 那会变成客服聊到一半，AI 突然插进来抢话。回收是给「转过去却没人理」
-        # 准备的兜底，不是一个到点必响的闹钟。
+        # 接手的人**正在**说话，就别插嘴。
+        #
+        # 这里原来写的是「律师在转接之后说过话」（staff_ago <= waited），
+        # 而那个条件一旦成立就**永远成立**——转接越久 waited 越大，
+        # 差值只会越拉越开。真机后果：律师接手时说了一句，第二天客户再来，
+        # AI 依然一个字不回。客户看到的是一个死掉的窗口。
+        # 正确的语义是「最近」：用接管窗口（默认 30 分钟）判，
+        # 律师一开口 AI 让开，他走了 AI 接着兜。
         being_handled = (
             seconds_since_last_staff_reply is not None
-            and seconds_since_last_staff_reply <= waited
+            and seconds_since_last_staff_reply < settings.takeover_seconds
         )
         if being_handled:
             decision.reasons.append(f"gate:handed-off({group.handoff_userid})")

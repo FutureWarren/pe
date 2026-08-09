@@ -113,12 +113,27 @@ class Pipeline:
         """
         if not (group.is_kf and group.client_status == ClientStatus.PROSPECT):
             return False
-        if group.handoff_userid:
-            return False  # 已转人工，AI 不再作答
+        if self._being_handled(group):
+            return False  # 人还在跟，AI 不作答
+
         return any(
             rules.has_substance(m.get("content", ""))
             for m in history if not m.get("sender_is_staff")
         )
+
+    def _being_handled(self, group: GroupProfile) -> bool:
+        """这通对话此刻是不是真的有人在跟。
+
+        判据是「律师**最近**说过话」，不是「转接过」。转接过是个永久状态，
+        拿它当判据会让 AI 在律师早就离开之后仍然一言不发——
+        真机里客户第二天回来，对着一个死掉的窗口发「你好」。
+        """
+        if not group.handoff_userid:
+            return False
+        last = self.store.last_staff_reply_at(group.group_id)
+        if last is None:
+            return False
+        return (datetime.now() - last).total_seconds() < self.settings.takeover_seconds
 
     # ------------------------------------------------------------ 主流程
     def handle(self, msg: IncomingMessage, *, seconds_unanswered: float = 0.0) -> Decision:
