@@ -396,6 +396,13 @@ def reassign_lead(
     if group is None:
         raise HTTPException(404, "对应会话档案不存在")
     assignment.assign(store, group, row["group_id"], law)
+
+    # **改派必须把微信客服会话本身也搬过去。** 原来这里只改了我们库里的
+    # assigned_userid 再给新律师推一张单——而企微那边的会话状态一动没动，
+    # 于是新律师的「微信客服」工作台里根本看不到这个人，老律师那边倒还在。
+    # 单子看着交接完了，客户实际上还挂在原来那个人名下：又一个「看起来正常」。
+    moved, move_hint = _move_kf_session(request, store, group, law["userid"])
+
     sender = request.app.state.pipeline.sender
     fresh = store.get_lead(row["group_id"])
     notified = False
@@ -407,15 +414,46 @@ def reassign_lead(
             store.mark_lead_notified(row["group_id"])
     # 明确回报有没有真的通知到：影子模式/发送失败下静默返回 ok
     # 会让管理员以为交接完成，实际上新负责人什么都没收到
+    hint = "" if notified else (
+        "影子模式未推送交接单，请自行知会" if sender is None
+        else "企微推送失败，请自行知会"
+    )
+    if move_hint:
+        hint = (hint + "；" if hint else "") + move_hint
     return {
         "ok": True,
         "assigned_userid": law["userid"],
         "notified": bool(notified),
-        "hint": "" if notified else (
-            "影子模式未推送交接单，请自行知会" if sender is None
-            else "企微推送失败，请自行知会"
-        ),
+        "session_moved": moved,
+        "hint": hint,
     }
+
+
+def _move_kf_session(request: Request, store: Store, group, userid: str):
+    """把微信客服会话真正转到新律师名下。返回 (是否搬成功, 给管理员看的提示)。
+
+    只对**已经在人工接待中**的会话做：还在 AI 手上的会话本就没有归属，
+    强行转过去反而会让 AI 当场闭嘴，而新律师未必这会儿就要接。
+    """
+    if not (group.is_kf and not group.is_douyin and group.handoff_userid):
+        return False, ""
+    if group.handoff_userid == userid:
+        return True, ""
+    pipeline = request.app.state.pipeline
+    client = getattr(pipeline, "kf_client", None)
+    if client is None or not client.available():
+        return False, "微信客服通道未配置，会话未搬动，新律师工作台看不到这个人"
+    try:
+        if userid not in set(client.servicer_list(group.kf_open_kfid)):
+            return False, f"{userid} 不是该客服账号的接待人，会话搬不过去（去「状态」页一键补）"
+    except Exception:
+        logger.exception("servicer check failed: %s", group.group_id)
+        return False, "接待人名单查不到，会话未搬动"
+    if not client.transfer(group.kf_open_kfid, group.kf_external_userid, userid):
+        return False, "企微拒绝了会话转接，会话仍在原律师名下"
+    store.set_handoff(group.group_id, userid)
+    logger.info("kf session moved: %s → %s", group.group_id, userid)
+    return True, ""
 
 
 @router.post("/leads/import")
@@ -1412,6 +1450,34 @@ def _issue_token(store: Store, userid: str) -> str:
     token = secrets.token_urlsafe(24)
     store.set_lawyer_token_hash(userid, _hash_token(token))
     return token
+
+
+@router.delete("/lawyers/{userid}")
+def delete_lawyer(
+    userid: str, store: Store = Depends(get_store),
+    _: Principal = Depends(require_admin),
+):
+    """把律师从名册里移除。
+
+    **名下还有在办线索的不给删** ——删掉之后那些线索的负责人就成了一个
+    查无此人的 id：交接单推不出去、督办找不到人、看板上那一列是空的，
+    而没有任何地方会告诉你为什么。想让他不再接单，用「停用」；
+    真要删，先把他手上的单改派出去。
+    """
+    if store.get_lawyer(userid) is None:
+        raise HTTPException(404, "该律师不存在")
+    open_leads = [
+        row for row in store.leads_in_range(None, None)
+        if row.get("assigned_userid") == userid and row.get("status") != "done"
+    ]
+    if open_leads:
+        raise HTTPException(
+            400,
+            f"他名下还有 {len(open_leads)} 单在办，删了这些线索就没人认领了。"
+            "请先改派，或改用「停用」（保留历史归属，只是不再接新单）",
+        )
+    store.delete_lawyer(userid)
+    return {"ok": True}
 
 
 @router.post("/lawyers/{userid}/token")

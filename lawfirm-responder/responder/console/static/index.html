@@ -1788,7 +1788,8 @@ async function loadTeam() {
       <div class="row fb-row">
         <button class="btn-text" data-act="sendlogin" data-uid="${esc(l.userid)}">${ico("send")}发登录链接</button>
         <button class="btn-text muted" data-act="copylogin" data-uid="${esc(l.userid)}">复制链接</button>
-        <button class="btn-text muted" style="margin-left:auto" data-act="editlawyer" data-uid="${esc(l.userid)}">编辑${ico("chevron")}</button>
+        <button class="btn-text muted" data-act="editlawyer" data-uid="${esc(l.userid)}">编辑</button>
+        <button class="btn-text muted" style="margin-left:auto" data-act="dellawyer" data-uid="${esc(l.userid)}">移除</button>
       </div>
     </div>`).join("");
 }
@@ -1816,6 +1817,22 @@ function editLawyer(userid) {
       </label>`}
     </div>
     <button class="btn-primary xl" onclick="saveLawyer(${isNew})">保存</button>`);
+}
+function askDeleteLawyer(userid) {
+  const l = (teamCache || []).find(x => x.userid === userid) || {};
+  openSheet(`<h2>把 ${esc(l.name || userid)} 移出名册？</h2>
+    <p style="font-size:15px;margin:12px 0 8px;line-height:1.7">
+      移除后他不再接单，登录链接也失效。<br>
+      <b>只是想让他暂时不接单的话，用「编辑」里的启用开关更合适</b>——
+      那样历史归属还在，回来了打开就能继续。</p>
+    <div class="meta" style="margin-bottom:16px">名下还有在办线索时无法移除，会提示你先改派。</div>
+    <button class="btn-primary xl" onclick="doDeleteLawyer('${esc(userid)}')">确认移除</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">取消</button>`);
+}
+async function doDeleteLawyer(userid) {
+  try { await api(`/lawyers/${encodeURIComponent(userid)}`, { method: "DELETE" }); }
+  catch (e) { toast(e.detail || "移除失败，请重试", false); return; }
+  closeSheet(); toast("已移出名册"); loadTeam();
 }
 async function saveLawyer(isNew) {
   const userid = document.getElementById("lw_id").value.trim();
@@ -2571,6 +2588,7 @@ document.addEventListener("click", e => {
   else if (act === "sendlogin") sendLogin(uid);
   else if (act === "copylogin") copyLogin(uid);
   else if (act === "editlawyer") editLawyer(uid);
+  else if (act === "dellawyer") askDeleteLawyer(uid);
   else if (act === "kbok") setKbStatus(Number(el.dataset.kid), "approved");
   else if (act === "kboff") setKbStatus(Number(el.dataset.kid), "retired");
   else if (act === "kbedit") editKnowledge(Number(el.dataset.kid));

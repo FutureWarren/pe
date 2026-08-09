@@ -130,13 +130,22 @@ def decide(
             seconds_since_last_staff_reply is not None
             and seconds_since_last_staff_reply <= waited
         )
-        if waited < settings.handoff_reclaim_seconds or being_handled:
+        if being_handled:
             decision.reasons.append(f"gate:handed-off({group.handoff_userid})")
             return decision
-        # 超时仍没人接手：把客户交回 AI。转接引入的最坏情况是「被转给一个
-        # 不看企微的律师」，那比 AI 一直陪着更糟——宁可 AI 接回来继续兜着。
-        # 真正的升级提醒由 worker 的 SLA 扫描负责，这里只管别让客户没人理。
-        decision.reasons.append("handoff:reclaimed")
+        # **没人露面就别让客户对着空气说话。** 真机实测：转人工后客户连发
+        # 「你好」「人呢」「你好？」，AI 全程沉默，直到企微把会话判成
+        # 「已结束聊天」——转接本来是为了让他更快见到人，结果是被晾在
+        # 一间空屋子里，比不转还糟。
+        # 过了宽限期就让 AI 接着陪，但**不清转接状态**：律师随时可以接手，
+        # 他一开口上面那条 being_handled 立刻又把 AI 按住。
+        if waited < settings.handoff_grace_seconds:
+            decision.reasons.append(f"gate:handed-off({group.handoff_userid})")
+            return decision
+        decision.reasons.append(
+            "handoff:reclaimed" if waited >= settings.handoff_reclaim_seconds
+            else "handoff:no-show"
+        )
 
     if (
         seconds_since_last_staff_reply is not None

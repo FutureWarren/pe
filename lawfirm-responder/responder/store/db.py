@@ -1347,6 +1347,13 @@ class Store:
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(q).fetchall()]
 
+    def delete_lawyer(self, userid: str) -> None:
+        """物理删除。历史归属（线索上的 assigned_userid）刻意不动——
+        那是发生过的事实，抹掉它等于篡改台账。看板上会显示成一个陌生 id，
+        这正确：那单当时确实是他跟的。"""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM lawyers WHERE userid=?", (userid,))
+
     def get_lawyer_by_token_hash(self, token_hash: str) -> dict | None:
         """登录鉴权入口：库里只有哈希，比对同样只用哈希。"""
         if not token_hash:
