@@ -1487,6 +1487,25 @@ def diagnose(
             checks.append("微信客服通道正常")
     if group.handoff_userid:
         checks.append(f"这通对话已转给 {group.handoff_userid} 人工接待")
+    # 企微那边的会话归属才是决定性的：状态不是「智能助手接待」时，
+    # 我们判断得再对、回复生成得再好，客户也看不到。
+    if group.is_kf and not group.is_douyin:
+        kf = getattr(request.app.state.pipeline, "kf_client", None)
+        if kf is not None and kf.available():
+            try:
+                st = kf.service_state(group.kf_open_kfid, group.kf_external_userid)
+            except Exception:
+                st = None
+            names = {0: "未处理（没人在接！）", 1: "智能助手接待（正常）",
+                     2: "待接入人工池", 3: "人工接待中", 4: "已结束"}
+            if st is not None:
+                line = f"企微会话状态：{names.get(st, st)}"
+                if st in (0, 2, 4):
+                    blockers.append(
+                        f"**{line}** —— 这种状态下客户发什么都没人接，"
+                        "点一下上面的「收回给 AI」把它要回来。")
+                else:
+                    checks.append(line)
     if last_customer is None:
         blockers.append("**库里没有客户消息**——说明消息压根没送到我们这儿，"
                         "多半是回调或拉取断了。")
@@ -1547,7 +1566,7 @@ def _explain_reasons(reasons: list, last: dict | None) -> str:
 
 @router.post("/groups/{group_id}/release")
 def release_to_ai(
-    group_id: str, store: Store = Depends(get_store),
+    group_id: str, request: Request, store: Store = Depends(get_store),
     _: Principal = Depends(require_admin),
 ):
     """把会话收回给 AI（撤销「已转人工」）。
@@ -1560,8 +1579,15 @@ def release_to_ai(
     if group is None:
         raise HTTPException(404, "会话不存在")
     store.set_handoff(group_id, "")
+    # 光清我们自己的标记不够——**会话归属在企微那边**。
+    # 状态还停在「人工接待」或「已结束」的话，AI 说什么都到不了客户眼前。
+    hint = ""
+    kf = getattr(request.app.state.pipeline, "kf_client", None)
+    if group.is_kf and not group.is_douyin and kf is not None and kf.available():
+        if not kf.to_robot(group.kf_open_kfid, group.kf_external_userid):
+            hint = "已收回，但企微那边的会话状态没改过来，可能还是接不上"
     logger.info("released back to AI: %s", group_id)
-    return {"ok": True}
+    return {"ok": True, "hint": hint}
 
 
 @router.delete("/lawyers/{userid}")

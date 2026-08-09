@@ -59,6 +59,8 @@ class Worker:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._servicer_cache: dict[str, list[str]] = {}
+        # 会话归属状态的查询节流（见 _ensure_robot_state）
+        self._robot_state_checked: dict[str, float] = {}
         # 启动后先隔一个间隔再查更新：刚重启完不该立刻又想着升级
         self._last_update_check = datetime.now()
 
@@ -572,6 +574,8 @@ class Worker:
         if origin == wecom_kf.ORIGIN_SYSTEM:
             return  # 系统推送（企微自带欢迎语等）不进判断
         self._ensure_kf_profile(group_id, open_kfid, external_userid)
+        if origin == wecom_kf.ORIGIN_CUSTOMER:
+            self._ensure_robot_state(group_id, open_kfid, external_userid)
 
         is_staff = origin == wecom_kf.ORIGIN_SERVICER or bool(raw.get("servicer_userid"))
         content = (raw.get("text") or {}).get("content", "")
@@ -588,6 +592,46 @@ class Worker:
         if not self.store.save_message(msg):
             return  # 重复投递
         self.pipeline.handle(msg)
+
+    def _ensure_robot_state(
+        self, group_id: str, open_kfid: str, external_userid: str
+    ) -> None:
+        """确保这通会话在企微那边归「智能助手」接待。
+
+        **这是长期缺失的一环，也是「转过一次人工之后 AI 就永远不说话了」的真因。**
+        微信客服的会话有归属状态：0 未处理 / 1 智能助手 / 2 待接入 / 3 人工 / 4 已结束。
+        我们一直只会把它转给人工（state 3），从来没有要回来过。于是客户被转过一次、
+        或者会话被企微判成「已结束」之后，新消息进来是「未处理」——
+        **未处理的会话没有任何人在接，客户发什么都石沉大海**。
+        而我们这边判断照常跑、回复照常入库，日志里一切正常。
+
+        只在「我们这边认为该由 AI 接」时才要回来：已转人工且人还在跟的不碰，
+        否则会把正在聊的律师踢开。
+
+        节流：同一通会话十分钟内只查一次。这是每条客户消息都会走的路径，
+        不能每次都打两个企微接口。
+        """
+        if not self.kf_client or not self.kf_client.available():
+            return
+        group = self.store.get_group(group_id)
+        if group is None or not group.ai_enabled:
+            return
+        if group.handoff_userid and self.pipeline._being_handled(group):
+            return  # 人正在跟，别把他踢开
+        now = time.time()
+        if now - self._robot_state_checked.get(group_id, 0.0) < 600:
+            return
+        self._robot_state_checked[group_id] = now
+        try:
+            state = self.kf_client.service_state(open_kfid, external_userid)
+        except Exception:
+            logger.exception("service_state get failed: %s", group_id)
+            return
+        if state is None or state == wecom_kf.STATE_ROBOT:
+            return
+        if self.kf_client.to_robot(open_kfid, external_userid):
+            logger.info("kf session claimed back for AI: %s (was state=%s)",
+                        group_id, state)
 
     def _kf_welcome(
         self, group_id: str, open_kfid: str, external_userid: str, msg_id: str

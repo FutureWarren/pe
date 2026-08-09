@@ -172,6 +172,34 @@ class KfClient:
         v = data.get("service_state")
         return int(v) if v is not None else None
 
+    def to_robot(self, open_kfid: str, external_userid: str) -> bool:
+        """把会话要回给「智能助手接待」（service_state=1）。
+
+        **这是整条链上一个长期缺失的动作。** 我们只会把会话转给人工
+        （`transfer` → state 3），却从来没有把它要回来过：
+        一旦客户被转过人工、或者会话被企微判成「已结束」，
+        状态就停在 3 或 4，新消息进来是「未处理」（state 0）——
+        而未处理的会话没有任何人在接，**客户发什么都石沉大海**。
+
+        真机现象正是如此：同一个号码，转过一次人工之后，
+        无论隔多久、发多少句「你好」，AI 一个字都不回。
+        我们这边的判断日志看着一切正常——因为问题根本不在判断层，
+        在企微那边的会话归属上。
+        """
+        try:
+            self._post(
+                self.settings.kf_trans_path,
+                {
+                    "open_kfid": open_kfid,
+                    "external_userid": external_userid,
+                    "service_state": STATE_ROBOT,
+                },
+            )
+            return True
+        except Exception:
+            logger.exception("kf to_robot failed (%s)", open_kfid)
+            return False
+
     def transfer(
         self, open_kfid: str, external_userid: str, servicer_userid: str
     ) -> bool:

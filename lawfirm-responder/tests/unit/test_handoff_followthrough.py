@@ -282,3 +282,105 @@ def test_diagnose_says_when_the_conversation_never_arrived(tmp_path):
     c, _, _ = _console(tmp_path)
     r = c.get("/console/diagnose?group_id=kf:nope:nope").json()
     assert r["ok"] is False and "不存在" in r["verdict"]
+
+
+# ------------------------------------------------------ 七、会话归属要能要回来
+class StateKf(FakeKf):
+    """记录 service_state 的假客服端，用来验证「把会话要回给 AI」这条链路。"""
+
+    def __init__(self, state=3):
+        super().__init__()
+        self.state = state
+        self.to_robot_calls = []
+
+    def service_state(self, open_kfid, external_userid):
+        return self.state
+
+    def to_robot(self, open_kfid, external_userid):
+        self.to_robot_calls.append((open_kfid, external_userid))
+        self.state = 1
+        return True
+
+
+def _worker_env(tmp_path, kf, handoff=""):
+    from responder.worker import Worker
+
+    s = Settings(mode="live", db_path=str(tmp_path / "st.db"), llm_provider="none")
+    store = Store(s.db_path)
+    gid = "kf:wk:cust"
+    g = GroupProfile(group_id=gid, kf_open_kfid="wk", kf_external_userid="cust",
+                     client_status=ClientStatus.PROSPECT)
+    store.upsert_group(g)
+    if handoff:
+        store.set_handoff(gid, handoff)
+    p = Pipeline(store, None, s, kf_client=kf)
+    return Worker(p, store, kf_client=kf), store, gid
+
+
+def test_a_session_stuck_on_a_human_is_claimed_back_for_the_ai(tmp_path):
+    """会话归属在企微那边：状态停在「人工接待」或「已结束」时，
+    我们判断得再对、回复生成得再好，客户也看不到。真机现象就是
+    同一个号码转过一次人工之后，无论隔多久发多少句「你好」，AI 一个字不回。"""
+    kf = StateKf(state=4)  # 已结束
+    w, store, gid = _worker_env(tmp_path, kf)
+
+    w._ensure_robot_state(gid, "wk", "cust")
+
+    assert kf.to_robot_calls == [("wk", "cust")]
+    assert kf.state == 1
+
+
+def test_an_ai_owned_session_is_left_alone(tmp_path):
+    kf = StateKf(state=1)
+    w, store, gid = _worker_env(tmp_path, kf)
+    w._ensure_robot_state(gid, "wk", "cust")
+    assert kf.to_robot_calls == []
+
+
+def test_a_lawyer_actively_handling_is_not_kicked_out(tmp_path):
+    """人正在跟的时候把会话抢回来，等于当着客户的面把律师踢开。"""
+    from responder.models import IncomingMessage
+
+    kf = StateKf(state=3)
+    w, store, gid = _worker_env(tmp_path, kf, handoff="wei")
+    store.save_message(IncomingMessage(msg_id="s1", group_id=gid, sender_id="wei",
+                                       sender_is_staff=True, content="我来跟"))
+
+    w._ensure_robot_state(gid, "wk", "cust")
+
+    assert kf.to_robot_calls == []
+
+
+def test_the_state_check_is_throttled(tmp_path):
+    """这是每条客户消息都会走的路径，不能每次都打两个企微接口。"""
+    kf = StateKf(state=4)
+    w, store, gid = _worker_env(tmp_path, kf)
+    w._ensure_robot_state(gid, "wk", "cust")
+    kf.state = 4
+    w._ensure_robot_state(gid, "wk", "cust")
+    assert len(kf.to_robot_calls) == 1
+
+
+def test_release_button_also_fixes_the_wecom_side(tmp_path):
+    """光清我们自己的标记不够——会话归属在企微那边。"""
+    kf = StateKf(state=3)
+    c, store, _ = _console(tmp_path, kf)
+    gid = "kf:wk:cust"
+    store.upsert_group(GroupProfile(group_id=gid, kf_open_kfid="wk",
+                                    kf_external_userid="cust"))
+    store.set_handoff(gid, "wei")
+
+    assert c.post(f"/console/groups/{gid}/release").status_code == 200
+    assert kf.to_robot_calls == [("wk", "cust")]
+
+
+def test_diagnose_surfaces_a_stuck_wecom_state(tmp_path):
+    kf = StateKf(state=0)
+    c, store, _ = _console(tmp_path, kf)
+    gid = "kf:wk:cust"
+    store.upsert_group(GroupProfile(group_id=gid, kf_open_kfid="wk",
+                                    kf_external_userid="cust"))
+
+    r = c.get(f"/console/diagnose?group_id={gid}").json()
+
+    assert "没人在接" in r["verdict"], r
