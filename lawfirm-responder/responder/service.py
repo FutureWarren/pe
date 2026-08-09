@@ -349,6 +349,14 @@ class Pipeline:
                         self.store, group, convo, self.sender,
                         settings=self.settings, summarize=False,
                     )
+                    # 重算出来的分数**也要能触发转接**。原来这里算完就 return，
+                    # 于是「客户在一句看似平淡的追问里跨过 P0 门槛」这条路上，
+                    # 转接永远不会发生——而那恰恰是最常见的一条路：
+                    # 硬信号（受伤/要联系方式/留电话）往往落在冷消息里。
+                    if row:
+                        self._maybe_handoff(group, row, urgent=False)
+                        if row.get("_handoff_skip"):
+                            decision.reasons.append(row["_handoff_skip"])
                     return bool(row and row.get("_notified_now"))
                 except Exception:
                     logger.exception("lead rescore failed: %s", msg.group_id)
@@ -361,6 +369,8 @@ class Pipeline:
             )
             if row:
                 self._maybe_handoff(group, row, urgent=decision.urgent)
+                if row.get("_handoff_skip"):
+                    decision.reasons.append(row["_handoff_skip"])
             return bool(row and row.get("_notified_now"))
         except Exception:
             logger.exception("lead dispatch failed: %s", msg.group_id)
@@ -385,25 +395,46 @@ class Pipeline:
         """
         s = self.settings
         client = self.kf_client  # 受模式门控：影子模式绝不真的转
-        if not (s.handoff_enabled and client and group.is_kf and not group.is_douyin):
+
+        def _skip(reason: str) -> bool:
+            """记下**为什么没转**。
+
+            这六道前提原来是六个静默的 return：转不成就悄悄回落原链路，
+            控制台里什么都看不出来，律所方只能问「那怎么会没有自动转接呢」，
+            而我只能一条条猜。判断日志本来就是为这种时刻存在的——
+            把原因写进去，下次一眼可查（控制台「为什么没回复」也读这一条）。
+            """
+            decision_reason = f"handoff:skip({reason})"
+            logger.info("handoff skipped: %s — %s", group.group_id, reason)
+            self.store.set_note(f"handoff_skip:{group.group_id}", reason)
+            lead_row["_handoff_skip"] = decision_reason
             return False
+
+        if not s.handoff_enabled:
+            return _skip("转接开关关着")
+        if client is None:
+            return _skip("影子模式或微信客服通道未配置，不真的转")
+        if not group.is_kf or group.is_douyin:
+            return _skip("不是微信客服会话（抖音/群聊没有对等能力）")
         if group.handoff_userid:
-            return False
+            return _skip(f"这通对话已经转给过 {group.handoff_userid}，不重复转")
         tiers = {t.strip().upper() for t in s.handoff_priorities.split(",") if t.strip()}
-        if not urgent and (lead_row.get("priority") or "").upper() not in tiers:
-            return False
+        tier = (lead_row.get("priority") or "").upper()
+        if not urgent and tier not in tiers:
+            return _skip(f"优先级 {tier or '未评'} 不够格（只转 {'/'.join(sorted(tiers))} 或紧急）")
         target = lead_row.get("assigned_userid") or ""
         if not target:
-            return False
+            return _skip("这条线索还没派给具体律师（名册为空或都不在班？）")
         try:
-            if target not in set(client.servicer_list(group.kf_open_kfid)):
-                logger.warning(
-                    "handoff skipped: %s 不是 %s 的接待人", target, group.kf_open_kfid
-                )
-                return False
+            servicers = set(client.servicer_list(group.kf_open_kfid))
         except Exception:
             logger.exception("handoff servicer check failed: %s", group.group_id)
-            return False
+            return _skip("查不到该客服账号的接待人名单")
+        if target not in servicers:
+            return _skip(
+                f"{target} 不在客服账号「{group.kf_open_kfid}」的接待人名单里"
+                "（去控制台「状态」页点「把名册律师加为接待人」）"
+            )
 
         # 先跟客户说一句再转，否则律师还没看到的这段时间里客户对着静默。
         # 不点名（业务决策 2026-08，见 CLAUDE.md）：这里更不能点——客户读到名字
@@ -417,7 +448,7 @@ class Pipeline:
         if not client.transfer(group.kf_open_kfid, group.kf_external_userid, target):
             # 转不过去就当没转：交接单已经推给律师了，他还能打电话，客户不会掉队
             logger.warning("handoff transfer failed, 回落原链路: %s", group.group_id)
-            return False
+            return _skip("企微拒绝了转接请求（接口返回失败）")
         self.store.set_handoff(group.group_id, target)
         self.store.save_reply(
             f"handoff-{group.group_id}-{int(time.time())}", group.group_id,

@@ -1487,6 +1487,12 @@ def diagnose(
             checks.append("微信客服通道正常")
     if group.handoff_userid:
         checks.append(f"这通对话已转给 {group.handoff_userid} 人工接待")
+    # 「为什么没自动转给律师」——转接有六个前提，缺一个就静默回落。
+    # 静默正是最贵的部分：律所方只能问「怎么会没转呢」，而我们只能一条条猜。
+    # `_maybe_handoff._skip` 把原因写在这儿，此处照搬出来。
+    skip = store.get_note(f"handoff_skip:{group_id}")
+    if skip and not group.handoff_userid:
+        checks.append(f"没有自动转给律师，因为：{skip}")
     # 企微那边的会话归属才是决定性的：状态不是「智能助手接待」时，
     # 我们判断得再对、回复生成得再好，客户也看不到。
     if group.is_kf and not group.is_douyin:

@@ -10,7 +10,14 @@
 import pytest
 
 from responder.config import Settings
-from responder.models import ClientStatus, GroupProfile
+from responder.models import (
+    Action,
+    Category,
+    ClientStatus,
+    Decision,
+    GroupProfile,
+    IncomingMessage,
+)
 from responder.service import Pipeline
 from responder.store.db import Store
 
@@ -414,3 +421,99 @@ def test_takeover_rejects_unknown_group(tmp_path):
         "/console/groups/kf:nope:nobody/takeover", json={"userid": "wei"},
     )
     assert r.status_code == 404
+
+
+# --------------------------------------------------- 没转成，得说得出为什么
+# 律所方原话：「那怎么会没有自动转接给律师呢」。六个前提原来是六个静默的
+# return——转不成就悄悄回落，控制台里什么都看不出来，只能一条条猜。
+# 静默失败是最贵的失败：没有人会去查一个「看起来正常」的系统。
+
+def _skip_reason(store, group_id: str) -> str:
+    return store.get_note(f"handoff_skip:{group_id}")
+
+
+def test_every_skip_writes_down_why(tmp_path):
+    """六道前提，每一道都得留下一句人话。缺哪句，排障就得靠猜。"""
+    cases = [
+        ("转接开关关着", dict(handoff_enabled=False), kf_group(), lead_row()),
+        ("影子模式", dict(mode="shadow"), kf_group(), lead_row()),
+        ("不是微信客服会话", {}, kf_group(group_id="dyim:abc", kf_open_kfid="",
+                                    kf_external_userid="", douyin_open_id="abc"),
+         lead_row()),
+        ("转给过", {}, kf_group(handoff_userid="wei"), lead_row()),
+        ("不够格", {}, kf_group(), lead_row(priority="P1")),
+        ("还没派给具体律师", {}, kf_group(), lead_row(assigned="")),
+    ]
+    for expect, over, group, row in cases:
+        sub = tmp_path / expect
+        sub.mkdir()
+        store, _, p = make(sub, **over)
+        assert p._maybe_handoff(group, row, urgent=False) is False
+        assert expect in _skip_reason(store, group.group_id), expect
+        assert expect in row["_handoff_skip"], expect
+
+
+def test_not_a_servicer_says_which_button_to_press(tmp_path):
+    """最常见的一种没转成：律师根本不在那个客服账号的接待人名单里。
+
+    光说「不在名单里」不够——得说清去哪儿点哪个按钮，否则律所方那头
+    还是不知道该做什么。
+    """
+    store, _, p = make(tmp_path, kf=FakeKf(servicers=("zhang",)))
+    group = kf_group()
+    assert p._maybe_handoff(group, lead_row(), urgent=False) is False
+    why = _skip_reason(store, group.group_id)
+    assert "接待人" in why and "状态" in why
+
+
+def test_refused_transfer_is_recorded_too(tmp_path):
+    """企微那头拒了也算一种「没转成」，不能只在日志里留一行。"""
+    store, _, p = make(tmp_path, kf=FakeKf(transfer_ok=False))
+    group = kf_group()
+    store.upsert_group(group)
+    assert p._maybe_handoff(group, lead_row(), urgent=False) is False
+    assert "企微拒绝" in _skip_reason(store, group.group_id)
+
+
+def test_diagnose_surfaces_the_skip_reason(tmp_path):
+    """「为什么没回复」那一页要顺带答「为什么没自动转给律师」——
+    律所方问的其实是同一件事：这通对话现在卡在哪儿。"""
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    group = kf_group()
+    store.upsert_group(group)
+    p._maybe_handoff(group, lead_row(priority="P2"), urgent=False)
+
+    r = TestClient(_probe_app(store, p.settings, ProbeKf())).get(
+        "/console/diagnose", params={"group_id": GID},
+    )
+    assert r.status_code == 200
+    assert any("没有自动转给律师" in c for c in r.json()["checks"])
+
+
+def test_score_crossing_p0_on_a_quiet_follow_up_still_transfers(tmp_path):
+    """跨过 P0 门槛的那一句，常常是一句「冷」消息。
+
+    硬信号（有人受伤、要律师联系、留电话）落在追问里是常态，而冷消息走的是
+    另一条分支——那条分支原来只重算分数就 return，转接一次也不会触发。
+    症状是：控制台里线索明明是 P0，律师的企微里却什么都没有。
+    """
+    store, kf, p = make(tmp_path)
+    group = kf_group()
+    store.upsert_group(group)
+    store.upsert_lead(GID, {"priority": "P2", "score": 10, "assigned_userid": "wei"})
+
+    convo = [
+        {"content": "我朋友出车祸住院了，对方全责", "sender_is_staff": 0},
+        {"content": "我的电话 13800001111", "sender_is_staff": 0},
+    ]
+    msg = IncomingMessage(msg_id="q-1", group_id=GID, content="好的",
+                          sender_id="cust")
+    decision = Decision(msg_id="q-1", group_id=GID, action=Action.ANSWER,
+                        category=Category.OTHER)
+    p._maybe_dispatch_lead(msg, decision, group, convo)
+
+    assert kf.transfers == [(OPEN_KFID, EXT_USER, "wei")], (
+        f"没转成：{store.get_note(f'handoff_skip:{GID}')}"
+    )
