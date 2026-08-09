@@ -1452,6 +1452,99 @@ def _issue_token(store: Store, userid: str) -> str:
     return token
 
 
+@router.get("/diagnose")
+def diagnose(
+    group_id: str, request: Request,
+    store: Store = Depends(get_store), _: Principal = Depends(require_admin),
+):
+    """这通对话为什么没回复？一句人话说清楚。
+
+    存在的理由：AI 不说话有十几种可能（没收到消息、开关关了、影子模式、
+    转人工了、通道断了、发送失败…），而它们**在客户那头长得一模一样**——
+    一片空白。没有这个自检，每次都要靠人肉猜 + 来回截图，一轮几分钟。
+    """
+    group = store.get_group(group_id)
+    if group is None:
+        return {"ok": False, "verdict": "这个会话在库里根本不存在——消息没进来。"}
+    s = request.app.state.pipeline.settings
+    msgs = store.recent_messages(group_id, 5)
+    last_customer = next(
+        (m for m in reversed(msgs) if not m.get("sender_is_staff")), None
+    )
+    decisions = store.list_decisions(group_id, limit=1)
+    last = decisions[0] if decisions else None
+
+    checks, blockers = [], []
+    if s.mode != "live":
+        blockers.append("现在是**影子模式**，AI 只写草稿不发言。到「状态」页切成正式模式。")
+    if not group.ai_enabled:
+        blockers.append("这个会话的 **AI 开关是关的**。在「会话」页把它打开。")
+    if group.is_kf and not group.is_douyin:
+        kf = getattr(request.app.state.pipeline, "kf_client", None)
+        if kf is None or not kf.available():
+            blockers.append("**微信客服通道没配好**，回复发不出去。")
+        else:
+            checks.append("微信客服通道正常")
+    if group.handoff_userid:
+        checks.append(f"这通对话已转给 {group.handoff_userid} 人工接待")
+    if last_customer is None:
+        blockers.append("**库里没有客户消息**——说明消息压根没送到我们这儿，"
+                        "多半是回调或拉取断了。")
+    if last is None:
+        blockers.append("**没有任何判断记录**——消息进来了但没被处理，"
+                        "后台工作线程可能已经停了，请点一次「升级到最新版」重启。")
+
+    reasons = []
+    if last:
+        try:
+            reasons = json.loads(last.get("reasons") or "[]")
+        except (ValueError, TypeError):
+            reasons = []
+    why = _explain_reasons(reasons, last)
+    return {
+        "ok": True,
+        "verdict": blockers[0] if blockers else why,
+        "blockers": blockers,
+        "checks": checks,
+        "last_customer_message": (last_customer or {}).get("content", ""),
+        "last_decision": {
+            "action": (last or {}).get("action", ""),
+            "should_speak": bool((last or {}).get("should_speak")),
+            "reasons": reasons,
+            "at": (last or {}).get("created_at", ""),
+        } if last else None,
+    }
+
+
+_REASON_ZH = {
+    "gate:ai-disabled": "这个会话的 AI 开关被关了",
+    "gate:handed-off": "已转人工接待，AI 主动让开（律师最近说过话）",
+    "gate:human-takeover": "律师刚在这通对话里说过话，AI 暂时让开",
+    "gate:waiting": "在等承办律师先回（群聊补位策略），到点会自动重判",
+    "handoff:no-show": "转过去没人接手，AI 已经接回来继续陪",
+    "handoff:reclaimed": "转接超时无人接手，已收回给 AI",
+    "staff-message": "这条是我方发的，不需要 AI 回",
+    "chitchat-fastpath": "客户只发了句寒暄，AI 按规则不接话",
+    "courtesy": "客户在道谢，AI 不接话",
+    "default-silence": "规则没认出这是需要回答的问题（这类通常是词表该补了）",
+    "non-text-or-empty": "这条不是文字消息（图片/语音），AI 读不了",
+    "at-mention": "这条 @ 了具体的人，AI 不插话",
+    "send:failed": "**回复生成了但没发出去**——通道有问题",
+}
+
+
+def _explain_reasons(reasons: list, last: dict | None) -> str:
+    if not last:
+        return "还没有判断记录。"
+    for r in reasons:
+        for key, zh in _REASON_ZH.items():
+            if r.startswith(key):
+                return zh
+    if last.get("should_speak"):
+        return "判断是要回复的——如果客户没收到，说明卡在发送这一步。"
+    return f"被这些原因拦下了：{'、'.join(reasons) or '（无）'}"
+
+
 @router.post("/groups/{group_id}/release")
 def release_to_ai(
     group_id: str, store: Store = Depends(get_store),

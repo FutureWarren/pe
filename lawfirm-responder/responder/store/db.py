@@ -228,6 +228,34 @@ _ADDED_COLUMNS = {
 }
 
 
+def _heal_channel_ids(g: GroupProfile) -> GroupProfile:
+    """会话标识被抹掉时，从 group_id 里补回来。
+
+    为什么需要自愈：控制台的「保存群档案」曾经把 kf_open_kfid /
+    kf_external_userid / ext_channel 一起清成空串（前端只发 10 个字段，
+    端点按整档覆盖）。那个 bug 已经堵上了，但**已经被点坏的会话不会自己好**——
+    `is_kf` 变假，回复被发往一个不存在的群，客户从此一句话也收不到，
+    而判断和回复照常入库、控制台里看着一切正常。
+
+    好在 group_id 本身就是 `kf:{open_kfid}:{external_userid}` /
+    `ch:{channel}:{external_id}`，两个标识一直在那儿。读的时候补一次即可，
+    不必写库、不必人工介入，坏掉的会话下一条消息就活过来。
+    """
+    gid = g.group_id or ""
+    parts = gid.split(":")
+    if len(parts) >= 3 and parts[0] == "kf" and not (
+        g.kf_open_kfid and g.kf_external_userid
+    ):
+        g.kf_open_kfid = g.kf_open_kfid or parts[1]
+        g.kf_external_userid = g.kf_external_userid or ":".join(parts[2:])
+    elif len(parts) >= 3 and parts[0] == "ch" and not (
+        g.ext_channel and g.ext_user_id
+    ):
+        g.ext_channel = g.ext_channel or parts[1]
+        g.ext_user_id = g.ext_user_id or ":".join(parts[2:])
+    return g
+
+
 class Store:
     def __init__(self, path: str = "responder.db"):
         self.path = path
@@ -328,7 +356,7 @@ class Store:
         for key, field in GroupProfile.model_fields.items():
             if d.get(key) is None and field.annotation is str:
                 d[key] = ""
-        return GroupProfile(**d)
+        return _heal_channel_ids(GroupProfile(**d))
 
     def set_memory(self, group_id: str, text: str) -> None:
         """写入客户跨会话记忆。空串 = 清空（客户要求删除时用）。

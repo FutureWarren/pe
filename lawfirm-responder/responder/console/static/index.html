@@ -1434,10 +1434,15 @@ async function openConversation(gid) {
     <button class="btn-outline" style="margin:10px 0" data-act="takeover" data-gid="${esc(gid)}">
       <svg class="ico"><use href="#i-users"/></svg>转给我接手（在企微里直接跟客户聊）
     </button>
-    <button class="btn-text muted" style="width:100%;justify-content:center;margin:-4px 0 8px"
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin:-4px 0 0"
             data-act="release" data-gid="${esc(gid)}">
       <svg class="ico"><use href="#i-refresh"/></svg>收回给 AI（人接不上时用）
     </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin:0 0 8px"
+            data-act="diagnose" data-gid="${esc(gid)}">
+      <svg class="ico"><use href="#i-alert"/></svg>为什么没回复？
+    </button>
+    <div id="diagBox"></div>
     <div id="convoBody">${skeleton()}</div>`);
   let list;
   try { list = await api(`/conversation?group_id=${encodeURIComponent(gid)}`); }
@@ -1821,6 +1826,29 @@ function editLawyer(userid) {
       </label>`}
     </div>
     <button class="btn-primary xl" onclick="saveLawyer(${isNew})">保存</button>`);
+}
+/* AI 不说话有十几种可能，而它们在客户那头长得一模一样——一片空白。
+   这个按钮把「到底卡在哪」直接说成人话，省掉一轮轮猜测和截图。 */
+async function diagnose(gid) {
+  const box = document.getElementById("diagBox");
+  if (box) box.innerHTML = `<div class="meta">检查中…</div>`;
+  let d;
+  try { d = await api(`/diagnose?group_id=${encodeURIComponent(gid)}`); }
+  catch (e) { if (box) box.innerHTML = `<div class="meta">自检失败，请重试</div>`; return; }
+  if (!box) return;
+  const list = (d.blockers || []).length
+    ? (d.blockers || []).map(b => `<div style="margin:4px 0">· ${esc(b)}</div>`).join("")
+    : `<div style="margin:4px 0">· ${esc(d.verdict || "")}</div>`;
+  const ok = (d.checks || []).map(c => `<div class="meta">✓ ${esc(c)}</div>`).join("");
+  const dec = d.last_decision
+    ? `<div class="meta" style="margin-top:6px">最后一次判断：${esc(d.last_decision.action)}
+       ${d.last_decision.should_speak ? "（要发言）" : "（不发言）"} ·
+       ${esc((d.last_decision.reasons || []).join(" / "))}</div>` : "";
+  box.innerHTML = `<div class="card" style="margin:0 0 10px">
+      <b style="font-size:15px">自检结果</b>
+      <div style="font-size:14px;line-height:1.7;margin-top:6px">${list}</div>
+      ${ok}${dec}
+    </div>`;
 }
 async function releaseToAi(gid) {
   try { await api(`/groups/${encodeURIComponent(gid)}/release`, { method: "POST" }); }
@@ -2600,6 +2628,7 @@ document.addEventListener("click", e => {
   else if (act === "editlawyer") editLawyer(uid);
   else if (act === "dellawyer") askDeleteLawyer(uid);
   else if (act === "release") releaseToAi(gid);
+  else if (act === "diagnose") diagnose(gid);
   else if (act === "kbok") setKbStatus(Number(el.dataset.kid), "approved");
   else if (act === "kboff") setKbStatus(Number(el.dataset.kid), "retired");
   else if (act === "kbedit") editKnowledge(Number(el.dataset.kid));

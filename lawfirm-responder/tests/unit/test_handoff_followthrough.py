@@ -213,3 +213,72 @@ def test_release_button_hands_the_conversation_back_to_the_ai(tmp_path):
 
     assert c.post(f"/console/groups/{gid}/release").status_code == 200
     assert store.get_group(gid).handoff_userid == ""
+
+
+# ------------------------------------------------------ 五、被抹掉的会话要自愈
+def test_a_wiped_kf_session_heals_itself_from_the_group_id(tmp_path):
+    """「保存群档案」曾经把 kf_open_kfid 一起清成空串。那个 bug 堵上了，
+    但**已经被点坏的会话不会自己好**——is_kf 变假，回复被发往一个不存在的群，
+    客户从此一句话也收不到，而控制台里看着一切正常。
+    好在 group_id 本身就是 kf:{open_kfid}:{external_userid}。"""
+    from responder.store.db import Store
+
+    store = Store(str(tmp_path / "heal.db"))
+    gid = "kf:wk05XzXg:wm05XzXg"
+    store.upsert_group(GroupProfile(group_id=gid, kf_open_kfid="wk05XzXg",
+                                    kf_external_userid="wm05XzXg"))
+    with store._conn() as conn:
+        conn.execute("UPDATE groups SET kf_open_kfid='', kf_external_userid=''"
+                     " WHERE group_id=?", (gid,))
+
+    g = store.get_group(gid)
+    assert g.is_kf is True
+    assert (g.kf_open_kfid, g.kf_external_userid) == ("wk05XzXg", "wm05XzXg")
+
+
+def test_a_wiped_external_channel_heals_too(tmp_path):
+    from responder.store.db import Store
+
+    store = Store(str(tmp_path / "heal2.db"))
+    store.upsert_group(GroupProfile(group_id="ch:meituan:u-9527"))
+    with store._conn() as conn:
+        conn.execute("UPDATE groups SET ext_channel='', ext_user_id=''")
+
+    g = store.get_group("ch:meituan:u-9527")
+    assert (g.ext_channel, g.ext_user_id) == ("meituan", "u-9527")
+    assert g.is_external is True
+
+
+def test_group_chats_are_not_touched_by_the_healing(tmp_path):
+    from responder.store.db import Store
+
+    store = Store(str(tmp_path / "heal3.db"))
+    store.upsert_group(GroupProfile(group_id="wrOabc123", name="客户群"))
+    g = store.get_group("wrOabc123")
+    assert g.is_kf is False and g.kf_open_kfid == ""
+
+
+# ------------------------------------------------------ 六、一键自检
+def test_diagnose_names_the_gate_in_plain_chinese(tmp_path):
+    """AI 不说话有十几种可能，而它们在客户那头长得一模一样——一片空白。"""
+    c, store, _ = _console(tmp_path)
+    gid = "kf:wk:cust"
+    store.upsert_group(GroupProfile(group_id=gid, kf_open_kfid="wk",
+                                    kf_external_userid="cust", ai_enabled=False))
+    r = c.get(f"/console/diagnose?group_id={gid}").json()
+    assert "开关" in r["verdict"], r
+
+
+def test_diagnose_flags_shadow_mode(tmp_path):
+    c, store, s = _console(tmp_path)
+    s.mode = "shadow"
+    gid = "kf:wk:cust"
+    store.upsert_group(GroupProfile(group_id=gid, kf_open_kfid="wk",
+                                    kf_external_userid="cust"))
+    assert "影子模式" in c.get(f"/console/diagnose?group_id={gid}").json()["verdict"]
+
+
+def test_diagnose_says_when_the_conversation_never_arrived(tmp_path):
+    c, _, _ = _console(tmp_path)
+    r = c.get("/console/diagnose?group_id=kf:nope:nope").json()
+    assert r["ok"] is False and "不存在" in r["verdict"]
