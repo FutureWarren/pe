@@ -406,20 +406,35 @@ def ask_contact(
     这是首轮筛查的收口动作：线上能说的是一般性框架，真要把事办了必须落到
     「谁来跟进、怎么找到他」。不开口要，八成客户聊完就走了。
 
-    语气按真人来：先给「为什么要电话」的理由（律师回电更省事），再给一个
-    可选项（也可以直接来所里），不逼客户二选一。地址报全，让人觉得是实体所。
+    **一次只做一件事。** 原来这段话把「留个电话」和「地址是××路 88 号平高广场
+    11 楼、欢迎来所里坐坐」塞在同一口气里，律所方实测的原话是
+    「这一长串的说话方式，让客户一看就会觉得这是不是 AI」——真人不会在
+    刚听完你一句话之后，就把电话和地址一起报出来。
+
+    所以这里只要电话，短句、给一个理由、留一个台阶。所址走 `office_invite`，
+    等客户真的表现出想来了再说（或者他直接问地址，那时 `office_fact` 会答）。
     """
     settings = settings or get_settings()
     L = _lawyer(group)
+    variants = [
+        f"您留个手机号吧，我让{L}直接给您回电话，比在这儿打字说得清楚。",
+        f"方便留个手机号吗？我转给{L}，电话里三两句就说明白了。",
+        f"要不您把手机号发我，{L}那边直接联系您，比打字快。",
+    ]
+    return _pick(variants, seed)
+
+
+def office_invite(
+    group: GroupProfile, seed: str = "", settings: Settings | None = None
+) -> str:
+    """邀约到所面谈。**和要电话分开**，别在同一条里一起说。"""
+    settings = settings or get_settings()
     addr = settings.office_address
     where = f"{settings.office_name}（{addr}）" if addr else settings.office_name
     variants = [
-        f"这样，您留个手机号吧，我安排{L}直接给您回个电话，比打字说得清楚。\n"
-        f"要是您方便过来，也欢迎来所里坐坐、当面聊：{where}，来之前跟我说一声就行。",
-        f"您方便留个手机号吗？我转给{L}，让他电话里跟您细说，比在这儿打字快。\n"
-        f"或者您得空来所里也行，我们在{where}，喝杯茶把材料一起看看。",
-        f"要不这样，您把手机号发我，{L}那边直接联系您。\n"
-        f"当面聊也可以，地址是{where}，您定个时间我这边给您安排。",
+        f"您要是方便，也欢迎来所里当面聊，我们在{where}。",
+        f"当面聊也行，地址是{where}，来之前跟我说一声我给您留时间。",
+        f"或者您得空来所里坐坐，{where}，把材料一起看看更快。",
     ]
     return _pick(variants, seed)
 

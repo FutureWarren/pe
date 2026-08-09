@@ -32,7 +32,31 @@ _ENGAGE = re.compile(
     r"(想|要|得|需要)(找|请)(个|位)?律师|找你们律师)"
 )
 # 主动索要联系方式也算强信号（客户想把沟通挪到线下）
-_WANT_CONTACT = re.compile(r"(电话(联系|多少|号码)|打(我|个)?电话|留(个)?(电话|联系方式)|怎么联系)")
+# 客户主动要律师联系他——这是整通对话里最强的成交信号，比他留下号码还强，
+# 因为那是他自己要往前走。真机漏过一整串：「现在有律师可以直接让我联系的吗」
+# 「让律师直接来电」——一条都没命中，于是这单被判成弱意愿躺在队列里。
+_WANT_CONTACT = re.compile(
+    r"(电话(联系|多少|号码)|打(我|个)?电话|留(个)?(电话|联系方式)|怎么联系|"
+    r"(律师|你们|谁).{0,8}(联系|对接|沟通|回电|来电|打给)我|"
+    r"(让|叫|请|麻烦).{0,6}(律师|人).{0,6}(来电|回电|打|联系|沟通)|"
+    r"有(没有)?(律师|人).{0,10}(联系|沟通|对接|说话|接)|"
+    r"(直接|马上|现在|尽快).{0,6}(联系|对接|沟通)我)"
+)
+
+# 人身伤害正在发生：住院、受伤、抢救。对律所来说这是最该当场接住的一类，
+# 而它此前一分不加——真机里客户反复说「朋友已经在医院了」「需要快一点」，
+# 系统给出的结论是「弱意愿」。
+_INJURY = re.compile(
+    r"(在|进|送|住)(医院|急诊|ICU|重症)|住院|抢救|昏迷|重伤|骨折|"
+    r"(伤得|伤情).{0,4}(重|严重)|命危|生命危险|做手术|开刀"
+)
+
+# 客户自己说「急」。不是所有「急」都等于法律意义上的紧急（拘留/开庭），
+# 但它一定意味着**这个人现在就要有人回应他**——而那正是排队顺序要回答的问题。
+_URGENT_PLEA = re.compile(
+    r"(很|非常|特别|真的|都|挺)?(着)?急([了死坏]|得很)?|"
+    r"(尽快|马上|立刻|赶紧|快一点|快点|等不了|来不及|拖不起)"
+)
 _FEE = re.compile(r"(收费|费用|多少钱|价格|报价|律师费)")
 
 HOT, WARM, COLD = "hot", "warm", "cold"
@@ -60,10 +84,14 @@ def detect(text: str) -> tuple[str, list[str]]:
         hits.append("engage")
     if _WANT_CONTACT.search(text):
         hits.append("want-contact")
+    if _INJURY.search(text):
+        hits.append("injury")
+    if _URGENT_PLEA.search(text):
+        hits.append("urgent-plea")
     if _FEE.search(text):
         hits.append("fee")
 
-    if {"contact", "meeting", "engage", "want-contact", "wechat"} & set(hits):
+    if {"contact", "meeting", "engage", "want-contact", "wechat", "injury"} & set(hits):
         return HOT, hits
     if "fee" in hits:
         return WARM, hits

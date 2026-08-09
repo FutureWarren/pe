@@ -67,6 +67,7 @@ def generate(
     include_cta: bool = True,
     ask_contact: bool = False,
     next_step: bool = False,
+    office_invite: bool = False,
     knowledge_text: str = "",
     memory_text: str = "",
     settings: Settings | None = None,
@@ -100,6 +101,11 @@ def generate(
         if ask_contact:
             decision.reasons.append("cta:ask-contact")
             return text + "\n" + templates.ask_contact(
+                group, seed=msg.msg_id, settings=settings
+            )
+        if office_invite:
+            decision.reasons.append("cta:office-invite")
+            return text + "\n" + templates.office_invite(
                 group, seed=msg.msg_id, settings=settings
             )
         if next_step:
@@ -159,7 +165,7 @@ def generate(
             group, body,
             include_disclaimer=require_disclaimer,
             opening=templates.answer_opening(msg.content, now),
-            include_cta=include_cta and not (ask_contact or next_step),
+            include_cta=include_cta and not (ask_contact or next_step or office_invite),
             seed=msg.msg_id,
         )
     else:
@@ -167,7 +173,7 @@ def generate(
         text = templates.answer_without_llm(
             group,
             include_disclaimer=require_disclaimer,
-            include_cta=include_cta and not (ask_contact or next_step),
+            include_cta=include_cta and not (ask_contact or next_step or office_invite),
         )
     return guard(
         _close(text), Action.ANSWER, fallback, require_disclaimer=require_disclaimer

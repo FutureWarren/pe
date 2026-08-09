@@ -219,12 +219,25 @@ THREE = [
 
 
 def test_ask_contact_after_threshold(tmp_path):
-    """聊到第 3 条还没留电话 → 主动要手机号 + 报全地址邀约到所。"""
+    """聊到第 3 条还没留电话 → 开口要手机号。**这一条里不报地址**。"""
     _, kf = _chat(tmp_path, THREE)
     text = kf.texts()
     assert "手机号" in text
-    assert ADDRESS in text
-    assert "上海松沪律师事务所" in text
+    assert ADDRESS not in text, "第一拍只要电话，所址是下一拍的事"
+
+
+def test_office_invite_comes_one_beat_later(tmp_path):
+    """号码还是没留、而他仍在聊，才补一句所址。
+
+    两拍分开是律所方 2026-08-08 的实测要求：原来这两件事挤在同一条里，
+    「留个手机号吧……当面聊也可以，地址是××路 88 号平高广场 11 楼」——
+    一看就是机器。真人不会在刚听完一句话之后把电话和地址一口气报出来。
+    """
+    _, kf = _chat(tmp_path, THREE + ["那我先准备着，还有别的要注意吗"])
+    text = kf.texts()
+    assert "手机号" in text and ADDRESS in text
+    for _, _, one in kf.sent:
+        assert not ("手机号" in one and ADDRESS in one), f"又挤一条里了：{one}"
 
 
 def test_ask_contact_not_before_threshold(tmp_path):
@@ -299,13 +312,19 @@ def test_handoff_reply_always_has_a_next_step(tmp_path):
     )
 
 
-def test_next_step_yields_to_full_ask_contact(tmp_path):
-    """轻推与完整邀约互斥，不叠着发（同一条里不会问两遍电话）。"""
+def test_phone_and_address_are_never_asked_in_one_breath(tmp_path):
+    """要电话和报所址**必须分成两拍**（律所方 2026-08-08 实测要求）。
+
+    原来这两件事挤在同一条消息里——「留个手机号吧……当面聊也可以，
+    地址是××路 88 号平高广场 11 楼」——律所方的原话是
+    「这一长串的说话方式，让客户一看就会觉得这是不是 AI」。
+    真人不会在刚听完一句话之后，把电话和地址一口气报出来。
+    """
     _, kf = _chat(tmp_path, THREE)
-    # 完整邀约含地址，轻推不含；两者同时出现会变成一条里问两遍
     for _, _, t in kf.sent:
         if ADDRESS in t:
-            assert t.count("手机号") == 1
+            assert "手机号" not in t, f"地址和要电话又挤在一条里了：{t}"
+        assert t.count("手机号") <= 1
 
 
 def test_no_next_step_in_group_chat(tmp_path):

@@ -196,6 +196,9 @@ class Pipeline:
             )
 
         want_contact = self._should_ask_contact(group, decision, convo)
+        want_office = (not want_contact) and self._should_invite_office(
+            group, decision, convo
+        )
         # 承接类回复本身是死胡同（「我帮您问下律师，请您稍等」说完客户只能干等）。
         # 完整邀约还不到时候的，至少轻推一句，别让对话停在没有下一步的地方。
         # 只对一对一窗口做：群聊里承办律师本人在场，「请您稍等」的下一步就是
@@ -209,11 +212,13 @@ class Pipeline:
             and not signals.scan(convo)[1]
             and not self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
         )
+        want_next_step = want_next_step and not want_office
         self._maybe_intake(msg, decision, group, convo)
         result = generate(
             msg, decision, group, history=history, settings=self.settings,
             include_cta=not self._recent_cta(msg.group_id),
             ask_contact=want_contact, next_step=want_next_step,
+            office_invite=want_office,
             knowledge_text=self._recall(msg, decision),
             memory_text=self._customer_memory(group, convo),
         )
@@ -615,11 +620,47 @@ class Pipeline:
         ]
         if len(spoken) < threshold:
             return False
+        # **得先听懂他的事，再开口要电话。** 律所方实测原话：「AI 应该在了解完
+        # 基础信息之后，再去引导客户留联系方式」。客户第二句话刚问完一个法律
+        # 问题就被要号码，那不像接待，像推销——而推销的第一反应是关掉窗口。
+        # 判据是「他把事说出来过」，不是「他说够两句了」：两句寒暄也能凑够数。
+        if not any(
+            rules.has_substance(m.get("content", ""))
+            for m in spoken
+        ):
+            return False
         if signals.scan(convo)[1]:
             return False
-        if self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS, limit=1):
-            return False  # 上一条刚问过号码，这条再问就是催单
-        return not self._recent_marker(group.group_id, templates.OFFICE_INVITE_MARKERS)
+        # 同一个接管窗口里只要一次号码。问第二遍就是催单，
+        # 而催单是客户判断「对面是不是机器人」最强的一条线索。
+        return not self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
+
+    def _should_invite_office(
+        self, group: GroupProfile, decision: Decision, convo: list[dict]
+    ) -> bool:
+        """该不该邀他来所里当面聊。
+
+        **和要电话分开、并且晚一步。** 原来这两件事挤在同一条消息里
+        （「留个手机号吧……当面聊也可以，地址是××路 88 号平高广场 11 楼」），
+        律所方实测的原话是「这一长串的说话方式，让客户一看就会觉得这是不是 AI」。
+        真人不会在刚听完一句话之后，把电话和地址一口气报出来。
+
+        所以拆成两拍：先只要电话；号码还是没留、而他仍在聊，才补一句所址。
+        客户自己表达了想见面的（`meeting` 信号）也直接给。
+        """
+        if not group.is_kf or group.client_status != ClientStatus.PROSPECT:
+            return False
+        if decision.category == Category.GREETING:
+            return False
+        if signals.scan(convo)[1]:
+            return False  # 号码已经有了，该打电话而不是请人跑一趟
+        if self._recent_marker(group.group_id, templates.OFFICE_INVITE_MARKERS):
+            return False  # 邀第二遍就成了催
+        hits = signals.scan(convo)[2]
+        if "meeting" in hits:
+            return True  # 他自己说想来，那就别绕
+        # 否则：得是「已经问过号码但他没给」的那一步
+        return self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
 
     # ------------------------------------------------------------ 发送
     def _is_kf(self, group: GroupProfile) -> bool:

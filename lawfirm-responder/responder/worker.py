@@ -622,8 +622,11 @@ class Worker:
         if now - self._robot_state_checked.get(group_id, 0.0) < 600:
             return
         self._robot_state_checked[group_id] = now
+        getter = getattr(self.kf_client, "service_state", None)
+        if getter is None:
+            return  # 老版本客户端/测试桩没有这个能力，跳过而不是报错
         try:
-            state = self.kf_client.service_state(open_kfid, external_userid)
+            state = getter(open_kfid, external_userid)
         except Exception:
             logger.exception("service_state get failed: %s", group_id)
             return
