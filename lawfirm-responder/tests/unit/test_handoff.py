@@ -553,3 +553,26 @@ def test_handoff_checklist_matches_hot_signals():
     from responder.engine import priority, signals
 
     assert {k for k, _ in priority.WANTS_HUMAN} == signals.HOT_SIGNALS
+
+
+@pytest.mark.parametrize("payload,anchor", [
+    ("kf kf/servicer/add failed: {'errcode': 48007, 'errmsg': 'api forbidden'}",
+     "通过 API 管理微信客服账号"),
+    ({"errcode": 48002}, "可调用接口的应用"),
+    ({"errcode": 60030}, "可见范围"),
+    ({"errcode": 0}, ""),
+    ("网络超时", ""),
+])
+def test_wecom_errcodes_are_translated_into_something_actionable(payload, anchor):
+    """「48007 api forbidden for no kfid privilege」对律所侧等于一串乱码。
+
+    每一个真会撞到的错误码都必须翻成一句**能照着点**的中文，否则每次都变成
+    「发截图给开发」——而开发这边同样要现查，一轮就是半小时。
+    """
+    from responder.gateway.wecom_kf import err_hint
+
+    hint = err_hint(payload)
+    if anchor:
+        assert anchor in hint
+    else:
+        assert hint == ""

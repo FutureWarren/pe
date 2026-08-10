@@ -1158,6 +1158,7 @@ async function checkHandoff() {
     if (a.missing.length) {
       lines.push(`　❌ 不是接待人：${a.missing.map(m => esc(m.name || m.userid)).join("、")}`);
     }
+    if (a.hint) lines.push(`　<b style="color:var(--gold,#C6A15B)">👉 ${esc(a.hint)}</b>`);
   }
   const sp = r.state_probe || {};
   if (sp.ok) lines.push(`✅ 转接接口已连通（当前会话状态 ${sp.service_state}）`);
@@ -1181,7 +1182,9 @@ async function addServicers() {
   for (const a of r.accounts) {
     lines.push(`「${esc(a.name || a.open_kfid)}」已就位 ${a.added.length} 位`);
     if (a.failed.length) lines.push(`　❌ 没加上：${a.failed.map(esc).join("、")}`);
-    if (a.error) lines.push(`　接口报错：${esc(a.error)}`);
+    /* 先说怎么办，再说原始报错——律所侧看「48007」等于看一串乱码 */
+    if (a.hint) lines.push(`　<b style="color:var(--gold,#C6A15B)">👉 ${esc(a.hint)}</b>`);
+    if (a.error) lines.push(`　<span class="muted">原始报错：${esc(a.error)}</span>`);
   }
   el.innerHTML = lines.join("<br>");
   if (document.getElementById("teamList")) loadTeam();  // 就地刷新那几个徽标

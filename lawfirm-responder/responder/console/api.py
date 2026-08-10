@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from responder.compliance import forbidden
 from responder.config import persist_setting
 from responder.engine import priority
+from responder.gateway import wecom_kf as kf_errors
 from responder.models import GroupProfile
 from responder.store.db import Store
 
@@ -844,6 +845,7 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
             "servicers": sorted(servicers),
             "missing": [{"userid": u, "name": names.get(u, "")} for u in missing],
             "raw": raw if not servicers else None,  # 取不到接待人时才回原始返回
+            "hint": kf_errors.err_hint(raw.get("error", "") or raw),
         })
     state = _probe_state_endpoint(store, client, s)
     if state.get("error"):
@@ -906,6 +908,8 @@ def add_kf_servicers(request: Request, _: Principal = Depends(require_admin)):
             "added": sorted(set(userids) & after),
             "failed": sorted(set(userids) - after),
             "error": raw.get("error", ""),
+            # 48007/60030 这类错误码对律所侧等于乱码，翻成一句能照着点的中文
+            "hint": raw.get("hint", "") or kf_errors.err_hint(raw),
         })
     ok = all(not a["failed"] for a in out)
     return {"ok": ok, "accounts": out, "roster": userids}

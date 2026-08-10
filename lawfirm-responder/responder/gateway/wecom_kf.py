@@ -12,6 +12,7 @@
 """
 
 import logging
+import re
 import time
 
 import httpx
@@ -38,6 +39,44 @@ STATE_ROBOT = 1
 STATE_POOL = 2
 STATE_HUMAN = 3
 STATE_ENDED = 4
+
+
+
+# 企微错误码 → 一句能照着做的中文。
+# 存在的理由：律所侧看到的是「48007 api forbidden for no kfid privilege」，
+# 那对他们等于一串乱码——于是每一次都变成「发截图给开发」。
+# 这几个码是这条链上真正会撞到的，每一个都对应一个具体的后台动作。
+ERR_HINTS: dict[int, str] = {
+    48007: (
+        "这个客服账号还没交给我们的应用管理。去企业微信管理后台 → 应用管理 → "
+        "「微信客服」→ 右上角「API」→ 在「通过 API 管理微信客服账号-企业内部开发」里"
+        "勾上这个客服账号。（勾了之后就不能再用微信客服网页后台新建账号了）"
+    ),
+    48002: (
+        "应用没有微信客服的接口权限。管理后台 → 应用管理 → 「微信客服」→ "
+        "「API」→ 「可调用接口的应用」里选中我们的自建应用。"
+    ),
+    60011: "没有操作这个成员的权限——他多半不在自建应用的可见范围里。",
+    60030: (
+        "接待人不在应用的可见范围里。管理后台 → 应用管理 → 我们的自建应用 → "
+        "「可见范围」把这个人加进去。"
+    ),
+    301002: "没有该成员的权限（可见范围问题）。",
+}
+
+
+def err_hint(payload: dict | str) -> str:
+    """从企微返回里挑出 errcode，翻成一句能照着做的中文；认不出就空串。"""
+    code = None
+    if isinstance(payload, dict):
+        code = payload.get("errcode")
+    else:
+        m = re.search(r"'errcode':\s*(\d+)", str(payload))
+        code = int(m.group(1)) if m else None
+    try:
+        return ERR_HINTS.get(int(code), "") if code is not None else ""
+    except (TypeError, ValueError):
+        return ""
 
 
 class KfClient:
@@ -133,10 +172,15 @@ class KfClient:
     def servicer_add(self, open_kfid: str, userids: list[str]) -> dict:
         """把律师加为该客服账号的接待人。返回原始结果（含逐人 errcode）。
 
-        为什么要做成 API 而不是让律所自己去后台点：这个客服账号由企微应用托管，
-        kf.weixin.qq.com 那个后台顶部横幅明说「正在通过企业微信应用管理相关能力」，
-        点「开始使用」会把管理权夺回网页后台——那会打断消息推送，代价远大于收益。
-        既然程序有权限，就由程序加，律所侧一个按钮的事。
+        为什么要做成 API 而不是让律所自己去后台点：账号一旦交给应用托管，
+        kf.weixin.qq.com 顶部就会挂「正在通过企业微信应用管理相关能力」，
+        接待人在那个网页后台反而点不了；而点「开始使用」会把管理权夺回网页侧，
+        打断消息推送。既然程序有权限，就由程序加，律所侧一个按钮的事。
+
+        **前提是那个账号真的托管给了应用**（管理后台 → 应用管理 → 微信客服 →
+        API → 「通过 API 管理微信客服账号-企业内部开发」勾上它）。没勾的话
+        这里会拿到 48007 `no kfid privilege`——`err_hint` 会把它翻成
+        那句能照着点的中文，别让人对着错误码发愣。
         """
         if not userids:
             return {"error": "没有可添加的 userid"}
@@ -146,7 +190,7 @@ class KfClient:
             )
         except Exception as e:
             logger.exception("kf servicer/add error (open_kfid=%s)", open_kfid)
-            return {"error": str(e)[:300]}
+            return {"error": str(e)[:300], "hint": err_hint(str(e))}
 
     def account_list(self) -> list[dict]:
         """客服账号列表（部署自检用）。"""
