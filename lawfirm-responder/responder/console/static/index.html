@@ -2694,7 +2694,8 @@ function renderGroups(more) {
               : g.robot_webhook
                 ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
                 : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
-        <button class="btn-text muted" style="margin-left:auto" data-act="edit" data-gid="${esc(g.group_id)}">编辑${ico("chevron")}</button>
+        <button class="btn-text muted" style="margin-left:auto" data-act="convo" data-gid="${esc(g.group_id)}">${ico("message")}查看对话</button>
+        <button class="btn-text muted" data-act="edit" data-gid="${esc(g.group_id)}">编辑${ico("chevron")}</button>
       </div>
     </div>`;
   }).join("");

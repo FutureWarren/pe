@@ -358,3 +358,27 @@ def test_forget_also_hands_the_wecom_session_back_to_ai(tmp_path):
     ))
     c.post(f"/console/groups/{gid}/forget")
     assert kf.robot == [("wk1", "cust")]
+
+
+def test_the_conversations_tab_can_actually_open_a_conversation():
+    """「会话」页原来只有「编辑」——而「查看对话」（以及它里面的「转给我接手」
+    「为什么没回复」「清空这个客户」）只挂在线索页和看板上。
+
+    律所方去「会话」页找「清空这个客户」，翻遍了没有，点「编辑」进的是
+    档案表单，底下还摆着一个红色的「删除群档案」——**离误删只差一步**。
+    功能藏在一个想不到的地方，跟没做是一回事；藏在一个危险按钮旁边更糟。
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from responder.console.api import ui_router
+
+    app = FastAPI()
+    app.include_router(ui_router)
+    html = TestClient(app).get("/ui").text
+
+    assert "清空这个客户，重新测一遍" in html
+    # 会话卡片（AI 开关所在的那张）上必须同时有「查看对话」和「编辑」
+    card = html[html.index('data-act="ai" data-gid'):][:2000]
+    assert 'data-act="convo"' in card, "会话页进不去对话面板"
+    assert 'data-act="edit"' in card
