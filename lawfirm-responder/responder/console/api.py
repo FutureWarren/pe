@@ -26,7 +26,7 @@ from responder.compliance import forbidden
 from responder.config import persist_setting
 from responder.engine import priority
 from responder.gateway import wecom_kf as kf_errors
-from responder.models import GroupProfile
+from responder.models import ClientStatus, GroupProfile
 from responder.store.db import Store
 
 logger = logging.getLogger(__name__)
@@ -1625,6 +1625,42 @@ def release_to_ai(
             hint = "已收回，但企微那边的会话状态没改过来，可能还是接不上"
     logger.info("released back to AI: %s", group_id)
     return {"ok": True, "hint": hint}
+
+
+@router.post("/groups/{group_id:path}/forget")
+def forget_group(
+    group_id: str, request: Request, store: Store = Depends(get_store),
+    _: Principal = Depends(require_admin),
+):
+    """把这个客户彻底忘掉——像他从没来过一样，用来反复跑测试。
+
+    存在的理由很实在：**回访客户那条路径，用一个新微信号是永远测不到的。**
+    每跑一次测试换一个号，测到的全是「新客户」；而跨会话记忆、二次问候、
+    再推送判据这些只在老客户身上发生，没有这个按钮就只能等上线以后撞。
+
+    建档保留（案由、承办律师、AI 开关是人配的，不该被一次测试清掉）。
+    企微那边的会话归属也要一并要回来——只清我们库里的是假动作，
+    会话还挂在「人工接待」或「已结束」上，下次扫码进来照样没人接。
+    """
+    group = store.get_group(group_id)
+    if group is None:
+        raise HTTPException(404, "会话不存在")
+    # 已委托客户不给清：那是台账，不是测试数据。删掉之后没有任何地方能还原，
+    # 而「我以为是测试号」是这类误删最常见的开场白。
+    if group.client_status == ClientStatus.SIGNED:
+        raise HTTPException(
+            400,
+            "这是已委托客户，聊天记录属于案件台账，不能清空。"
+            "确实要清的话，先在「会话」页把客户状态改成「咨询客户」。",
+        )
+    counts = store.forget_group(group_id)
+    hint = ""
+    kf = getattr(request.app.state.pipeline, "kf_client", None)
+    if group.is_kf and not group.is_douyin and kf is not None and kf.available():
+        if not kf.to_robot(group.kf_open_kfid, group.kf_external_userid):
+            hint = "本地记录已清空，但企微那边的会话状态没改回来，下次进来可能还是没人接"
+    logger.info("group forgotten (test reset): %s — %s", group_id, counts)
+    return {"ok": True, "deleted": counts, "hint": hint}
 
 
 @router.delete("/lawyers/{userid}")

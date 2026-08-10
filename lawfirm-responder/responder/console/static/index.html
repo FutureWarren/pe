@@ -1453,9 +1453,13 @@ async function openConversation(gid) {
             data-act="release" data-gid="${esc(gid)}">
       <svg class="ico"><use href="#i-refresh"/></svg>收回给 AI（人接不上时用）
     </button>
-    <button class="btn-text muted" style="width:100%;justify-content:center;margin:0 0 8px"
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin:0"
             data-act="diagnose" data-gid="${esc(gid)}">
       <svg class="ico"><use href="#i-alert"/></svg>为什么没回复？
+    </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin:0 0 8px"
+            data-act="forget" data-gid="${esc(gid)}">
+      <svg class="ico"><use href="#i-refresh"/></svg>清空这个客户，重新测一遍
     </button>
     <div id="diagBox"></div>
     <div id="convoBody">${skeleton()}</div>`);
@@ -1921,6 +1925,32 @@ async function releaseToAi(gid) {
   try { await api(`/groups/${encodeURIComponent(gid)}/release`, { method: "POST" }); }
   catch (e) { toast(e.detail || "操作失败，请重试", false); return; }
   toast("已收回给 AI，它会立刻继续接待");
+  groupsCache = []; refresh();
+}
+/* 「清空这个客户」——给测试用的。
+   律所方原话：「我每次跑测试都得用新的微信号，有点麻烦」。
+   而这不只是麻烦：**每次换号，测到的永远是「新客户」**，
+   跨会话记忆、二次问候、再推送判据这些只在老客户身上发生的事，
+   用新号一次也测不到。
+   删数据不可撤销，所以走确认层；已委托客户由服务端直接拒（那是台账）。 */
+function askForget(gid) {
+  openSheet(`<h2>清空这个客户？</h2>
+    <div class="sub">${esc(groupName(gid))}</div>
+    <p style="font-size:15px;margin:12px 0 8px;line-height:1.7">
+      聊天记录、AI 的判断与回复、线索、跨会话记忆、转接状态<b>全部删除，不可恢复</b>。
+      客户档案本身（案由、承办律师、AI 开关）保留。<br><br>
+      清完之后他再扫码进来，AI 会当成第一次见到他——<b>这正是用同一个微信号
+      反复跑测试的办法</b>。</p>
+    <button class="btn-primary xl" data-act="doforget" data-gid="${esc(gid)}">确认清空</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+            onclick="closeSheet()">取消</button>`);
+}
+async function doForget(gid) {
+  let r;
+  try { r = await api(`/groups/${encodeURIComponent(gid)}/forget`, { method: "POST" }); }
+  catch (e) { toast(e.detail || "清空失败，请重试", false); return; }
+  closeSheet();
+  toast(r.hint || "已清空，现在用同一个微信号扫码就是一次全新对话");
   groupsCache = []; refresh();
 }
 function askDeleteLawyer(userid) {
@@ -2695,6 +2725,8 @@ document.addEventListener("click", e => {
   else if (act === "editlawyer") editLawyer(uid);
   else if (act === "dellawyer") askDeleteLawyer(uid);
   else if (act === "release") releaseToAi(gid);
+  else if (act === "forget") askForget(gid);
+  else if (act === "doforget") doForget(gid);
   else if (act === "diagnose") diagnose(gid);
   else if (act === "kbok") setKbStatus(Number(el.dataset.kid), "approved");
   else if (act === "kboff") setKbStatus(Number(el.dataset.kid), "retired");

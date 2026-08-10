@@ -1382,6 +1382,36 @@ class Store:
         with self._conn() as conn:
             conn.execute("DELETE FROM lawyers WHERE userid=?", (userid,))
 
+    def forget_group(self, group_id: str) -> dict:
+        """把一个客户彻底忘掉：像他从没来过一样。返回各表删了多少行。
+
+        为什么需要它：**回访客户那条路径，用一个新微信号是永远测不到的。**
+        律所方每跑一次测试就换一个号，于是测到的全是「新客户」——
+        而记忆注入、二次问候、再推送判据这些恰恰只在老客户身上发生。
+        没有这个按钮，那半条链路就只能靠上线以后撞。
+
+        建档本身保留（案由、承办律师、AI 开关是人配的，不该被一次测试清掉），
+        只清掉「这个人跟我们发生过什么」：消息、判断、回复、线索、提醒、
+        待办、跨会话记忆、转接状态。进线问候的幂等占位也在 messages 里，
+        一并清掉——否则下次扫码不会再打招呼，而那正是要测的第一步。
+        """
+        counts: dict[str, int] = {}
+        with self._conn() as conn:
+            for table in ("messages", "decisions", "replies", "reminders",
+                          "pending_checks", "leads", "outbox"):
+                cur = conn.execute(f"DELETE FROM {table} WHERE group_id=?", (group_id,))
+                counts[table] = cur.rowcount
+            conn.execute(
+                "UPDATE groups SET memory='', memory_at=NULL,"
+                " handoff_userid='', handoff_at=NULL WHERE group_id=?",
+                (group_id,),
+            )
+            # 排障小记也擦掉，否则「为什么没转」会一直显示上一轮的结论
+            conn.execute(
+                "DELETE FROM ops_commands WHERE id=?", (f"_handoff_skip:{group_id}",)
+            )
+        return counts
+
     def get_lawyer_by_token_hash(self, token_hash: str) -> dict | None:
         """登录鉴权入口：库里只有哈希，比对同样只用哈希。"""
         if not token_hash:

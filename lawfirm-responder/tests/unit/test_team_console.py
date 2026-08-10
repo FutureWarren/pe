@@ -270,3 +270,91 @@ def test_team_page_shows_whether_each_lawyer_can_receive_transfers():
     # 而客户实际走的那个入口可能完全是通的（真机 2026-08-09：律所有两个账号）
     assert "从那个入口进来的客户转接不到他" in html
     assert "不取交集" in html
+
+
+def _forget_app(tmp_path, kf=None):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from responder.config import Settings
+    from responder.console.api import router
+    from responder.service import Pipeline
+    from responder.store.db import Store
+
+    s = Settings(mode="live", db_path=str(tmp_path / "f.db"), admin_token="",
+                 llm_provider="none")
+    store = Store(s.db_path)
+    app = FastAPI()
+    app.state.store = store
+    app.state.pipeline = Pipeline(store, None, s, kf_client=kf)
+    app.include_router(router)
+    return TestClient(app), store
+
+
+def test_forgetting_a_customer_makes_the_next_visit_look_brand_new(tmp_path):
+    """律所方原话：「我每次跑测试都得用新的微信号，有点麻烦」。
+
+    而这不只是麻烦——**每次换号，测到的永远是「新客户」**：跨会话记忆、
+    二次问候、再推送判据这些只在老客户身上发生的事，用新号一次也测不到。
+    """
+    from responder.models import ClientStatus, GroupProfile, IncomingMessage
+
+    c, store = _forget_app(tmp_path)
+    gid = "kf:wk1:cust"
+    store.upsert_group(GroupProfile(
+        group_id=gid, kf_open_kfid="wk1", kf_external_userid="cust",
+        client_status=ClientStatus.PROSPECT, case_type="工伤",
+    ))
+    store.save_message(IncomingMessage(
+        msg_id="m1", group_id=gid, sender_id="cust", content="我被辞退了"))
+    store.upsert_lead(gid, {"intent": "hot", "contact": "13800001111"})
+    store.set_memory(gid, "上次聊过工伤")
+    store.set_handoff(gid, "wei")
+
+    r = c.post(f"/console/groups/{gid}/forget")
+    assert r.status_code == 200, r.text
+    assert not store.recent_messages(gid, 10)
+    assert store.get_lead(gid) is None
+    g = store.get_group(gid)
+    assert g is not None, "档案本身要留着——案由和承办律师是人配的"
+    assert g.case_type == "工伤"
+    assert g.memory == "" and g.handoff_userid == ""
+
+
+def test_a_signed_clients_history_is_not_a_thing_you_can_wipe(tmp_path):
+    """已委托客户的聊天记录是案件台账。「我以为那是测试号」是这类误删
+    最常见的开场白，所以服务端直接拒，不靠人小心。"""
+    from responder.models import ClientStatus, GroupProfile
+
+    c, store = _forget_app(tmp_path)
+    gid = "kf:wk1:signed"
+    store.upsert_group(GroupProfile(
+        group_id=gid, kf_open_kfid="wk1", kf_external_userid="signed",
+        client_status=ClientStatus.SIGNED,
+    ))
+    r = c.post(f"/console/groups/{gid}/forget")
+    assert r.status_code == 400
+    assert "台账" in r.json()["detail"]
+
+
+def test_forget_also_hands_the_wecom_session_back_to_ai(tmp_path):
+    """只清我们库里的是假动作：会话还挂在「人工接待」或「已结束」上，
+    下次扫码进来照样没人接（2026-08-08 那条真因）。"""
+    from responder.models import ClientStatus, GroupProfile
+
+    class Kf:
+        def __init__(self): self.robot = []
+        def available(self): return True
+        def to_robot(self, kfid, ext):
+            self.robot.append((kfid, ext))
+            return True
+
+    kf = Kf()
+    c, store = _forget_app(tmp_path, kf)
+    gid = "kf:wk1:cust"
+    store.upsert_group(GroupProfile(
+        group_id=gid, kf_open_kfid="wk1", kf_external_userid="cust",
+        client_status=ClientStatus.PROSPECT,
+    ))
+    c.post(f"/console/groups/{gid}/forget")
+    assert kf.robot == [("wk1", "cust")]
