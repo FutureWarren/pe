@@ -1382,6 +1382,23 @@ class Store:
         with self._conn() as conn:
             conn.execute("DELETE FROM lawyers WHERE userid=?", (userid,))
 
+    def last_inbound_at(self, prefix: str) -> datetime | None:
+        """这个客服账号最近一次收到**客户**消息是什么时候（跨所有会话）。
+
+        用来把两种完全不同的故障分开：
+        「这一通卡住了」 vs 「整条回调断了，谁发都收不到」。
+        它们在客户那头长得一模一样——一片空白——但修法天差地别，
+        而没有这个数，只能靠一通一通试。
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(created_at) AS t FROM messages"
+                " WHERE group_id LIKE ? AND sender_is_staff=0 AND msg_type!='event'",
+                (f"{prefix}%",),
+            ).fetchone()
+        val = row["t"] if row else None
+        return datetime.fromisoformat(val) if val else None
+
     def forget_group(self, group_id: str) -> dict:
         """把一个客户彻底忘掉：像他从没来过一样。返回各表删了多少行。
 

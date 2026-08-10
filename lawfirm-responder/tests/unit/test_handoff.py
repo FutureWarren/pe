@@ -642,3 +642,35 @@ def test_a_brand_new_deployment_still_checks_every_account(tmp_path):
     r = c.get("/console/kf/handoff-probe").json()
     assert r["accounts"][0]["in_use"] is True
     assert r["ready"] is False
+
+
+def test_diagnose_separates_a_stuck_conversation_from_a_dead_channel(tmp_path):
+    """「这一通卡住了」和「整条回调断了」在客户那头长得一模一样——一片空白——
+    但修法天差地别。没有这个区分，只能一通一通试。"""
+    from datetime import datetime
+
+    from fastapi.testclient import TestClient
+
+    from responder.models import IncomingMessage
+
+    store, _, p = make(tmp_path, admin_token="")
+    store.upsert_group(kf_group())
+    other = f"kf:{OPEN_KFID}:someone-else"
+    store.upsert_group(kf_group(group_id=other, kf_external_userid="someone-else"))
+    store.save_message(IncomingMessage(
+        msg_id="x1", group_id=other, sender_id="someone-else", content="我想咨询工伤",
+        created_at=datetime.now(),
+    ))
+
+    c = TestClient(_probe_app(store, p.settings, ProbeKf()))
+    r = c.get("/console/diagnose", params={"group_id": GID}).json()
+    assert any("唯独这通进不来" in b for b in r["blockers"]), r
+
+    # 反过来：整个账号一条都没收到过 → 通道本身没配通
+    sub = tmp_path / "b"
+    sub.mkdir()
+    store2, _, p2 = make(sub, admin_token="")
+    store2.upsert_group(kf_group())
+    r2 = TestClient(_probe_app(store2, p2.settings, ProbeKf())).get(
+        "/console/diagnose", params={"group_id": GID}).json()
+    assert any("从来没收到过任何客户消息" in b for b in r2["blockers"]), r2

@@ -1546,6 +1546,23 @@ def diagnose(
     if last_customer is None:
         blockers.append("**库里没有客户消息**——说明消息压根没送到我们这儿，"
                         "多半是回调或拉取断了。")
+    # 把两种长得一样、修法完全不同的故障分开：
+    # 「这一通卡住了」（别人还在正常进线）vs「整条回调断了」（谁发都收不到）。
+    if group.is_kf and not group.is_douyin and group.kf_open_kfid:
+        last_any = store.last_inbound_at(f"kf:{group.kf_open_kfid}:")
+        if last_any is None:
+            blockers.append("**这个客服账号从来没收到过任何客户消息**——"
+                            "回调地址、Token、可信 IP 里至少有一项没配通。")
+        else:
+            mins = (datetime.now() - last_any).total_seconds() / 60
+            when = last_any.strftime("%m-%d %H:%M")
+            if last_customer is None and mins < 60:
+                blockers.append(
+                    f"**别人的消息进得来（最近一条 {when}），唯独这通进不来**——"
+                    "问题在这一通会话上，不是通道。")
+            else:
+                checks.append(f"这个客服账号最近收到客户消息：{when}"
+                              f"（{int(mins)} 分钟前）")
     if last is None:
         blockers.append("**没有任何判断记录**——消息进来了但没被处理，"
                         "后台工作线程可能已经停了，请点一次「升级到最新版」重启。")
