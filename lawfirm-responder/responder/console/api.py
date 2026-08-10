@@ -807,6 +807,22 @@ def _douyin_diag(s, store: Store) -> dict:
     }
 
 
+
+def _kf_accounts_in_use(store: Store) -> set[str]:
+    """真正有客户从这里进来的客服账号。
+
+    企微会把**企业名下所有**客服账号都列出来，其中很可能有跟我们无关的
+    （真机 2026-08-09：律所另有一个「上海松沪律师事务所在线客服」，
+    人工在接，从没交给自建应用管）。对那种账号做任何管理动作都会拿到
+    48007，于是一个碰不着的账号把整块自检染成红色——
+    **说错「坏了」和漏报一样贵**，人会跑去修一个没坏的东西。
+
+    还没有任何会话时（刚上线）退回「全都算」，否则第一天什么都检查不了。
+    """
+    used = {g.get("kf_open_kfid") for g in store.list_groups() if g.get("kf_open_kfid")}
+    return used
+
+
 @router.get("/kf/handoff-probe")
 def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
     """会话转接就绪自检（只读，不改任何东西）。
@@ -830,14 +846,17 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
     roster = {law["userid"] for law in store.list_lawyers(active_only=True)
               if law.get("userid")}
     names = {law["userid"]: law.get("name", "") for law in store.list_lawyers()}
+    used = _kf_accounts_in_use(store)
     out, ready = [], bool(roster)
     for a in accounts:
         kfid = a.get("open_kfid", "")
+        # 没有任何客户从这个账号进来过 = 不是我们这条链路上的账号，不参与判绿判红
+        in_use = kfid in used if used else True
         raw = client.servicer_raw(kfid)
         servicers = {x["userid"] for x in (raw.get("servicer_list") or [])
                      if x.get("userid")}
         missing = sorted(roster - servicers)
-        if missing:
+        if missing and in_use:
             ready = False
         out.append({
             "open_kfid": kfid,
@@ -846,6 +865,7 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
             "missing": [{"userid": u, "name": names.get(u, "")} for u in missing],
             "raw": raw if not servicers else None,  # 取不到接待人时才回原始返回
             "hint": kf_errors.err_hint(raw.get("error", "") or raw),
+            "in_use": in_use,
         })
     state = _probe_state_endpoint(store, client, s)
     if state.get("error"):
@@ -897,9 +917,15 @@ def add_kf_servicers(request: Request, _: Principal = Depends(require_admin)):
     if not accounts:
         raise HTTPException(400, "取不到客服账号：检查 Secret 与企微可信 IP")
 
-    out = []
+    used = _kf_accounts_in_use(store)
+    out, skipped = [], []
     for a in accounts:
         kfid = a.get("open_kfid", "")
+        if used and kfid not in used:
+            # 别去动一个没有客户从中进来的账号：多半根本没交给我们管，
+            # 加不上是正常的，报红反而误导人去修一个没坏的东西
+            skipped.append(a.get("name", "") or kfid)
+            continue
         raw = client.servicer_add(kfid, userids)
         after = set(client.servicer_list(kfid))
         out.append({
@@ -911,8 +937,8 @@ def add_kf_servicers(request: Request, _: Principal = Depends(require_admin)):
             # 48007/60030 这类错误码对律所侧等于乱码，翻成一句能照着点的中文
             "hint": raw.get("hint", "") or kf_errors.err_hint(raw),
         })
-    ok = all(not a["failed"] for a in out)
-    return {"ok": ok, "accounts": out, "roster": userids}
+    ok = bool(out) and all(not a["failed"] for a in out)
+    return {"ok": ok, "accounts": out, "roster": userids, "skipped": skipped}
 
 
 def _probe_state_endpoint(store: Store, client, s) -> dict:

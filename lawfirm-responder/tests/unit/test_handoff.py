@@ -576,3 +576,69 @@ def test_wecom_errcodes_are_translated_into_something_actionable(payload, anchor
         assert anchor in hint
     else:
         assert hint == ""
+
+
+# ------------------------------------- 企业名下别的客服账号，不是我们的事
+# 真机 2026-08-09：律所另有一个「上海松沪律师事务所在线客服」，人工在接，
+# 从没交给自建应用管。而 kf/account/list 把它也列了出来，于是「一键加接待人」
+# 对它调用 servicer/add 拿到 48007，整块自检被染成红色——
+# 客户实际走的那个账号明明是通的。**说错「坏了」和漏报一样贵。**
+
+class TwoAccountKf(ProbeKf):
+    """一个归我们管、一个不归——企微把两个都列出来。"""
+
+    OTHER = "wk-not-ours"
+
+    def account_list(self):
+        return [{"open_kfid": OPEN_KFID, "name": "松沪律所咨询"},
+                {"open_kfid": self.OTHER, "name": "上海松沪律师事务所在线客服"}]
+
+    def servicer_raw(self, open_kfid):
+        if open_kfid == self.OTHER:
+            return {"error": "kf kf/servicer/list failed: {'errcode': 48007}"}
+        return super().servicer_raw(open_kfid)
+
+    def servicer_add(self, open_kfid, userids):
+        if open_kfid == self.OTHER:
+            raise AssertionError("不该去动一个没有客户从中进来的账号")
+        return super().servicer_add(open_kfid, userids)
+
+
+def _two_account_client(tmp_path):
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    store.upsert_group(kf_group())          # 客户只从 OPEN_KFID 这个账号进来
+    kf = TwoAccountKf()
+    return TestClient(_probe_app(store, p.settings, kf)), kf
+
+
+def test_probe_ignores_customer_service_accounts_we_never_see_traffic_from(tmp_path):
+    c, _ = _two_account_client(tmp_path)
+    r = c.get("/console/kf/handoff-probe").json()
+    by_name = {a["name"]: a for a in r["accounts"]}
+    assert by_name["松沪律所咨询"]["in_use"] is True
+    assert by_name["上海松沪律师事务所在线客服"]["in_use"] is False
+    # 那个账号没有接待人也不该把整体判成未就绪
+    assert r["ready"] is True, r["hint"]
+
+
+def test_adding_servicers_leaves_other_peoples_accounts_alone(tmp_path):
+    """去动它只会拿到 48007，然后让人跑去修一个没坏的东西。"""
+    c, _ = _two_account_client(tmp_path)
+    r = c.post("/console/kf/servicers/add").json()
+    assert r["ok"] is True
+    assert r["skipped"] == ["上海松沪律师事务所在线客服"]
+    assert [a["name"] for a in r["accounts"]] == ["松沪律所咨询"]
+
+
+def test_a_brand_new_deployment_still_checks_every_account(tmp_path):
+    """一条会话都还没有时不能什么都不查——那天恰恰是最需要自检的一天。"""
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    kf = ProbeKf(servicers=("zhang",))       # 名册里的 wei 不在接待人里
+    c = TestClient(_probe_app(store, p.settings, kf))
+    r = c.get("/console/kf/handoff-probe").json()
+    assert r["accounts"][0]["in_use"] is True
+    assert r["ready"] is False

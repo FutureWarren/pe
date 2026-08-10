@@ -469,8 +469,12 @@ def test_channel_fallback_msg_id_is_stable_across_processes():
     import sys
 
     root = str(_pl.Path(__file__).resolve().parents[2])
+    # 把时钟钉死：这条测的是**哈希跨进程是否稳定**，不是时钟。
+    # 不钉的话三个子进程一旦跨过一分钟边界，分钟桶就变了，测试随机变红——
+    # 而随机变红的测试，几次之后就没人再看它说什么了。
     code = (
         f"import sys; sys.path.insert(0, {root!r});"
+        "import time; time.time = lambda: 1700000000.0;"
         "from responder.gateway.channel import _fallback_msg_id;"
         "print(_fallback_msg_id('ch:meituan:u1', '在吗'))"
     )

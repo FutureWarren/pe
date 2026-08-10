@@ -1154,6 +1154,10 @@ async function checkHandoff() {
   if (!r.enabled) lines.push("⚠️ 转接开关是关的（RESPONDER_HANDOFF_ENABLED）");
   if (r.mode !== "live") lines.push(`⚠️ 当前是${esc(r.mode)}模式，不会真的转接`);
   for (const a of r.accounts) {
+    if (a.in_use === false) {
+      lines.push(`「${esc(a.name || a.open_kfid)}」—— 没有客户从这里进来，不归我们管，忽略`);
+      continue;
+    }
     lines.push(`「${esc(a.name || a.open_kfid)}」接待人 ${a.servicers.length} 位`);
     if (a.missing.length) {
       lines.push(`　❌ 不是接待人：${a.missing.map(m => esc(m.name || m.userid)).join("、")}`);
@@ -1179,6 +1183,9 @@ async function addServicers() {
   try { r = await api("/kf/servicers/add", { method: "POST" }); }
   catch (e) { el.innerHTML = `<b style="color:var(--danger)">${esc(e.detail || "添加失败，请重试")}</b>`; return; }
   const lines = [r.ok ? "✅ 名册律师已全部是接待人" : "⚠️ 有人没加上"];
+  if ((r.skipped || []).length) {
+    lines.push(`<span class="muted">没动这些账号（没有客户从那里进来）：${r.skipped.map(esc).join("、")}</span>`);
+  }
   for (const a of r.accounts) {
     lines.push(`「${esc(a.name || a.open_kfid)}」已就位 ${a.added.length} 位`);
     if (a.failed.length) lines.push(`　❌ 没加上：${a.failed.map(esc).join("、")}`);
@@ -1833,9 +1840,10 @@ async function paintServicerBadges() {
      人会跑去修一个没坏的东西。
      判据用接待人全集而不是 probe 的 missing——后者只算在职律师，
      停用但名下还压着单的律师会被整个漏掉，那些单一样转不过去。 */
-  const accs = r.accounts.map(a => ({
+  const accs = r.accounts.filter(a => a.in_use !== false).map(a => ({
     name: a.name || a.open_kfid, set: new Set(a.servicers || []),
   }));
+  if (!accs.length) return;   // 企业名下的其它客服账号不是我们这条链路，不评价
   let needAdd = false;
   for (const el of slots) {
     const uid = el.getAttribute("data-sv");
