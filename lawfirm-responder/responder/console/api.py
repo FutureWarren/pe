@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from responder.compliance import forbidden
 from responder.config import persist_setting
+from responder.engine import priority
 from responder.models import GroupProfile
 from responder.store.db import Store
 
@@ -851,7 +852,7 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
         "ready": ready,
         "enabled": s.handoff_enabled,
         "mode": s.mode,
-        "priorities": s.handoff_priorities,
+        "triggers": [label for _, label in priority.WANTS_HUMAN],
         "accounts": out,
         "roster_size": len(roster),
         "reclaim_seconds": s.handoff_reclaim_seconds,

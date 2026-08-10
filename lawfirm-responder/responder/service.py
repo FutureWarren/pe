@@ -4,6 +4,7 @@
   第 1 次 → 正常话术；第 2 次 → 二次安抚（不复读）；第 3 次起 → 群内静默 + 升级提醒。
 """
 
+import json
 import logging
 import re
 import time
@@ -11,7 +12,7 @@ from datetime import datetime, timedelta
 
 from responder import lead, memory
 from responder.config import Settings, get_settings
-from responder.engine import llm, rules, signals
+from responder.engine import llm, priority, rules, signals
 from responder.engine.decision import decide, wait_seconds
 from responder.gateway.sender import WeComSender
 from responder.models import (
@@ -418,10 +419,17 @@ class Pipeline:
             return _skip("不是微信客服会话（抖音/群聊没有对等能力）")
         if group.handoff_userid:
             return _skip(f"这通对话已经转给过 {group.handoff_userid}，不重复转")
-        tiers = {t.strip().upper() for t in s.handoff_priorities.split(",") if t.strip()}
-        tier = (lead_row.get("priority") or "").upper()
-        if not urgent and tier not in tiers:
-            return _skip(f"优先级 {tier or '未评'} 不够格（只转 {'/'.join(sorted(tiers))} 或紧急）")
+        # 清单制：客户做出「想找真人」的动作才转（业务决策 2026-08-09，
+        # 见 priority.WANTS_HUMAN）。不看分数——分数是排队用的，不是开关。
+        try:
+            hits = json.loads(lead_row.get("signals") or "[]")
+        except (ValueError, TypeError):
+            hits = []
+        # 冷消息那条重算路径拿不到本轮的 urgent，但线索上记着——别丢了它
+        is_urgent = urgent or lead_row.get("urgency") == "high"
+        trigger = priority.wants_human(hits, urgent=is_urgent)
+        if not trigger:
+            return _skip("客户还没做出「想找真人」的动作（只是问问题 / 问收费 / 打招呼）")
         target = lead_row.get("assigned_userid") or ""
         if not target:
             return _skip("这条线索还没派给具体律师（名册为空或都不在班？）")
@@ -454,7 +462,8 @@ class Pipeline:
             f"handoff-{group.group_id}-{int(time.time())}", group.group_id,
             checked.text, "live", checked.passed, category="handoff",
         )
-        logger.info("handoff: %s → %s", group.group_id, target)
+        logger.info("handoff: %s → %s（%s）", group.group_id, target, trigger)
+        self.store.set_note(f"handoff_skip:{group.group_id}", f"已转给 {target}：{trigger}")
         return True
 
     def _recall(self, msg: IncomingMessage, decision: Decision) -> str:

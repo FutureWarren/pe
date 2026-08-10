@@ -90,7 +90,6 @@ class Settings(BaseSettings):
     handoff_enabled: bool = True
     # 哪些优先级触发转接。紧急线索无论优先级一律转。
     # 别放宽到 P1/P2——一周 416 人进私信，全转过去律师什么也别干了。
-    handoff_priorities: str = "P0"
     # 转接接口路径。企微文档站在部署环境不可达，故做成配置项：
     # 控制台自检探到正确路径后改这里，不必改代码重新部署。
     kf_trans_path: str = "kf/service_state/trans"

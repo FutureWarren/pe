@@ -1146,7 +1146,10 @@ async function checkHandoff() {
   if (r.error) { el.innerHTML = `<b style="color:var(--danger)">${esc(r.error)}</b>`; return; }
   const lines = [
     `${r.ready ? "✅" : "⚠️"} ${esc(r.hint)}`,
-    `律师名册 ${r.roster_size} 位 · 触发档位 ${esc(r.priorities || "P0")}`,
+    `律师名册 ${r.roster_size} 位`,
+    /* 把触发条件原样摆出来，而不是一个「P0」——那三个字什么也没说明，
+       所主任看到它只会再问一次「那 P0 是什么」。 */
+    `客户出现下面任一情况就转给律师：${(r.triggers || []).map(esc).join(" · ")}`,
   ];
   if (!r.enabled) lines.push("⚠️ 转接开关是关的（RESPONDER_HANDOFF_ENABLED）");
   if (r.mode !== "live") lines.push(`⚠️ 当前是${esc(r.mode)}模式，不会真的转接`);

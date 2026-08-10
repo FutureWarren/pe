@@ -7,6 +7,8 @@
 （对着一个不会有人来的窗口干等），比不转更糟。
 """
 
+import json
+
 import pytest
 
 from responder.config import Settings
@@ -85,8 +87,10 @@ def kf_group(**over) -> GroupProfile:
     return GroupProfile(**fields)
 
 
-def lead_row(priority="P0", assigned="wei") -> dict:
-    return {"priority": priority, "assigned_userid": assigned, "intent": "hot"}
+def lead_row(priority="P0", assigned="wei", hits=("contact",)) -> dict:
+    # signals 是转接的判据（清单制，2026-08-09）；priority 只影响排队顺序
+    return {"priority": priority, "assigned_userid": assigned, "intent": "hot",
+            "signals": json.dumps(list(hits))}
 
 
 # ------------------------------------------------------------------ 该转的转
@@ -133,10 +137,15 @@ def test_handoff_reply_is_logged(tmp_path):
 
 
 # ---------------------------------------------------------------- 不该转的不转
-def test_low_priority_is_not_transferred(tmp_path):
-    """一周 416 人进私信，P1/P2 全转过去律师什么也别干了。"""
+def test_just_asking_questions_is_not_transferred(tmp_path):
+    """一周 416 人进私信。只是来问问题的不转——AI 接着摸情况，那正是它的活。
+
+    「问到收费」加分（案子可能值钱），但**不是找人的动作**：转过去客户会愣一下，
+    而 AI 本可以把案由、时间、金额都问清楚再交出去。
+    """
     _, kf, p = make(tmp_path)
-    assert p._maybe_handoff(kf_group(), lead_row(priority="P1"), urgent=False) is False
+    row = lead_row(priority="P1", hits=("fee",))
+    assert p._maybe_handoff(kf_group(), row, urgent=False) is False
     assert not kf.transfers
 
 
@@ -240,14 +249,29 @@ def test_decision_stays_silent_after_handoff(tmp_path):
     assert any("handed-off" in r for r in d.reasons)
 
 
-@pytest.mark.parametrize("tiers,priority,expect", [
-    ("P0", "P0", True),
-    ("P0,P1", "P1", True),
-    ("P0", "P1", False),
+@pytest.mark.parametrize("hits,expect", [
+    (["engage"], True),          # 说要委托
+    (["want-contact"], True),    # 要律师给他打电话
+    (["injury"], True),          # 有人在医院
+    (["contact"], True),         # 留了电话
+    (["meeting"], True),         # 想来所里
+    (["wechat"], True),          # 要加微信
+    (["fee"], False),            # 只问了收费——案子也许值钱，但他没在找人
+    (["urgent-plea"], False),    # 只是说「急」，谁都会说
+    ([], False),
 ])
-def test_priority_tiers_are_configurable(tmp_path, tiers, priority, expect):
-    _, kf, p = make(tmp_path, handoff_priorities=tiers)
-    assert p._maybe_handoff(kf_group(), lead_row(priority=priority), urgent=False) is expect
+def test_transfer_is_decided_by_the_checklist_not_the_score(tmp_path, hits, expect):
+    """律所方 2026-08-09 拍板：转人工看清单，不看分数。
+
+    分数回答的是「先给谁打电话」，是排队问题；「现在要不要叫真人」是另一个
+    问题，它只需要知道客户是不是已经在要真人了。绑在一起就会出现真机里那一幕：
+    客户说了「让律师给我打电话」，系统还在算他够不够 60 分。
+    """
+    _, kf, p = make(tmp_path)
+    row = lead_row(priority="P2")
+    row["signals"] = json.dumps(hits)
+    assert p._maybe_handoff(kf_group(), row, urgent=False) is expect
+    assert bool(kf.transfers) is expect
 
 
 # ------------------------------------------------------------------ 就绪自检
@@ -441,7 +465,7 @@ def test_every_skip_writes_down_why(tmp_path):
                                     kf_external_userid="", douyin_open_id="abc"),
          lead_row()),
         ("转给过", {}, kf_group(handoff_userid="wei"), lead_row()),
-        ("不够格", {}, kf_group(), lead_row(priority="P1")),
+        ("还没做出「想找真人」的动作", {}, kf_group(), lead_row(hits=("fee",))),
         ("还没派给具体律师", {}, kf_group(), lead_row(assigned="")),
     ]
     for expect, over, group, row in cases:
@@ -483,7 +507,7 @@ def test_diagnose_surfaces_the_skip_reason(tmp_path):
     store, _, p = make(tmp_path, admin_token="")
     group = kf_group()
     store.upsert_group(group)
-    p._maybe_handoff(group, lead_row(priority="P2"), urgent=False)
+    p._maybe_handoff(group, lead_row(hits=("fee",)), urgent=False)
 
     r = TestClient(_probe_app(store, p.settings, ProbeKf())).get(
         "/console/diagnose", params={"group_id": GID},
@@ -517,3 +541,15 @@ def test_score_crossing_p0_on_a_quiet_follow_up_still_transfers(tmp_path):
     assert kf.transfers == [(OPEN_KFID, EXT_USER, "wei")], (
         f"没转成：{store.get_note(f'handoff_skip:{GID}')}"
     )
+
+
+def test_handoff_checklist_matches_hot_signals():
+    """转接清单里的每一条，都必须让 `signals.detect` 判成 hot。
+
+    不一致的后果很隐蔽：清单认得这个信号，但那条消息被当成「冷消息」，
+    于是走另一条分支——线索晚一轮才出，转接跟着晚一轮。客户那头的表现是
+    「我都说了让律师联系我，怎么还是 AI 在回」。
+    """
+    from responder.engine import priority, signals
+
+    assert {k for k, _ in priority.WANTS_HUMAN} == signals.HOT_SIGNALS

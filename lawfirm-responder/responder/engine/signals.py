@@ -61,6 +61,12 @@ _FEE = re.compile(r"(收费|费用|多少钱|价格|报价|律师费)")
 
 HOT, WARM, COLD = "hot", "warm", "cold"
 
+# 「这个人已经在找真人了」的信号。必须与 `priority.WANTS_HUMAN` 保持一致——
+# 转接清单认得的信号如果在这里不算 hot，那条消息就会掉进「冷消息」分支，
+# 线索晚一轮才出、转接跟着晚一轮。两者的一致性由
+# tests/unit/test_handoff.py::test_handoff_checklist_matches_hot_signals 守着。
+HOT_SIGNALS = {"contact", "meeting", "engage", "want-contact", "wechat", "injury"}
+
 
 def extract_contact(text: str) -> str:
     """从文本中提取联系方式，取第一个命中；无则空串。"""
@@ -91,7 +97,7 @@ def detect(text: str) -> tuple[str, list[str]]:
     if _FEE.search(text):
         hits.append("fee")
 
-    if {"contact", "meeting", "engage", "want-contact", "wechat", "injury"} & set(hits):
+    if HOT_SIGNALS & set(hits):
         return HOT, hits
     if "fee" in hits:
         return WARM, hits
