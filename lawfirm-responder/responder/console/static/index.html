@@ -1171,7 +1171,8 @@ async function checkHandoff() {
    那个账号由企微应用托管，后台里点「开始使用」反而会夺走管理权、打断消息推送。
    所以由服务器直接调接口加，加完立刻回读列表确认。 */
 async function addServicers() {
-  const el = document.getElementById("hoResult");
+  /* 「状态」面板和「团队」页都能调它，所以结果面板取当前存在的那一个 */
+  const el = document.getElementById("hoResult") || document.getElementById("teamSvHint");
   el.textContent = "正在添加……";
   let r;
   try { r = await api("/kf/servicers/add", { method: "POST" }); }
@@ -1183,6 +1184,7 @@ async function addServicers() {
     if (a.error) lines.push(`　接口报错：${esc(a.error)}`);
   }
   el.innerHTML = lines.join("<br>");
+  if (document.getElementById("teamList")) loadTeam();  // 就地刷新那几个徽标
 }
 
 /* 免输入登录链接：把令牌放进 # 片段存成书签，点一下直接进。
@@ -1797,14 +1799,61 @@ async function loadTeam() {
       </div>
       <div class="meta" style="margin-top:2px">在办 ${l.open} 单${l.p0 ? ` · 其中 P0 待联系 ${l.p0} 单` : ""}
         ${l.has_token ? "" : " · 尚未开通登录"}</div>
+      <div class="meta" style="margin-top:2px" data-sv="${esc(l.userid)}"></div>
       <div class="row fb-row">
         <button class="btn-text" data-act="sendlogin" data-uid="${esc(l.userid)}">${ico("send")}发登录链接</button>
         <button class="btn-text muted" data-act="copylogin" data-uid="${esc(l.userid)}">复制链接</button>
         <button class="btn-text muted" data-act="editlawyer" data-uid="${esc(l.userid)}">编辑</button>
         <button class="btn-text muted" style="margin-left:auto" data-act="dellawyer" data-uid="${esc(l.userid)}">移除</button>
       </div>
-    </div>`).join("");
+    </div>`).join("") + `<div class="meta" id="teamSvHint" style="margin-top:8px"></div>`;
+  paintServicerBadges();
 }
+
+/* 「他是不是微信客服的接待人」——转接的硬前置，画在人名底下。
+   律所方原话：「EZID 都配对了，也收得到每日 update，就是收不到转接」。
+   这不矛盾：**那是两份互不相干的名单**——日报走自建应用的可见范围，
+   转接走客服账号的接待人列表，企微里两者完全不通消息。
+   所以这条状态必须画在他本人那张卡上；藏在一个要点右上角才能打开的
+   面板里，等于没有。 */
+async function paintServicerBadges() {
+  const slots = document.querySelectorAll("[data-sv]");
+  if (!slots.length) return;
+  let r;
+  try { r = await api("/kf/handoff-probe"); }
+  catch (e) { return; }            // 未接客服 / 非管理员：不画，也不报错
+  if (!r || !r.accounts || !r.accounts.length) return;
+  /* 判据用**接待人全集**，不用 probe 的 missing——后者只算在职律师，
+     停用的律师会因此被漏掉，而他名下可能还压着没结的单，
+     那些单一样转不过去。多账号时要求每个账号都在。 */
+  let ok = null;
+  for (const a of r.accounts) {
+    const set = new Set(a.servicers || []);
+    ok = ok === null ? set : new Set([...ok].filter(u => set.has(u)));
+  }
+  let needAdd = false;
+  for (const el of slots) {
+    const uid = el.getAttribute("data-sv");
+    const l = (teamCache || []).find(x => x.userid === uid) || {};
+    if (ok.has(uid)) { el.innerHTML = `<span style="color:var(--ok)">✓ 可接收客户转接</span>`; continue; }
+    if (l.active) {
+      needAdd = true;
+      el.innerHTML = `<b style="color:var(--danger)">⚠️ 还不是微信客服接待人 —— 客户转接不到他这里</b>`;
+    } else if (l.open) {
+      /* 停用 + 名下有单 = 最安静的那种坏：单子看着有人管，实际转不过去 */
+      el.innerHTML = `<b style="color:var(--warn,#E0A458)">⚠️ 已停用，名下 ${l.open} 单转接不过去，请先改派</b>`;
+    } else {
+      el.innerHTML = `<span class="muted">已停用，不参与转接</span>`;
+    }
+  }
+  const hint = document.getElementById("teamSvHint");
+  if (hint) {
+    hint.innerHTML = needAdd
+      ? `<button class="btn-outline" style="width:100%" onclick="addServicers()">一键把在职律师加为接待人</button>`
+      : "";
+  }
+}
+
 function editLawyer(userid) {
   const l = teamCache.find(x => x.userid === userid) ||
     { userid: "", name: "", specialties: "", role: "lawyer", on_duty: true, active: true };

@@ -240,3 +240,29 @@ def test_contacted_lead_not_nudged(tmp_path):
     snd.direct.clear()
     app.state.worker.tick()
     assert not [d for d in snd.direct if "督办" in d[1]]
+
+
+def test_team_page_shows_whether_each_lawyer_can_receive_transfers():
+    """「他是不是微信客服接待人」必须画在他本人那张卡上。
+
+    律所方原话：「EZID 都配对了，也收得到每日 update，就是收不到转接」。
+    这两件事不矛盾——**它们查的是两份互不相干的名单**：日报走自建应用的
+    可见范围，转接走客服账号的接待人列表。把这个区别藏在一个要点右上角
+    才能打开的面板里，等于没有说。
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from responder.console.api import ui_router
+
+    app = FastAPI()
+    app.include_router(ui_router)
+    html = TestClient(app).get("/ui").text
+
+    assert 'data-sv="' in html, "团队卡片要有画接待人状态的位置"
+    assert "paintServicerBadges" in html
+    assert "还不是微信客服接待人" in html
+    # 停用但名下还压着单的律师：那些单一样转不过去，必须说出来
+    assert "转接不过去" in html
+    # 判据要用接待人全集，不能用 probe 的 missing（它只算在职律师）
+    assert "a.servicers" in html
