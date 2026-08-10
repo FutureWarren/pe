@@ -261,8 +261,12 @@ def test_team_page_shows_whether_each_lawyer_can_receive_transfers():
 
     assert 'data-sv="' in html, "团队卡片要有画接待人状态的位置"
     assert "paintServicerBadges" in html
-    assert "还不是微信客服接待人" in html
+    assert "还不是接待人" in html
     # 停用但名下还压着单的律师：那些单一样转不过去，必须说出来
     assert "转接不过去" in html
     # 判据要用接待人全集，不能用 probe 的 missing（它只算在职律师）
     assert "a.servicers" in html
+    # 多个客服账号时逐个算，不取交集：一个没配好的账号会把所有人都染红，
+    # 而客户实际走的那个入口可能完全是通的（真机 2026-08-09：律所有两个账号）
+    assert "从那个入口进来的客户转接不到他" in html
+    assert "不取交集" in html

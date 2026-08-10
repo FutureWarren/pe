@@ -1826,22 +1826,26 @@ async function paintServicerBadges() {
   try { r = await api("/kf/handoff-probe"); }
   catch (e) { return; }            // 未接客服 / 非管理员：不画，也不报错
   if (!r || !r.accounts || !r.accounts.length) return;
-  /* 判据用**接待人全集**，不用 probe 的 missing——后者只算在职律师，
-     停用的律师会因此被漏掉，而他名下可能还压着没结的单，
-     那些单一样转不过去。多账号时要求每个账号都在。 */
-  let ok = null;
-  for (const a of r.accounts) {
-    const set = new Set(a.servicers || []);
-    ok = ok === null ? set : new Set([...ok].filter(u => set.has(u)));
-  }
+  /* **按客服账号逐个算，不取交集。** 律所常常不止一个客服账号
+     （真机：「松沪律所咨询」已托管给应用，「上海松沪律师事务所在线客服」
+     还在网页后台管着）。取交集的话，一个没配好的账号会把所有人都染红——
+     而客户实际走的那个入口可能完全是通的。**说错「坏了」和漏报一样贵**：
+     人会跑去修一个没坏的东西。
+     判据用接待人全集而不是 probe 的 missing——后者只算在职律师，
+     停用但名下还压着单的律师会被整个漏掉，那些单一样转不过去。 */
+  const accs = r.accounts.map(a => ({
+    name: a.name || a.open_kfid, set: new Set(a.servicers || []),
+  }));
   let needAdd = false;
   for (const el of slots) {
     const uid = el.getAttribute("data-sv");
     const l = (teamCache || []).find(x => x.userid === uid) || {};
-    if (ok.has(uid)) { el.innerHTML = `<span style="color:var(--ok)">✓ 可接收客户转接</span>`; continue; }
+    const bad = accs.filter(a => !a.set.has(uid)).map(a => a.name);
+    if (!bad.length) { el.innerHTML = `<span style="color:var(--ok)">✓ 可接收客户转接</span>`; continue; }
+    const where = accs.length > 1 ? `在「${esc(bad.join("」「"))}」` : "";
     if (l.active) {
       needAdd = true;
-      el.innerHTML = `<b style="color:var(--danger)">⚠️ 还不是微信客服接待人 —— 客户转接不到他这里</b>`;
+      el.innerHTML = `<b style="color:var(--danger)">⚠️ ${where}还不是接待人 —— 从那个入口进来的客户转接不到他</b>`;
     } else if (l.open) {
       /* 停用 + 名下有单 = 最安静的那种坏：单子看着有人管，实际转不过去 */
       el.innerHTML = `<b style="color:var(--warn,#E0A458)">⚠️ 已停用，名下 ${l.open} 单转接不过去，请先改派</b>`;
@@ -1850,11 +1854,11 @@ async function paintServicerBadges() {
     }
   }
   const hint = document.getElementById("teamSvHint");
-  if (hint) {
-    hint.innerHTML = needAdd
-      ? `<button class="btn-outline" style="width:100%" onclick="addServicers()">一键把在职律师加为接待人</button>`
-      : "";
-  }
+  if (!hint) return;
+  /* 账号没托管给应用时，按钮点了也只会再拿一次 48007——先把原因摆出来 */
+  const blocked = r.accounts.filter(a => a.hint).map(a => `「${esc(a.name || a.open_kfid)}」${esc(a.hint)}`);
+  hint.innerHTML = (blocked.length ? `<b style="color:var(--gold,#C6A15B)">👉 ${blocked.join("<br>👉 ")}</b><br>` : "")
+    + (needAdd ? `<button class="btn-outline" style="width:100%;margin-top:6px" onclick="addServicers()">一键把在职律师加为接待人</button>` : "");
 }
 
 function editLawyer(userid) {
