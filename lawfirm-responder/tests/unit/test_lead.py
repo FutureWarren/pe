@@ -47,7 +47,10 @@ def test_intent_levels():
     assert signals.detect("可以的呀我的电话是17721275495")[0] == signals.HOT
     assert signals.detect("什么时候方便见面聊聊")[0] == signals.HOT
     assert signals.detect("我想委托你们代理")[0] == signals.HOT
-    assert signals.detect("你们收费怎么算")[0] == signals.WARM
+    # 律所方 2026-08-10 拍板：问收费＝在做决策，一律叫真人，因此升为 hot。
+    # 在律所这门生意里，问价的人已经在比较，而比较时听到的是不是一个真人，
+    # 直接决定他去谁那儿。
+    assert signals.detect("你们收费怎么算")[0] == signals.HOT
     assert signals.detect("拖欠工资多久可以仲裁")[0] == signals.COLD
 
 
@@ -241,7 +244,7 @@ def test_cold_lead_is_pushed_too_when_manpower_allows(tmp_path):
     from responder import lead as lead_mod
 
     store, settings, sender, group = _cold_env(tmp_path, notify_all_leads=True)
-    row = lead_mod.dispatch(store, group, _hist("你们几点上班"), sender, settings=settings)
+    row = lead_mod.dispatch(store, group, _hist("我再想想吧"), sender, settings=settings)
     assert row is not None
     assert sender.direct, "冷线索也要有人接手，不能只归档"
 
@@ -251,7 +254,7 @@ def test_cold_lead_stays_archived_when_the_switch_is_off(tmp_path):
     from responder import lead as lead_mod
 
     store, settings, sender, group = _cold_env(tmp_path, notify_all_leads=False)
-    lead_mod.dispatch(store, group, _hist("你们几点上班"), sender, settings=settings)
+    lead_mod.dispatch(store, group, _hist("我再想想吧"), sender, settings=settings)
     assert not sender.direct
 
 
@@ -261,7 +264,7 @@ def test_full_push_does_not_mean_one_brief_per_message(tmp_path):
 
     store, settings, sender, group = _cold_env(tmp_path, notify_all_leads=True)
     for _ in range(3):
-        lead_mod.dispatch(store, group, _hist("你们几点上班"), sender, settings=settings)
+        lead_mod.dispatch(store, group, _hist("我再想想吧"), sender, settings=settings)
     assert len(sender.direct) == 1
 
 

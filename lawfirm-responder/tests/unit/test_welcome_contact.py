@@ -173,10 +173,13 @@ def test_greeting_never_repeated_in_one_conversation(tmp_path):
     # 客户把事情说出来了，回应必须接着他说的往下问，而不是让他再讲一遍
     assert "什么时候开始" in reply or "走到哪一步" in reply
     reasons = [d["reasons"] for d in store.list_decisions(GID)]
-    assert any("kf:substance" in r for r in reasons), (
-        "有内容的消息不该再绕开场白那条路——那条路的兜底是「请您说说什么情况」，"
-        "而他刚说完"
+    # 2026-08-10 判断层放开后，这句话先被认成法律话题（走作答层），
+    # 再由 `_maybe_intake` 改判成追问。走哪条路不重要，**不能走开场白那条**
+    # 才重要——那条路的兜底是「请您说说什么情况」，而他刚说完。
+    assert any("kf:substance" in r or "kf:intake" in r for r in reasons), (
+        "有内容的消息不该再绕开场白那条路"
     )
+    assert not any("greeting:already-sent" in r for r in reasons)
 
 
 def test_kf_replies_never_mention_group(tmp_path):

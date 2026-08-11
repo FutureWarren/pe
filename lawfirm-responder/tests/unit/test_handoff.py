@@ -140,11 +140,12 @@ def test_handoff_reply_is_logged(tmp_path):
 def test_just_asking_questions_is_not_transferred(tmp_path):
     """一周 416 人进私信。只是来问问题的不转——AI 接着摸情况，那正是它的活。
 
-    「问到收费」加分（案子可能值钱），但**不是找人的动作**：转过去客户会愣一下，
-    而 AI 本可以把案由、时间、金额都问清楚再交出去。
+    「客户自己说很急」加分（排队时他该靠前），但**不是找人的动作**：
+    他在讲自己的处境，不是在要一个人。转过去他会愣一下，
+    而 AI 本可以接着把案由、时间、金额都问清楚再交出去。
     """
     _, kf, p = make(tmp_path)
-    row = lead_row(priority="P1", hits=("fee",))
+    row = lead_row(priority="P1", hits=("urgent-plea",))
     assert p._maybe_handoff(kf_group(), row, urgent=False) is False
     assert not kf.transfers
 
@@ -256,8 +257,9 @@ def test_decision_stays_silent_after_handoff(tmp_path):
     (["contact"], True),         # 留了电话
     (["meeting"], True),         # 想来所里
     (["wechat"], True),          # 要加微信
-    (["fee"], False),            # 只问了收费——案子也许值钱，但他没在找人
-    (["urgent-plea"], False),    # 只是说「急」，谁都会说
+    (["fee"], True),             # 问收费＝在做决策，律所方 2026-08-10 拍板要叫人
+    (["urgent-plea"], False),    # 只是说「急」——在讲处境，不是在要人
+    (["depth"], False),          # 聊得久说明案子复杂，不说明他想找人
     ([], False),
 ])
 def test_transfer_is_decided_by_the_checklist_not_the_score(tmp_path, hits, expect):
@@ -465,7 +467,7 @@ def test_every_skip_writes_down_why(tmp_path):
                                     kf_external_userid="", douyin_open_id="abc"),
          lead_row()),
         ("转给过", {}, kf_group(handoff_userid="wei"), lead_row()),
-        ("还没做出「想找真人」的动作", {}, kf_group(), lead_row(hits=("fee",))),
+        ("还没做出「想找真人」的动作", {}, kf_group(), lead_row(hits=("urgent-plea",))),
         ("还没派给具体律师", {}, kf_group(), lead_row(assigned="")),
     ]
     for expect, over, group, row in cases:
@@ -507,7 +509,7 @@ def test_diagnose_surfaces_the_skip_reason(tmp_path):
     store, _, p = make(tmp_path, admin_token="")
     group = kf_group()
     store.upsert_group(group)
-    p._maybe_handoff(group, lead_row(hits=("fee",)), urgent=False)
+    p._maybe_handoff(group, lead_row(hits=("urgent-plea",)), urgent=False)
 
     r = TestClient(_probe_app(store, p.settings, ProbeKf())).get(
         "/console/diagnose", params={"group_id": GID},

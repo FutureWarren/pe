@@ -555,9 +555,25 @@ class Pipeline:
         只做一次：问第二遍就成了查户口。
         已经留了联系方式的不问：那时候该做的是把人交出去，不是继续采集。
         """
-        if not (group.is_kf and decision.action == Action.HANDOFF):
+        if not group.is_kf:
             return
-        if decision.category not in (Category.OTHER, Category.CASE_STATUS):
+        # 2026-08-10：判断层放开之后，「公司拖欠我三个月工资」这类**陈述句**
+        # 从承接改判成了直接作答，于是这条追问再也不触发——客户第一次把事
+        # 交出来，换回的是一段泛泛的法律框架。
+        #
+        # 分界线是**他在陈述还是在提问**：
+        #   陈述（「公司拖欠我三个月工资」）→ 接着问，这时候我们几乎什么都不知道，
+        #     一个好问题的信息量远大于一段好答案；
+        #   提问（「醉驾一般判多久」）→ 正面回答，追问他「这事什么时候开始的」
+        #     等于答非所问。
+        probing_a_statement = False
+        if decision.action == Action.ANSWER:
+            if rules.QUESTION_MARK.search(msg.content):
+                return
+            probing_a_statement = True
+        elif decision.action != Action.HANDOFF:
+            return
+        elif decision.category not in (Category.OTHER, Category.CASE_STATUS):
             return
         if group.client_status != ClientStatus.PROSPECT or group.handoff_userid:
             return
@@ -584,6 +600,11 @@ class Pipeline:
             or self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
         )
         decision.reasons.append("kf:intake-quiet" if quiet else "kf:intake")
+        if probing_a_statement:
+            # 追问是**承接**，不是作答：话术走 templates.intake_probe，
+            # 而生成层是按 action 分派的。不改这一下，理由挂上去也没人读。
+            decision.action = Action.HANDOFF
+            decision.category = Category.OTHER
 
     def _is_repeat_message(self, msg: IncomingMessage) -> bool:
         """这条消息客户刚刚发过一模一样的（标点/空格差异不算）。

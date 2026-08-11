@@ -12,6 +12,8 @@
 
 import re
 
+from responder.engine import rules
+
 # 中国大陆手机号：先剔除分隔符再匹配，兼容「177 2127 5495」「177-2127-5495」
 _SEP = re.compile(r"[\s\-—－]")
 _PHONE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
@@ -19,6 +21,21 @@ _PHONE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 _TEL = re.compile(r"(?<!\d)0\d{2,3}\d{7,8}(?!\d)")
 
 _WECHAT_HINT = re.compile(r"(微信同号|微信是|加(我|个)?微信|vx|wx)[:：]?", re.I)
+
+# ---------------------------------------------------------------------------
+# **词表只写一遍。**
+# 这一层和 rules 判的是同一批说法（要联系方式、问收费、约见、想委托、问所址），
+# 各写一套的代价回测里量出来了：规则层认得「留个电话给我」，信号层不认得，
+# 于是 AI 承接得好好的，**转接却一次也不触发**——客户在要人，系统看不见。
+# 所以凡是 rules 已经成文的，这里直接复用它的模式，只补 rules 用不上的说法。
+def _rules_hit(patterns, text: str) -> bool:
+    return any(p.search(text) for p in patterns)
+
+
+_R_ENGAGE = [re.compile(p) for p in rules.ENGAGE_PATTERNS]
+_R_MEETING = [re.compile(p) for p in rules.MEETING_PATTERNS]
+_R_FEE = [re.compile(p) for p in rules.FEE_PATTERNS]
+_R_WANT_CONTACT = [re.compile(p) for p in rules.WANT_LAWYER_CONTACT_PATTERNS]
 
 # 明确的面谈 / 委托意愿
 _MEETING = re.compile(
@@ -65,7 +82,11 @@ HOT, WARM, COLD = "hot", "warm", "cold"
 # 转接清单认得的信号如果在这里不算 hot，那条消息就会掉进「冷消息」分支，
 # 线索晚一轮才出、转接跟着晚一轮。两者的一致性由
 # tests/unit/test_handoff.py::test_handoff_checklist_matches_hot_signals 守着。
-HOT_SIGNALS = {"contact", "meeting", "engage", "want-contact", "wechat", "injury"}
+HOT_SIGNALS = {"contact", "meeting", "engage", "want-contact", "wechat", "injury",
+               # 律所方 2026-08-10：问所址、问收费一律叫真人。
+               # 这两件事都发生在客户从「了解」转向「决定」的那一刻——
+               # 他要听的是一个具体的人，而不是一段听起来很周到的话。
+               "office", "fee"}
 
 
 def extract_contact(text: str) -> str:
@@ -84,23 +105,26 @@ def detect(text: str) -> tuple[str, list[str]]:
         hits.append("contact")
     if _WECHAT_HINT.search(text):
         hits.append("wechat")
-    if _MEETING.search(text):
+    if _MEETING.search(text) or _rules_hit(_R_MEETING, text):
         hits.append("meeting")
-    if _ENGAGE.search(text):
+    if _ENGAGE.search(text) or _rules_hit(_R_ENGAGE, text):
         hits.append("engage")
-    if _WANT_CONTACT.search(text):
+    if _WANT_CONTACT.search(text) or _rules_hit(_R_WANT_CONTACT, text):
         hits.append("want-contact")
+    # 问所址/路线/几点上班 = 这个人打算上门。答案我们当场就给了
+    # （rules 的 office-fact 那一层），但**人也该叫**——走到问路这一步的客户，
+    # 离到所里只差一次确认。
+    if rules.office_fact_hit(text):
+        hits.append("office")
     if _INJURY.search(text):
         hits.append("injury")
     if _URGENT_PLEA.search(text):
         hits.append("urgent-plea")
-    if _FEE.search(text):
+    if _FEE.search(text) or _rules_hit(_R_FEE, text) or rules.FEE_BROAD.search(text):
         hits.append("fee")
 
     if HOT_SIGNALS & set(hits):
         return HOT, hits
-    if "fee" in hits:
-        return WARM, hits
     return COLD, hits
 
 
