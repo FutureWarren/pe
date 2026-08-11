@@ -316,7 +316,10 @@ class Runner:
         laws = self.store.list_lawyers(active_only=True)
         groups = self.store.list_groups()
         kf_ok = bool(self.kf_client and self.kf_client.available())
+        from responder import ops as _ops
+
         lines = [
+            f"当前版本：{_ops.current_commit(s.update_repo_dir) or '未知'}",
             f"运行模式：{s.mode}",
             f"微信客服通道：{'正常' if kf_ok else '未配置'}",
             f"进线事件累计：{self.store.count_event_messages()} 条",
@@ -324,12 +327,38 @@ class Runner:
             f"会话档案：{len(groups)} 个",
             f"对外地址：{s.public_base_url or '（未记录）'}",
         ]
-        # 客服账号可能不止一个，而应用未必对每一个都有权限（48007）。
-        # 客户扫到的要是那个没权限的账号，AI 根本收不到他的消息——
-        # 而现象是「客户说没人理」，从我们这边什么都看不出来。所以逐个报。
+        # 后台线程死活。这条指令本身就跑在那个线程里，所以能收到这份汇报
+        # 就说明它活着——但把心跳时间报出来仍有意义：它能区分
+        # 「一直在跑」和「刚被看门狗救回来」。
+        beat = self.store.get_note("worker_heartbeat")
+        lines.append(f"后台线程心跳：{beat or '（无记录，版本可能还没更新）'}")
+        if restarted := self.store.get_note("worker_restarted"):
+            lines.append(f"⚠️ {restarted}")
+        # **最关键的一条：客户的消息到底有没有进来。**
+        # 「客户说没人理」有两种完全不同的原因——消息没送到我们这儿（回调断了），
+        # 还是送到了但没被回复（判断/发送的问题）。没有这个时间戳只能靠猜，
+        # 而排一轮就是几个小时。
         if kf_ok:
             for a in self.kf_client.account_list():
                 kfid = a.get("open_kfid", "")
                 n = len(self.kf_client.servicer_list(kfid))
-                lines.append(f"  客服账号「{a.get('name', '') or kfid}」接待人 {n} 位")
+                last = self.store.last_inbound_at(f"kf:{kfid}:")
+                when = last.strftime("%m-%d %H:%M") if last else "从来没有过"
+                lines.append(
+                    f"  客服账号「{a.get('name', '') or kfid}」"
+                    f"接待人 {n} 位 · 最近收到客户消息：{when}"
+                )
+        # 最近一通对话在企微那边归谁接。0/2/4 都意味着没人在接，
+        # 客户发什么都石沉大海，而我们这边看不出任何异常。
+        recent = [g for g in groups if g.get("kf_open_kfid") and g.get("kf_external_userid")]
+        if kf_ok and recent:
+            g = recent[-1]
+            names = {0: "未处理（没人在接！）", 1: "智能助手接待（正常）",
+                     2: "待接入人工池", 3: "人工接待中", 4: "已结束"}
+            try:
+                st = self.kf_client.service_state(
+                    g["kf_open_kfid"], g["kf_external_userid"])
+            except Exception:
+                st = None
+            lines.append(f"最近一通会话状态：{names.get(st, st if st is not None else '查不到')}")
         return "\n".join(lines)
