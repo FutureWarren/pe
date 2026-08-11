@@ -1030,6 +1030,13 @@ function openStatusPanel() {
           onclick="openKfQr()">${ico("phone")}获取客户进线二维码</button>` : ""}
       </div>
       <div class="srow"><div class="k">待处理队列</div><div class="v">${esc(qTxt)}</div></div>
+      <div class="srow"><div class="k">后台处理线程</div><div class="v">${
+        h.worker_alive === false
+          ? `<b style="color:var(--danger)">已停止 —— 消息进得来但没人处理，所有客户都收不到回复</b>`
+          : (h.worker_idle_seconds > 90
+              ? `<b style="color:var(--warn,#E0A458)">${Math.round(h.worker_idle_seconds)} 秒没动静，多半卡在某个外部接口上</b>`
+              : `正常（${Math.round(h.worker_idle_seconds || 0)} 秒前刚跑过一轮）`)
+      }</div></div>
       ${h.kf ? `<div class="srow admin-only"><div class="k">会话转接</div>
         <div class="v">把客户直接交给律师在原窗口接着聊，不用打电话</div>
         <button class="btn-outline" style="margin-top:8px" onclick="checkHandoff()">

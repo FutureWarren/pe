@@ -239,6 +239,9 @@ class Settings(BaseSettings):
     update_repo_dir: str = "/opt/pe"
     update_branch: str = "claude/law-firm-wechat-ai-responder-q3nttv"
     update_pip: str = "/opt/pe-venv/bin/pip"
+    # 升级脚本用它做「新版本起不起得来」的冒烟检查（见 ops._SCRIPT）。
+    # 与 pip 同一个虚拟环境，否则测的不是真正要跑的那套依赖。
+    update_python: str = "/opt/pe-venv/bin/python"
     update_log: str = "/tmp/responder-update.log"
 
     # 控制台/ingest 访问令牌：公网部署必填（deploy.sh 自动生成）。

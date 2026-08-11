@@ -61,18 +61,79 @@ class Worker:
         self._servicer_cache: dict[str, list[str]] = {}
         # 会话归属状态的查询节流（见 _ensure_robot_state）
         self._robot_state_checked: dict[str, float] = {}
+        # 心跳与看门狗（见 start()）：后台线程停了必须有人知道、有人扶起来
+        self._last_beat = 0.0
+        self._guard: threading.Thread | None = None
         # 启动后先隔一个间隔再查更新：刚重启完不该立刻又想着升级
         self._last_update_check = datetime.now()
 
     # ------------------------------------------------------------ 生命周期
     def start(self) -> None:
+        """拉起后台线程，并派一个看门狗盯着它。
+
+        **后台线程停了是整个系统里最致命、也最安静的一种坏**：队列照常收消息，
+        只是再也没人取——所有客户从此一句回复都收不到，控制台看着一切正常，
+        日志里只有最初那一条 traceback。更糟的是自动升级本身也跑在这个线程里，
+        它一停，我们连远程推一版修复的通道都没了。
+
+        `_run` 里已经把异常逐层隔离过，但那只能挡住 `Exception`。
+        真正兜底的是这两样：
+          · 心跳——每轮记一次时间，任何人（控制台 / 自检 / 战报）都查得到；
+          · 看门狗——发现线程没了就地拉起来，不用等人发现。
+        """
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        self._beat()
         self._thread = threading.Thread(
             target=self._run, daemon=True, name="responder-worker"
         )
         self._thread.start()
+        if self._guard is None or not self._guard.is_alive():
+            self._guard = threading.Thread(
+                target=self._watch, daemon=True, name="responder-watchdog"
+            )
+            self._guard.start()
+
+    def _beat(self) -> None:
+        """记一次「我还活着」。写内存 + 落库：内存给看门狗用（快），
+        库里那份给控制台和自检用（跨进程、重启后还在）。"""
+        self._last_beat = time.time()
+        try:
+            self.store.set_note("worker_heartbeat", datetime.now().isoformat())
+        except Exception:
+            logger.exception("heartbeat write failed")
+
+    def seconds_since_beat(self) -> float:
+        return time.time() - self._last_beat if self._last_beat else 1e9
+
+    def alive(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    def _watch(self) -> None:
+        """看门狗：线程没了就地重启。
+
+        重启是安全的——队列还在（`queue.Queue` 属于 Worker 不属于线程），
+        游标、待办、提醒全在库里，最坏是一条消息重复处理一次，而 `save_message`
+        按 msg_id 幂等。**重复一句远比永远静默便宜。**
+        """
+        while not self._stop.is_set():
+            self._stop.wait(5.0)
+            if self._stop.is_set():
+                return
+            if self._thread is not None and not self._thread.is_alive():
+                logger.error("worker thread died — 看门狗重新拉起")
+                try:
+                    self.store.set_note(
+                        "worker_restarted",
+                        f"{datetime.now().isoformat()} 后台线程意外退出，已由看门狗重启",
+                    )
+                except Exception:
+                    logger.exception("restart note failed")
+                self._thread = threading.Thread(
+                    target=self._run, daemon=True, name="responder-worker"
+                )
+                self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -380,6 +441,10 @@ class Worker:
                     logger.exception("worker dispatch failed, 继续下一条: %r", item)
             if time.time() - last_tick >= self.poll_seconds:
                 last_tick = time.time()
+                # 心跳在 tick **之前**打：tick 里任何一环卡住（网络挂起、
+                # 数据库锁），线程其实还活着，但外面看是「没反应」。
+                # 先记下来，才分得清「线程死了」和「线程被某件事卡住了」。
+                self._beat()
                 try:
                     self.tick()
                 except Exception:

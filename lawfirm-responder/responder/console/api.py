@@ -1564,8 +1564,25 @@ def diagnose(
                 checks.append(f"这个客服账号最近收到客户消息：{when}"
                               f"（{int(mins)} 分钟前）")
     if last is None:
-        blockers.append("**没有任何判断记录**——消息进来了但没被处理，"
-                        "后台工作线程可能已经停了，请点一次「升级到最新版」重启。")
+        # 这里曾经写「后台工作线程**可能**已经停了」——那是在猜。
+        # 现在线程有心跳，死活由下面那段直接说，这句只报事实。
+        blockers.append("**这条消息没有留下任何判断记录**——它进了库却没被处理。"
+                        "看下面「后台处理线程」那一行。")
+    # 不用再说「可能」：后台线程有心跳，直接把死活摆出来。
+    worker = getattr(request.app.state, "worker", None)
+    if worker is not None and hasattr(worker, "seconds_since_beat"):
+        idle = worker.seconds_since_beat()
+        limit = max(60.0, s.worker_poll_seconds * 3)
+        if not worker.alive():
+            blockers.append("**后台处理线程已经停了**——消息进得来但没人处理，"
+                            "所有客户都收不到回复。看门狗会自动拉起，"
+                            "若持续如此请点「升级到最新版」重启服务。")
+        elif idle > limit:
+            blockers.append(
+                f"**后台线程 {int(idle)} 秒没动静了**（正常应小于 {int(limit)} 秒）——"
+                "多半卡在某个外部接口上，先看一眼企微和模型服务是否正常。")
+        else:
+            checks.append(f"后台处理线程正常（{int(idle)} 秒前刚跑过一轮）")
 
     reasons = []
     if last:

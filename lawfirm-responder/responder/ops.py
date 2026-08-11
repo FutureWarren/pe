@@ -20,13 +20,56 @@ from responder.config import Settings
 
 logger = logging.getLogger(__name__)
 
+# 升级脚本。**它必须能把自己撤回来。**
+#
+# 律所侧没有 SSH，而控制台和后台线程跑在同一个进程里。一旦新版本起不来：
+# 服务死 → 控制台打不开（那个「升级到最新版」按钮也就没了）→ 后台线程不跑
+# → 自动升级不跑 → **我们再也推不进任何修复**。服务器就此永久失联，
+# 而修复它需要有人物理接触那台机器。
+#
+# 而「推送即上线」意味着这条路每天都要走好几趟。所以三道闸：
+#   ① 装完先在**另一个进程里**把 app 装配一遍（配置校验、数据库迁移、
+#      import 全在这一步暴露）——起不来就不重启，直接回滚；
+#   ② 重启后轮询 /health，60 秒内不通同样回滚并再重启回旧版；
+#   ③ 全过程写进升级日志，控制台「状态」页读得到。
+#
+# 宁可停在旧版本，也不能停在一个起不来的新版本上。
 _SCRIPT = """#!/usr/bin/env bash
 set -x
 cd {repo} || exit 1
+PREV=$(git rev-parse HEAD) || exit 1
+echo "[update] 当前版本 $PREV"
+
+rollback() {{
+  echo "[update] !!! 回滚到 $PREV"
+  git reset --hard "$PREV" || exit 1
+  {pip} install -q -e {repo}/lawfirm-responder
+  systemctl restart responder
+  exit 1
+}}
+
 git fetch origin {branch} || exit 1
 git reset --hard FETCH_HEAD || exit 1
-{pip} install -q -e {repo}/lawfirm-responder || exit 1
+{pip} install -q -e {repo}/lawfirm-responder || rollback
+
+# ① 起不来的版本绝不能上线：在另一个进程里把 app 完整装配一遍。
+#    配置校验、数据库迁移、所有 import 都在这一步暴露。
+echo "[update] 冒烟：装配 app"
+{python} -c 'from responder.app import create_app; create_app()' || rollback
+
 systemctl restart responder
+
+# ② 重启后必须真的活过来。60 秒不通就滚回旧版并重启回去。
+echo "[update] 等待 /health"
+for i in $(seq 1 30); do
+  sleep 2
+  if curl -fsS -m 3 "http://127.0.0.1:{port}/health" >/dev/null 2>&1; then
+    echo "[update] OK，新版本已在服务"
+    exit 0
+  fi
+done
+echo "[update] /health 60 秒内没通"
+rollback
 """
 
 
@@ -52,6 +95,8 @@ def start_update(settings: Settings) -> dict:
             repo=settings.update_repo_dir,
             branch=settings.update_branch,
             pip=settings.update_pip,
+            python=settings.update_python,
+            port=settings.api_port,
         ),
         encoding="utf-8",
     )

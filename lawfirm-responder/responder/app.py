@@ -66,6 +66,11 @@ def create_app() -> FastAPI:
             "kf": bool(kf_client and kf_client.available()),
             "douyin": bool(dy_client and dy_client.available()),
             "queued": worker.qsize(),
+            # 后台线程死活。这是全系统最致命也最安静的一种坏：队列照常收，
+            # 只是再也没人取——所有客户从此一句回复都收不到，而这里以外
+            # 每一个指标看着都正常。放在免鉴权端点上，手机上随时能查。
+            "worker_alive": worker.alive(),
+            "worker_idle_seconds": round(worker.seconds_since_beat(), 1),
             # 进线事件累计条数。「进线即问候」整条链路挂在企微推这个事件上，
             # 一条都没有就说明企微根本没通知过我们「有人进来了」——那跟
             # 「新版没部署」在客户那边看起来一模一样，得有个数才分得清。
