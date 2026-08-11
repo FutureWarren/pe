@@ -451,7 +451,12 @@ class Pipeline:
         from responder.compliance.guard import guard
 
         checked = guard(text, Action.HANDOFF, templates.safe_fallback(group))
-        self._send_group(group, group.group_id, checked.text)
+        sent, _parts = self._send_group(group, group.group_id, checked.text)
+        if not sent:
+            # 这句话没送到，就绝不能转。转了之后 `gate:handed-off` 让 AI 闭嘴，
+            # 而客户那头**从头到尾一个字都没收到**——他会以为没人在，然后走掉。
+            # 宁可不转：交接单已经推给律师了，他还能打电话。
+            return _skip("过渡话术没发出去（通道异常），不敢转——转了客户会对着空窗口")
 
         if not client.transfer(group.kf_open_kfid, group.kf_external_userid, target):
             # 转不过去就当没转：交接单已经推给律师了，他还能打电话，客户不会掉队
@@ -880,6 +885,17 @@ class Pipeline:
         # 把 urgency 拍成 high、并让优先级直接置 P0，于是客户只是把同一句话
         # 说了三遍，客服就收到一张【强意愿】·紧急·1 小时内联系 的假单，
         # 还顺带解锁了会话转接。用一个独立标记，别污染判断本身。
+        #
+        # **一对一进线窗口不静默。** 静默这条规矩是为群聊写的：那里承办律师
+        # 在场，AI 说到第三遍就成了刷屏。而进线窗口里没有别人——
+        # 客户问了三遍还是这句话，说明他**越来越急**，这时候闭嘴是最坏的回应，
+        # 他下一步就是关掉窗口走人。改成换一句说法 + 给一个此刻能做的事。
+        if group.is_kf and group.client_status == ClientStatus.PROSPECT:
+            decision.reasons.append("followup:third-touch-kf")
+            from responder.compliance.guard import guard
+
+            body = templates.third_touch(group, seed=msg.msg_id, settings=self.settings)
+            return guard(body, Action.HANDOFF, templates.safe_fallback(group)).text
         decision.reasons.append("followup:suppressed-escalated")
         return None
 

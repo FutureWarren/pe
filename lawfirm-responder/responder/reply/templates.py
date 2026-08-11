@@ -346,6 +346,25 @@ def second_touch(group: GroupProfile, urgent: bool = False) -> str:
     return f"抱歉让您久等了，我刚又跟{L}那边催了一下，一有回复马上{G}告诉您。"
 
 
+def third_touch(group: GroupProfile, seed: str = "", settings=None) -> str:
+    """客户**第三次**问同一件事。
+
+    群聊到这一步 AI 就闭嘴了（律师在场，再说就成了刷屏）。一对一窗口不行——
+    那里没有别人。客户问了三遍还是这句话，说明他越来越急，
+    **这时候闭嘴是最坏的回应**：他下一步就是关掉窗口走人。
+
+    所以这句话要做三件事：认下来（别再说「我催了」，他已经听过两遍了）、
+    给一个具体的时间感、给一件此刻他自己能做的事。
+    """
+    L = _lawyer(group)
+    tail = ask_contact(group, seed=seed, settings=settings)
+    return (
+        f"是我们让您久等了。{L}那边我已经标成加急，"
+        f"您先把手上跟这件事有关的材料拍照存好，回头一次性给他看，能省不少时间。\n"
+        + tail
+    )
+
+
 HANDOFF_BY_CATEGORY = {
     Category.CASE_STATUS: handoff_case_status,
     Category.FEE: handoff_fee,

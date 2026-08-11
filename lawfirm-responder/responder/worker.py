@@ -546,12 +546,55 @@ class Worker:
                 try:
                     self._handle_kf_message(raw)
                 except Exception:
+                    # 这条炸了，而**游标照常往前走**——它不会再来第二次。
+                    # 客户那头的表现是：发了一句话，然后什么也没有。
+                    # 日志里有一行异常，但没有人会去看一个「运行正常」的系统的日志。
+                    # 所以这里必须做两件事：给客户一句兜底，给我们一条看得见的记录。
                     logger.exception("kf message failed: %s", raw.get("msgid"))
+                    self._rescue_failed_kf_message(raw)
             cursor = batch["next_cursor"]
             if cursor:
                 self.store.set_kf_cursor(job.open_kfid, cursor)
             if not batch["has_more"]:
                 break
+
+    def _rescue_failed_kf_message(self, raw: dict) -> None:
+        """一条客户消息把判断链跑炸了之后的兜底。
+
+        不重试（同一条大概率还会炸），但**不能让客户对着空气**：
+        发一句确定性的承接话术，并把这一条记进运维小记，让它在控制台里看得见。
+        救援本身再炸也只吞掉——它已经是最后一道了。
+        """
+        try:
+            if (raw.get("origin") or 0) != wecom_kf.ORIGIN_CUSTOMER:
+                return
+            open_kfid = raw.get("open_kfid", "")
+            external_userid = raw.get("external_userid", "")
+            if not (open_kfid and external_userid):
+                return
+            group_id = f"kf:{open_kfid}:{external_userid}"
+            self.store.set_note(
+                f"pipeline_failed:{group_id}",
+                f"消息 {raw.get('msgid', '')} 处理时出错，已发兜底话术。"
+                "这条不会自动重来，请人工看一眼这通对话。",
+            )
+            client = self.pipeline.kf_client
+            if client is None:
+                return
+            group = self.store.get_group(group_id)
+            if group is None or not group.ai_enabled:
+                return
+            text = guard(
+                templates.safe_fallback(group), Action.HANDOFF,
+                templates.safe_fallback(group),
+            ).text
+            if client.send_text(open_kfid, external_userid, text):
+                self.store.save_reply(
+                    f"rescue-{raw.get('msgid', '')}", group_id, text, "live", True,
+                    category="other",
+                )
+        except Exception:
+            logger.exception("kf rescue failed: %s", raw.get("msgid"))
 
     def _handle_kf_message(self, raw: dict) -> None:
         origin = raw.get("origin")
@@ -577,12 +620,28 @@ class Worker:
         if origin == wecom_kf.ORIGIN_CUSTOMER:
             self._ensure_robot_state(group_id, open_kfid, external_userid)
 
-        is_staff = origin == wecom_kf.ORIGIN_SERVICER or bool(raw.get("servicer_userid"))
+        # **origin 说了算。** 原来是
+        # `origin == ORIGIN_SERVICER or bool(raw.get("servicer_userid"))`，
+        # 而企微在**客户消息**上也会带 `servicer_userid`（标明这通会话归谁接）——
+        # 于是客户自己说的话被记成了「我方发言」，`handle()` 走进 staff 分支：
+        # 就地标记为已转人工、AI 从此闭嘴、这条消息一个字的回复也不会有。
+        # 症状正是真机看到的那一幕：客户连发五次「你好」，跨两天，全程静默，
+        # 而后台判断日志里每一条都写着「staff-message，不需要 AI 回」。
+        #
+        # origin 是企微专门用来回答这个问题的字段，缺失时才回落到旧启发式。
+        if origin == wecom_kf.ORIGIN_SERVICER:
+            is_staff = True
+        elif origin == wecom_kf.ORIGIN_CUSTOMER:
+            is_staff = False
+        else:
+            is_staff = bool(raw.get("servicer_userid"))
         content = (raw.get("text") or {}).get("content", "")
         msg = IncomingMessage(
             msg_id=raw.get("msgid") or "",
             group_id=group_id,
-            sender_id=raw.get("servicer_userid") or external_userid,
+            # 发件人同理：客户消息的发件人永远是客户，哪怕报文里带着接待人 id
+            sender_id=(raw.get("servicer_userid") or external_userid) if is_staff
+            else external_userid,
             sender_is_staff=is_staff,
             content=content,
             msg_type="text" if raw.get("msgtype") == "text" else (raw.get("msgtype") or "other"),
@@ -676,7 +735,21 @@ class Worker:
             else templates.greeting_opener(group, seed=marker)
         )
         result = guard(text, Action.ANSWER, templates.safe_fallback(group))
-        client.send_text(open_kfid, external_userid, result.text)
+        if not client.send_text(open_kfid, external_userid, result.text):
+            # **没发出去就绝不能记账。** 记了 `has_greeting` 就为真，
+            # `_avoid_repeat_greeting` 从此认定「打过招呼了」，于是客户扫码进来
+            # 看到一片空白，而系统这边显示一切正常——空窗口是最大的流失点，
+            # 而这个 bug 恰好制造的就是空窗口。
+            self.store.save_reply(
+                marker, group_id, result.text, "failed", result.passed,
+                category="greeting",
+            )
+            self.store.set_note(
+                f"welcome_failed:{group_id}",
+                "进线问候没发出去（微信客服通道异常），客户扫码进来看到的是空窗口",
+            )
+            logger.error("kf welcome FAILED to send: %s", group_id)
+            return
         self.store.save_reply(
             marker, group_id, result.text, "live", result.passed, category="greeting",
         )

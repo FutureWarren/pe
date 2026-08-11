@@ -412,7 +412,18 @@ def dispatch(
         if reason:
             # 第二条提醒必须一眼看出跟第一条不一样，否则客服会当成重复推送划走
             text = _RENOTIFY_PREFIX[reason] + "\n\n" + text
-        if sender.send_direct_text(to, text):
+        if not sender.send_direct_text(to, text):
+            # **推不出去要响。** 不标记已通知，所以下一轮还会重试——但如果它
+            # 一直失败（userid 写错、人不在应用可见范围里），那张交接单就
+            # 一辈子送不到，而后台看起来一切正常：线索在、评分在、状态是「待跟进」。
+            # 这正是 2026-08-06 那条最贵的静默失败，只是换了个出口。
+            logger.error("lead brief NOT delivered: %s → %s", group.group_id, to)
+            store.set_note(
+                f"brief_undelivered:{group.group_id}",
+                f"交接单推给 {to} 失败——检查这个 userid 是否正确、"
+                "以及他在不在自建应用的可见范围里",
+            )
+        else:
             store.mark_lead_notified(group.group_id)
             # 瞬态标记（不入库）：告诉调用方「这一轮真的推送了」。
             # service 据此跳过同一条消息的逐条提醒——律师不该为一件事收到两条 DM。

@@ -169,14 +169,18 @@ async def receive_douyin(request: Request, pipeline: Pipeline = Depends(get_pipe
       2. 配置回调地址时平台先发一个挑战包，必须原样回显 challenge 才算配置成功——
          这一步不通，后面什么都收不到。
 
-    未配置校验 Token 时不做签名校验（本机联调用）。生产必须配，
-    否则任何人都能往这个地址灌消息，让 AI 对着伪造的客户说话。
+    **没配校验 Token 就整个拒收**（默认拒绝，不是默认放行）。
+    原来是「没配就不校验」，那等于把一个公网地址敞开：任何人都能灌进伪造的
+    客户消息，让 AI 对着不存在的人说话、生成假线索、占满律师的队列。
+    「本机联调方便」不值这个风险——联调时把 token 配上同样方便。
+    与外部渠道接入口（`gateway/channel.py`）口径一致。
     """
     s = pipeline.settings
     body = await request.body()
-    if s.douyin_callback_token and not douyin.verify_signature(
-        s.douyin_callback_token, request.headers, body
-    ):
+    if not s.douyin_callback_token:
+        logger.warning("douyin callback rejected: RESPONDER_DOUYIN_CALLBACK_TOKEN 未配置")
+        return Response(status_code=403)
+    if not douyin.verify_signature(s.douyin_callback_token, request.headers, body):
         return Response(status_code=403)
     try:
         payload = json.loads(body or b"{}")

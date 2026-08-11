@@ -101,7 +101,9 @@ def test_export_has_the_columns_a_partner_would_use(env):
     assert row["来源"] == "微信客服"
     assert row["负责律师"] == "魏涞"
     assert row["状态"] == "已联系"
-    assert row["完整对话"].startswith("http://1.2.3.4/ui#g=")
+    # `/g/{id}` 而不是 `/ui#g={id}`：这张表会被转发进企业微信，
+    # 而企微把 `#` 转义成 `%23`，后者点开是 404
+    assert row["完整对话"].startswith("http://1.2.3.4/g/")
 
 
 def test_export_does_not_dump_ai_conversations(env):

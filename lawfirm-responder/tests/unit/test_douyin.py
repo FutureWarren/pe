@@ -9,6 +9,7 @@
 """
 
 import hashlib
+import json
 from datetime import datetime, timedelta
 
 from responder.config import Settings
@@ -63,6 +64,23 @@ def make_env(tmp_path, **over):
     pipeline = Pipeline(store, sender=sender, settings=settings, douyin_client=dy)
     worker = Worker(pipeline, store, sender, douyin_client=dy)
     return store, dy, worker
+
+
+def dy_sign(token: str, payload: dict) -> dict:
+    """按抖音的拼法算一个真签名，供回调用例使用。
+
+    回调现在**默认拒绝**（没配 Token 就整个不收），所以这些用例必须带真签名，
+    不能再靠「没配 token 就跳过校验」那条已经删掉的后门。
+    """
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    sig = hashlib.sha1(
+        "".join(sorted([token, "1700000000", "abc", body.decode()])).encode()
+    ).hexdigest()
+    return {
+        "x-douyin-signature": sig,
+        "x-douyin-timestamp": "1700000000",
+        "x-douyin-nonce": "abc",
+    }
 
 
 def dy_msg(msg_id, text, *, content_as_str=False):
@@ -318,10 +336,21 @@ def _client(tmp_path, **over):
 
 def test_callback_echoes_challenge(tmp_path):
     """配置回调地址时平台先发挑战包，回显不对后面什么都收不到。"""
-    c = _client(tmp_path)
+    c = _client(tmp_path, douyin_callback_token="tok-123")
     r = c.post("/douyin/callback",
-               json={"event": "verify_webhook", "content": {"challenge": 4213}})
+               json={"event": "verify_webhook", "content": {"challenge": 4213}},
+               headers=dy_sign("tok-123",
+                               {"event": "verify_webhook",
+                                "content": {"challenge": 4213}}))
     assert r.status_code == 200 and r.json() == {"challenge": 4213}
+
+
+def test_callback_refuses_everything_when_no_token_is_configured(tmp_path):
+    """没配校验 Token = 接入口关闭。**默认拒绝，不是默认放行**——
+    敞着的话任何人都能灌进伪造的客户消息，让 AI 对着不存在的人说话、
+    生成假线索、占满律师的队列。"""
+    r = _client(tmp_path).post("/douyin/callback", json=dy_msg("m1", "你好"))
+    assert r.status_code == 403
 
 
 def test_callback_rejects_bad_signature(tmp_path):
@@ -350,8 +379,10 @@ def test_callback_accepts_signed_payload(tmp_path):
 
 def test_callback_always_200_on_junk(tmp_path):
     """认不出的报文也要立刻回 200，否则平台按超时反复重推。"""
-    c = _client(tmp_path)
-    r = c.post("/douyin/callback", json={"event": "video_publish"})
+    c = _client(tmp_path, douyin_callback_token="tok-123")
+    payload = {"event": "video_publish"}
+    r = c.post("/douyin/callback", json=payload,
+               headers=dy_sign("tok-123", payload))
     assert r.status_code == 200
 
 

@@ -1049,10 +1049,17 @@ class Store:
         判据是「有没有回过话」而不是「有没有发过 greeting 类回复」：
         客户第一句就直接说事时走的是承接/追问路径，那一轮压根没有 greeting 类
         记录，用类别判会永远为假，于是每一轮都重新自我介绍一遍。
+
+        **只认真的发出去了的（mode='live'）。** 原来是「有任何一行回复记录就算」，
+        于是一条 `failed`（生成了但通道没发出去）或 `shadow`（演练草稿）
+        也会让系统认定「已经开过口」——客户那头一个字都没收到，
+        而 AI 从此不再自我介绍、`_avoid_repeat_greeting` 也不再补问候。
+        空窗口是最大的流失点，而这个判据曾经亲手制造它。
         """
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT 1 FROM replies WHERE group_id=? LIMIT 1", (group_id,)
+                "SELECT 1 FROM replies WHERE group_id=? AND mode='live' LIMIT 1",
+                (group_id,),
             ).fetchone()
         return row is not None
 

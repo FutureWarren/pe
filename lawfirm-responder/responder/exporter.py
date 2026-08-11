@@ -135,12 +135,26 @@ def build_rows(
             "_hours": _hours_to_contact(row),
             # 深链而不是把对话糊进单元格：管理员不想看 AI 对话，
             # 但偶尔需要点进去看一眼。一列链接兼顾两者。
-            "_link": f"{base}/ui#g={gid}" if base else "",
+            # 用 `/g/{id}`，不用 `/ui#g={id}`：后者在企业微信里点开是 404
+            # （企微把 `#` 转义成 `%23`），而这张表是会被转发进企微群的。
+            "_link": f"{base}/g/{gid}" if base else "",
         }
         out.append([
-            str(computed.get(key, row.get(key, "")) or "") for _, key in _COLUMNS
+            _safe_cell(str(computed.get(key, row.get(key, "")) or ""))
+            for _, key in _COLUMNS
         ])
     return out
+
+
+# Excel 把 = + - @ 开头的单元格当公式执行。客户诉求是**客户自己打的字**，
+# 一句「=1+1」在表里会变成 2，而 `=cmd|...` 这类在某些环境下能拉起外部程序。
+# 律所会把这张表转发给合伙人、发进微信群——我们不能把一个可执行的东西发出去。
+# 前面加一个单引号即可让 Excel 按纯文本处理，肉眼几乎看不出来。
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value: str) -> str:
+    return "'" + value if value[:1] in _FORMULA_LEAD else value
 
 
 def to_xlsx(rows: list[list[str]], title: str = "客户档案") -> bytes:
