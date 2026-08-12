@@ -1524,6 +1524,11 @@ def diagnose(
     skip = store.get_note(f"handoff_skip:{group_id}")
     if skip and not group.handoff_userid:
         checks.append(f"没有自动转给律师，因为：{skip}")
+    # 名片没推出去的表现是「客户什么也没收到」——不摆出来根本发现不了
+    if card := store.get_note(f"specialist_card:{group_id}"):
+        (blockers if "没推出去" in card else checks).append(
+            f"专员名片：{card}" if "没推出去" not in card
+            else f"**律师名片没推给客户** —— {card}")
     # 企微那边的会话归属才是决定性的：状态不是「智能助手接待」时，
     # 我们判断得再对、回复生成得再好，客户也看不到。
     if group.is_kf and not group.is_douyin:

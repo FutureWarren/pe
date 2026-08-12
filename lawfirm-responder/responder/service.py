@@ -469,7 +469,48 @@ class Pipeline:
         )
         logger.info("handoff: %s → %s（%s）", group.group_id, target, trigger)
         self.store.set_note(f"handoff_skip:{group.group_id}", f"已转给 {target}：{trigger}")
+        self._offer_specialist(group, target)
         return True
+
+    def _offer_specialist(self, group: GroupProfile, userid: str) -> None:
+        """转接成功后，把这位律师的名片推给客户（企微「升级服务 → 专员服务」）。
+
+        **转接只解决「谁来回这句话」，名片解决「客户认识了谁」。**
+        微信客服里律师回的话，客户那头看到的永远是客服账号在说话；
+        会话一结束联系就断了，律师之后想主动找他没有任何通道。
+        客户把名片加上之后，就是他和这位律师的长期联系人关系——
+        对律所来说，这是从「一次咨询」变成「长期关系」的那一步。
+
+        **推的是分案引擎算出来的那一位**，不是随机推荐：把劳动争议的客户
+        推给做刑事的律师，比不推更糟。
+
+        失败一律吞掉：这一步锦上添花，不能反过来把已经成功的转接搞砸。
+        但要留下能查的证据——最常见的失败是 95021（这位律师不在后台
+        「升级服务」的专员名单里），而它的表现是「客户什么也没收到」。
+        """
+        s = self.settings
+        client = self.kf_client
+        if not s.upgrade_service_enabled or client is None:
+            return
+        if not hasattr(client, "upgrade_to_member"):
+            return  # 老版本客户端/测试桩没有这个能力，跳过而不是报错
+        try:
+            result = client.upgrade_to_member(
+                group.kf_open_kfid, group.kf_external_userid, userid,
+                wording=s.upgrade_service_wording,
+            )
+        except Exception:
+            logger.exception("upgrade_service crashed: %s", group.group_id)
+            return
+        if result.get("ok"):
+            self.store.set_note(
+                f"specialist_card:{group.group_id}", f"已把 {userid} 的名片推给客户"
+            )
+            logger.info("specialist card sent: %s → %s", group.group_id, userid)
+            return
+        hint = result.get("hint") or result.get("error", "")
+        self.store.set_note(f"specialist_card:{group.group_id}", f"名片没推出去：{hint}")
+        logger.warning("specialist card failed: %s — %s", group.group_id, hint)
 
     def _recall(self, msg: IncomingMessage, decision: Decision) -> str:
         """检索本所既定口径，注入这一轮的回答（见 responder/memory.py）。

@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # 别放宽到 P1/P2——一周 416 人进私信，全转过去律师什么也别干了。
     # 转接接口路径。企微文档站在部署环境不可达，故做成配置项：
     # 控制台自检探到正确路径后改这里，不必改代码重新部署。
+    # 转接成功后顺带把承办律师的名片推给客户（企微「升级服务 → 专员服务」）。
+    # 转接只解决「谁来回这句话」，名片解决「客户认识了谁」——后者才是
+    # 从一次咨询变成长期关系的那一步。推荐语留空＝用企微后台配好的那句，
+    # 话术留在律所自己手上。
+    upgrade_service_enabled: bool = True
+    upgrade_service_wording: str = ""
     kf_trans_path: str = "kf/service_state/trans"
     kf_state_path: str = "kf/service_state/get"
     # 转接后律师迟迟不接手 → 把客户收回给 AI。转接引入的最坏情况是

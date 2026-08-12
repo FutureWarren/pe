@@ -62,6 +62,11 @@ ERR_HINTS: dict[int, str] = {
         "「可见范围」把这个人加进去。"
     ),
     301002: "没有该成员的权限（可见范围问题）。",
+    95021: (
+        "这位律师不在后台「升级服务」配置的专员名单里。去企业微信管理后台 → "
+        "应用管理 → 「微信客服」→ 升级服务 → 进入配置，把他（或他所在的部门）"
+        "加进「可推荐的专员」。他还需要在「客户联系 → 权限配置」的使用范围内。"
+    ),
 }
 
 
@@ -191,6 +196,52 @@ class KfClient:
         except Exception as e:
             logger.exception("kf servicer/add error (open_kfid=%s)", open_kfid)
             return {"error": str(e)[:300], "hint": err_hint(str(e))}
+
+    def upgrade_to_member(
+        self, open_kfid: str, external_userid: str, userid: str, wording: str = "",
+    ) -> dict:
+        """把客户「升级为专员服务」——即把某位律师的名片推进这通对话。
+
+        为什么这一步比转接更值钱：**转接只解决「谁来回这句话」，
+        没解决「客户认识了谁」。** 微信客服里律师回的话，客户那头看到的
+        永远是客服账号在说话；会话一结束联系就断了，律师之后想主动找他
+        没有任何通道。而客户把名片加上之后，就是他和这位律师的长期联系人关系。
+        对律所来说，这是从「一次咨询」变成「长期关系」的那一步。
+
+        `wording` 留空时用企微后台「升级服务」里配好的推荐语——
+        **话术留在律所自己手上**，我们不在代码里替他们措辞。
+
+        失败不抛：这一步锦上添花，不能反过来把已经成功的转接搞砸。
+        最常见的失败是 `95021`（这位律师不在后台配置的专员名单里），
+        `err_hint` 会把它翻成一句能照着做的中文。
+        """
+        member: dict = {"userid": userid}
+        if wording:
+            member["wording"] = wording
+        try:
+            self._post("kf/customer/upgrade_service", {
+                "open_kfid": open_kfid,
+                "external_userid": external_userid,
+                "type": 1,  # 1=专员服务 2=客户群服务
+                "member": member,
+            })
+            return {"ok": True}
+        except Exception as e:
+            logger.exception("kf upgrade_service failed (%s → %s)", open_kfid, userid)
+            return {"ok": False, "error": str(e)[:300], "hint": err_hint(str(e))}
+
+    def upgrade_service_config(self) -> dict:
+        """后台「升级服务」里配了哪些专员/客户群。就绪自检用。
+
+        注意返回的可能是**部门**而不是具体的人（律所方配的就是「邀约谈案部」），
+        所以这里不做「这位律师在不在名单里」的判断——展开部门要通讯录权限，
+        而我们未必有。真要知道行不行，调一次就知道了：不行会明确报 95021。
+        """
+        try:
+            return self._post("kf/customer/get_upgrade_service_config", {})
+        except Exception as e:
+            logger.exception("kf get_upgrade_service_config failed")
+            return {"error": str(e)[:200], "hint": err_hint(str(e))}
 
     def account_list(self) -> list[dict]:
         """客服账号列表（部署自检用）。"""
