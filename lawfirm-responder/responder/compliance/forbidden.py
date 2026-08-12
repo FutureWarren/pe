@@ -47,6 +47,33 @@ FORBIDDEN: list[tuple[str, str]] = [
 _COMPILED = [(name, re.compile(pat)) for name, pat in FORBIDDEN]
 
 
+# 律所**书面授权**可以对客说出口的原话（`Settings.approved_claims`）。
+#
+# 2026-08-12，律所方明确要求主打「免费法律咨询」，并在我两次提出
+# 《律师业务推广行为规则》第十条的顾虑后重申「你不要管，按我说的做」。
+# 这是律所的执业判断，由律所承担；我把它记录在案并照办。
+#
+# **但不是把费用闸门拆掉。** 拆掉的后果是模型可以自己编出「打三折」
+# 「代理费一万」——那是律所没授权、也不知情的话。做法是只放行
+# 律所逐字定下的那几句：先把它们从待检文本里抠掉再跑规则，
+# 于是**授权的那句能说，别的关于钱的说法一句也漏不过去**。
+_MASK = "\x00"
+
+
+def _mask_approved(text: str) -> str:
+    from responder.config import get_settings
+
+    try:
+        raw = get_settings().approved_claims
+    except Exception:
+        return text
+    for phrase in (p.strip() for p in raw.split("|")):
+        if phrase:
+            text = text.replace(phrase, _MASK)
+    return text
+
+
 def check(text: str) -> list[str]:
     """返回命中的规则名列表，空列表 = 通过。"""
-    return [name for name, pat in _COMPILED if pat.search(text)]
+    masked = _mask_approved(text)
+    return [name for name, pat in _COMPILED if pat.search(masked)]

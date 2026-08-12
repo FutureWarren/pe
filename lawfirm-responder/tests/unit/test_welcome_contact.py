@@ -245,18 +245,30 @@ def test_asking_for_a_number_is_the_fallback_beat(tmp_path):
         assert not ("手机号" in one and ADDRESS in one), f"又挤一条里了：{one}"
 
 
-def test_the_invitation_never_promises_a_free_consult(tmp_path):
-    """律所方要求用「免费咨询」吸引到店，但全国律协《律师业务推广行为规则》
-    第十条把「以不收费或减低收费招揽业务」列为禁止行为，出口闸门也会整段拦掉——
-    真写进去的结果是客户什么都收不到。
+def test_the_free_consult_offer_is_actually_said(tmp_path):
+    """律所方 2026-08-12 拍板主打「免费法律咨询」，并在我两次提出
+    《律师业务推广行为规则》第十条的顾虑后重申「你不要管，按我说的做」。
+    这是律所的执业判断，由律所承担。
 
-    客户真正在意的是「我会不会被绑住」，而那层意思由「聊完您心里有个数、
-    接下来怎么走再定」传达，既准确又不踩线。
+    技术上要守住的是**只放行律所逐字授权的那几句**（`approved_claims`），
+    而不是把费用闸门拆掉——拆掉的后果是模型自己编出「打三折」
+    「代理费一万」，那是律所没授权也不知情的话。
     """
     _, kf = _chat(tmp_path, THREE)
     text = kf.texts()
-    for banned in ("免费", "不收费", "不要钱", "0元", "零元"):
-        assert banned not in text, f"话术里不该出现「{banned}」"
+    assert "免费" in text, "律所授权的这张牌要真的打出去"
+    assert "主任律师" in text
+
+
+def test_only_the_authorised_sentence_gets_through():
+    """授权一句话 ≠ 授权谈钱。别的关于钱的说法一句也不许漏。"""
+    from responder.compliance import forbidden
+
+    assert not forbidden.check("咨询是免费的，聊完您心里有个数")
+    assert not forbidden.check("来所里免费咨询，主任律师帮您看看")
+    for banned in ("我们可以给你打折", "代理费一万块", "这个案子不收费",
+                   "律师费大概三万", "按标的额百分之十收"):
+        assert forbidden.check(banned), f"这句不该放行：{banned}"
 
 
 def test_ask_contact_not_before_threshold(tmp_path):
