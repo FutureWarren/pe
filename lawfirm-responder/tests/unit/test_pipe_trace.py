@@ -130,3 +130,73 @@ def test_the_counters_never_become_the_outage(tmp_path):
     store.bump("k")
     store.path = "/nonexistent/dir/x.db"
     store.bump("k")  # 不该抛
+
+
+# ------------------------------------------- 拿浏览器戳一下这个地址会看到什么
+def _get_app(tmp_path, crypto=None):
+    s = Settings(mode="live", db_path=str(tmp_path / "g.db"), llm_provider="none")
+    store = Store(s.db_path)
+    app = FastAPI()
+    app.state.store = store
+    app.state.pipeline = Pipeline(store, None, s)
+    app.include_router(cb.router)
+    app.dependency_overrides[cb.get_crypto] = lambda: crypto or FakeCrypto()
+    return TestClient(app), store
+
+
+def test_a_human_opening_the_callback_url_gets_a_verdict(tmp_path):
+    """排查「客户消息为什么没进来」时，第一件事就是拿浏览器戳一下这个地址。
+    FastAPI 默认回一屏 `{"detail":[{"type":"missing"...}]}`——那对律所方
+    等于乱码，而它其实是**好消息**：地址通了、路由到了我们。
+    """
+    c, _ = _get_app(tmp_path)
+    r = c.get("/wecom/callback")
+    assert r.status_code == 200
+    assert "missing" not in r.text
+    assert "从公网是通的" in r.text
+    # 一条回调都没收到过 → 直接说该去后台填哪一项
+    assert "从来没有往这个地址推过消息" in r.text
+    assert "接收事件服务器" in r.text
+
+
+def test_the_page_names_the_signature_problem_when_that_is_the_problem(tmp_path):
+    c, store = _get_app(tmp_path)
+    store.bump("kf_cb_total", 5)
+    store.bump("kf_cb_bad_signature", 5)
+    assert "签名一直对不上" in c.get("/wecom/callback").text
+
+
+def test_the_page_names_a_stuck_pull_when_that_is_the_problem(tmp_path):
+    """通知收到了却一条也拉不回来——跟「没收到通知」完全是两回事。"""
+    c, store = _get_app(tmp_path)
+    store.bump("kf_cb_total", 3)
+    store.bump("kf_cb_event", 3)
+    assert "一条消息也拉不回来" in c.get("/wecom/callback").text
+
+
+def test_the_page_says_so_when_everything_works(tmp_path):
+    c, store = _get_app(tmp_path)
+    store.bump("kf_cb_total", 3)
+    store.bump("kf_cb_event", 3)
+    store.bump("kf_synced", 7)
+    assert "消息进得来" in c.get("/wecom/callback").text
+
+
+def test_the_real_verification_handshake_still_works(tmp_path):
+    """企微配置回调地址时先发一个挑战包，回显不对就配不上——
+    这条页面改动绝不能把它弄坏。"""
+    c, store = _get_app(tmp_path, FakeCrypto(payload="plain-echo"))
+    r = c.get("/wecom/callback", params={
+        "msg_signature": "s", "timestamp": "1", "nonce": "n", "echostr": "e"})
+    assert r.status_code == 200 and r.text == "plain-echo"
+    assert store.counters()["kf_verify_ok"]["n"] == 1
+
+
+def test_a_failed_verification_is_counted_too(tmp_path):
+    """企微配置时验证失败，律所方看到的只是后台一句「保存失败」。
+    这个数让我们这边也看得见。"""
+    c, store = _get_app(tmp_path, FakeCrypto(ok=False))
+    r = c.get("/wecom/callback", params={
+        "msg_signature": "s", "timestamp": "1", "nonce": "n", "echostr": "e"})
+    assert r.status_code == 403
+    assert store.counters()["kf_verify_failed"]["n"] == 1

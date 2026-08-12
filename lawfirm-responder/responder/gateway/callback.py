@@ -37,14 +37,60 @@ def get_pipeline(request: Request) -> Pipeline:
 
 @router.get("/wecom/callback")
 def verify_url(
-    msg_signature: str = Query(...),
-    timestamp: str = Query(...),
-    nonce: str = Query(...),
-    echostr: str = Query(...),
+    request: Request,
+    msg_signature: str = Query(default=""),
+    timestamp: str = Query(default=""),
+    nonce: str = Query(default=""),
+    echostr: str = Query(default=""),
     crypto: WeComCrypto = Depends(get_crypto),
 ):
+    """企微的 URL 验证；**人用浏览器打开时给一张能看懂的自检页**。
+
+    为什么值得写：排查「客户消息为什么没进来」时，第一件事就是拿浏览器
+    戳一下这个地址看它通不通。参数缺失时 FastAPI 默认回一屏
+    `{"detail":[{"type":"missing"...}]}`——那对律所方等于乱码，
+    而它其实是个**好消息**（地址通了、路由到了我们）。
+    顺手把管道计数一并摆出来：一个网址就能查完，不用两处对照。
+    """
+    if not (msg_signature and timestamp and nonce and echostr):
+        store = request.app.state.store
+        c = store.counters()
+
+        def n(key: str) -> int:
+            return int((c.get(key) or {}).get("n", 0))
+
+        total, synced = n("kf_cb_total"), n("kf_synced")
+        if total == 0:
+            verdict = ("❌ 企业微信从来没有往这个地址推过消息。\n"
+                       "   去「企业微信管理后台 → 应用管理 → 微信客服 → API」，\n"
+                       "   把「接收事件服务器」的 URL 填成本页地址，\n"
+                       "   Token 与 EncodingAESKey 用自建应用那一套。")
+        elif n("kf_cb_bad_signature") > 0 and n("kf_cb_event") == 0:
+            verdict = ("❌ 推过来了，但签名一直对不上。\n"
+                       "   Token 或 EncodingAESKey 跟企微后台填的不一致，去核对这两个值。")
+        elif n("kf_cb_event") > 0 and synced == 0:
+            verdict = ("❌ 收到通知了，但一条消息也拉不回来。\n"
+                       "   多半是 Secret 变了或客服账号没交给这个应用管（48007）。")
+        else:
+            verdict = "✅ 消息进得来。"
+        body = (
+            "这是给企业微信用的回调地址，不是给人看的页面。\n"
+            "你能看到这段字，说明**这个地址从公网是通的**。\n\n"
+            f"{verdict}\n\n"
+            "———— 管道分段计数 ————\n"
+            f"企微推过来的回调总数      {total}\n"
+            f"  其中签名对不上          {n('kf_cb_bad_signature')}\n"
+            f"  其中是微信客服事件      {n('kf_cb_event')}\n"
+            f"据此拉回来的消息条数      {synced}\n\n"
+            f"最后一次收到的回调        {store.get_note('kf_cb_last') or '（没有）'}\n"
+            f"最后一次拉到的消息        {store.get_note('kf_synced_last') or '（没有）'}\n"
+            f"认不出的事件名            {store.get_note('kf_unknown_event') or '（没有）'}\n"
+        )
+        return Response(content=body, media_type="text/plain; charset=utf-8")
     if not crypto.verify(msg_signature, timestamp, nonce, echostr):
+        request.app.state.store.bump("kf_verify_failed")
         return Response(status_code=403)
+    request.app.state.store.bump("kf_verify_ok")
     return Response(content=crypto.decrypt(echostr), media_type="text/plain")
 
 
