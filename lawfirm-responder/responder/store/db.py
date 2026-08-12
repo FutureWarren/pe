@@ -4,11 +4,14 @@
 """
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 
 from responder.models import Decision, GroupProfile, IncomingMessage, Reminder
+
+logger = logging.getLogger(__name__)
 
 
 def _escape_like(text: str) -> str:
@@ -167,6 +170,16 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending
 -- 各渠道的心跳。**失败是静默的**：RPA 那台机器弹个更新窗口就卡住了，
 -- 客户在美团上等了三天，而我们后台一片安静、什么都不会报错。
 -- 这张表存在的唯一理由，就是让「没有动静」本身变成一个能报警的信号。
+-- 管道计数器：回调到底有没有来、来了几条、在哪一段没了。
+-- 存在的理由：2026-08-11 真机——客户连发多条消息一条回复也没有，
+-- 而服务器一切正常（线程活着、队列空、通道配置有效）。当时无法区分
+-- 「企微没推给我们」「推了但签名验不过」「验过了但拉不到消息」，
+-- 三者症状完全一样，而修法天差地别。
+CREATE TABLE IF NOT EXISTS counters (
+    key TEXT PRIMARY KEY,
+    n INTEGER DEFAULT 0,
+    updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS channel_state (
     channel TEXT PRIMARY KEY,
     label TEXT DEFAULT '',          -- 给人看的渠道名，如「美团-静安店」
@@ -829,6 +842,24 @@ class Store:
             conn.executemany(
                 "UPDATE knowledge SET hits=hits+1 WHERE id=?", [(i,) for i in ids]
             )
+
+    def bump(self, key: str, n: int = 1) -> None:
+        """管道计数器 +n。失败只吞掉——计数器是用来排障的，不能反过来成为故障源。"""
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    "INSERT INTO counters(key, n, updated_at) VALUES(?,?,?)"
+                    " ON CONFLICT(key) DO UPDATE SET n = n + excluded.n,"
+                    " updated_at=excluded.updated_at",
+                    (key, n, datetime.now().isoformat()),
+                )
+        except Exception:
+            logger.exception("counter bump failed: %s", key)
+
+    def counters(self) -> dict:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT key, n, updated_at FROM counters").fetchall()
+        return {r["key"]: {"n": r["n"], "at": r["updated_at"]} for r in rows}
 
     def set_note(self, key: str, text: str) -> None:
         """运维小记：给远程排障留一行能读到的证据（复用 ops_commands 表）。

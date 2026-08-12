@@ -607,6 +607,16 @@ class Worker:
         cursor = self.store.get_kf_cursor(job.open_kfid)
         for _ in range(20):  # has_more 循环上限，防异常游标导致死循环
             batch = self.kf_client.sync_msg(job.token, job.open_kfid, cursor)
+            # 拉回来几条。回调来了但这个数一直是 0 = 游标卡住或 Token 过期，
+            # 跟「回调没来」是两码事，修法也完全不同。
+            self.store.bump("kf_synced", len(batch["msg_list"]))
+            if batch["msg_list"]:
+                first = batch["msg_list"][0]
+                self.store.set_note(
+                    "kf_synced_last",
+                    f"origin={first.get('origin')} type={first.get('msgtype')}"
+                    f" event={(first.get('event') or {}).get('event_type', '-')}",
+                )
             for raw in batch["msg_list"]:
                 try:
                     self._handle_kf_message(raw)
@@ -678,6 +688,10 @@ class Worker:
                 self._ensure_kf_profile(group_id, open_kfid, external_userid)
                 self._kf_welcome(group_id, open_kfid, external_userid,
                                  raw.get("msgid") or "")
+            else:
+                # 事件名不在白名单里 = 进线问候整条不触发，而客户看到的是空窗口。
+                # 白名单是照着文档写的，企微换个名字我们就哑了——留个证据。
+                self.store.set_note("kf_unknown_event", event or "(空)")
             return
         if origin == wecom_kf.ORIGIN_SYSTEM:
             return  # 系统推送（企微自带欢迎语等）不进判断

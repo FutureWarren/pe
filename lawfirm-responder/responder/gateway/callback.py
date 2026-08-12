@@ -57,12 +57,22 @@ async def receive(
     crypto: WeComCrypto = Depends(get_crypto),
     pipeline: Pipeline = Depends(get_pipeline),
 ):
+    # 管道计数器：把「企微到底有没有推给我们」这件事变成一个看得见的数。
+    # 2026-08-11 真机——客户连发多条消息一条回复也没有，而服务器一切正常
+    # （线程活着、队列空、通道配置有效）。当时分不清「没推给我们」
+    # 「推了但签名验不过」「验过了但拉不到消息」，三者症状完全一样。
+    store = request.app.state.store
+    store.bump("kf_cb_total")
     body = await request.body()
     try:
         encrypt = ET.fromstring(body).findtext("Encrypt", "")
     except ET.ParseError:
+        store.bump("kf_cb_unparsable")
         return Response(status_code=400)
     if not crypto.verify(msg_signature, timestamp, nonce, encrypt):
+        # 签名对不上 = Token/EncodingAESKey 跟企微后台填的不一致。
+        # 这条要是在涨，就别去查判断层了，去核对那两个值。
+        store.bump("kf_cb_bad_signature")
         return Response(status_code=403)
 
     try:
@@ -73,6 +83,11 @@ async def receive(
         return Response(content="success", media_type="text/plain")
     worker = getattr(request.app.state, "worker", None)
     async_ok = worker is not None and pipeline.settings.callback_async
+    # 记下最后一次收到的是什么，认不出的类型也留个证据
+    store.set_note(
+        "kf_cb_last",
+        f"{xml.findtext('MsgType') or '-'}/{xml.findtext('Event') or '-'}",
+    )
 
     if xml.findtext("MsgType") == "text":
         msg = IncomingMessage(
@@ -89,6 +104,7 @@ async def receive(
         else:
             pipeline.handle(msg)
     elif xml.findtext("Event") == "kf_msg_or_event":
+        store.bump("kf_cb_event")
         # 微信客服：回调只带一个 10 分钟有效的 Token，真实消息要用它去 sync_msg 拉
         job = KfSyncJob(
             token=xml.findtext("Token") or "",
@@ -134,12 +150,22 @@ async def receive_bot(
 
     与应用回调是两套凭据、两条路由，但共用同一条判断与话术管道。
     """
+    # 管道计数器：把「企微到底有没有推给我们」这件事变成一个看得见的数。
+    # 2026-08-11 真机——客户连发多条消息一条回复也没有，而服务器一切正常
+    # （线程活着、队列空、通道配置有效）。当时分不清「没推给我们」
+    # 「推了但签名验不过」「验过了但拉不到消息」，三者症状完全一样。
+    store = request.app.state.store
+    store.bump("kf_cb_total")
     body = await request.body()
     try:
         encrypt = ET.fromstring(body).findtext("Encrypt", "")
     except ET.ParseError:
+        store.bump("kf_cb_unparsable")
         return Response(status_code=400)
     if not crypto.verify(msg_signature, timestamp, nonce, encrypt):
+        # 签名对不上 = Token/EncodingAESKey 跟企微后台填的不一致。
+        # 这条要是在涨，就别去查判断层了，去核对那两个值。
+        store.bump("kf_cb_bad_signature")
         return Response(status_code=403)
     try:
         xml = ET.fromstring(crypto.decrypt(encrypt))

@@ -83,6 +83,14 @@ def create_app() -> FastAPI:
             # 没有这两个数，远程排障只能靠猜。
             "ops_done": store.count_commands_done(),
             "ops_error": store.get_note("ops_error"),
+            # 管道分段计数：客户的消息在哪一段没了，一眼可判。
+            # kf_cb_total=0 → 企微根本没推给我们（回调地址/可信 IP）；
+            # bad_signature 在涨 → Token/AESKey 跟后台不一致；
+            # cb_event 有而 synced=0 → 游标卡住或 Token 过期。
+            "kf_trace": store.counters(),
+            "kf_cb_last": store.get_note("kf_cb_last"),
+            "kf_synced_last": store.get_note("kf_synced_last"),
+            "kf_unknown_event": store.get_note("kf_unknown_event"),
         }
 
     return app
