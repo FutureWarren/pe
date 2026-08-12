@@ -102,7 +102,8 @@ def test_a_failed_welcome_is_not_recorded_as_a_greeting(tmp_path):
     from responder.worker import Worker
 
     kf = Kf(can_send=False)
-    store, p = _pipe(tmp_path, kf)
+    # 进线问候默认已关（企微后台自带欢迎语），这条测的是机制本身
+    store, p = _pipe(tmp_path, kf, kf_welcome_on_enter=True)
     store.upsert_group(_group())
     w = Worker(p, store, kf_client=kf)
 

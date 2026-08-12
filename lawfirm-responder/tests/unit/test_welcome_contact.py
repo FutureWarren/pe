@@ -91,11 +91,25 @@ def run(worker, token="tk"):
 
 
 # ---------------------------------------------------------------- 进线问候
-def test_enter_event_sends_welcome(tmp_path):
-    """客户扫码进入会话 → 不等他开口，先自报家门并请他说明情况。"""
-    store, kf, worker = make_env(tmp_path, [
+def test_our_opener_is_off_by_default(tmp_path):
+    """**默认不发我们自己的开场白**（律所方 2026-08-12）。
+
+    企微后台「微信客服 → 欢迎语」已经配了一条，客户进会话时企微自己会发。
+    我们再发一条，客户连着看到两句招呼——那恰恰是「一看就知道是机器人」
+    最典型的样子。一个窗口只该有一个人在说话。
+    """
+    _, kf, worker = make_env(tmp_path, [
         {"msg_list": [kf_event("e1")], "next_cursor": "c1", "has_more": 0},
     ])
+    run(worker)
+    assert kf.sent == []
+
+
+def test_enter_event_sends_welcome(tmp_path):
+    """机制保留：后台没配欢迎语的部署方式，打开开关即可用。"""
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_event("e1")], "next_cursor": "c1", "has_more": 0},
+    ], kf_welcome_on_enter=True)
     run(worker)
 
     assert len(kf.sent) == 1, "进线必须有且只有一句问候"
@@ -111,7 +125,7 @@ def test_welcome_is_idempotent(tmp_path):
     """企微重复推送同一个进线事件 → 只问候一次（msg_id 入库去重）。"""
     _, kf, worker = make_env(tmp_path, [
         {"msg_list": [kf_event("e1"), kf_event("e1")], "next_cursor": "c1", "has_more": 0},
-    ])
+    ], kf_welcome_on_enter=True)
     run(worker)
     assert len(kf.sent) == 1
 
@@ -122,7 +136,7 @@ def test_welcome_skipped_for_returning_customer(tmp_path):
         {"msg_list": [kf_msg("m1", "拖欠工资多久可以申请劳动仲裁？")],
          "next_cursor": "c1", "has_more": 0},
         {"msg_list": [kf_event("e9")], "next_cursor": "c2", "has_more": 0},
-    ])
+    ], kf_welcome_on_enter=True)
     run(worker)
     before = len(kf.sent)
     run(worker, token="tk2")
@@ -142,7 +156,7 @@ def test_welcome_respects_ai_switch(tmp_path):
     """控制台把该会话的 AI 关了 → 进线也不出声。"""
     store, kf, worker = make_env(tmp_path, [
         {"msg_list": [kf_event("e1")], "next_cursor": "c1", "has_more": 0},
-    ])
+    ], kf_welcome_on_enter=True)
     store.upsert_group(GroupProfile(
         group_id=GID, ai_enabled=False,
         kf_open_kfid=OPEN_KFID, kf_external_userid=EXT_USER,
@@ -161,7 +175,7 @@ def test_greeting_never_repeated_in_one_conversation(tmp_path):
         {"msg_list": [kf_event("e1")], "next_cursor": "c1", "has_more": 0},
         {"msg_list": [kf_msg("m1", "公司拖欠我三个月工资，还把我辞退了")],
          "next_cursor": "c2", "has_more": 0},
-    ])
+    ], kf_welcome_on_enter=True)
     run(worker)
     run(worker, token="tk2")
 
@@ -448,7 +462,7 @@ def test_winback_for_silent_visitor_gives_an_example(tmp_path):
     """进来被问候后一句没说的人，卡在「不知道怎么开口」——要再给一次例句。"""
     store, kf, worker = make_env(tmp_path, [
         {"msg_list": [kf_event("e1")], "next_cursor": "c1", "has_more": 0},
-    ])
+    ], kf_welcome_on_enter=True)
     run(worker)
     _idle(store, GID, 3600)
     worker.tick()
@@ -600,7 +614,7 @@ def test_returning_visitor_gets_short_regreeting_on_enter(tmp_path):
         {"msg_list": [kf_msg("m1", "拖欠工资多久可以申请劳动仲裁？")],
          "next_cursor": "c1", "has_more": 0},
         {"msg_list": [kf_event("e9")], "next_cursor": "c2", "has_more": 0},
-    ])
+    ], kf_welcome_on_enter=True)
     run(worker)
     n = len(kf.sent)
     # 把上一轮对话推到很久以前 → 这次点进来算「回访」
