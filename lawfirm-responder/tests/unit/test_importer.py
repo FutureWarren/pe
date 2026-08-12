@@ -123,7 +123,7 @@ def test_detect_columns_on_real_headers():
 
 
 def test_case_type_never_matches_traffic_or_product_type():
-    """裸「类型」会误吃流量类型/商品类型，把「自然流量」写成案由——专长派单就全乱了。"""
+    """裸「类型」会误吃流量类型/商品类型，把「自然流量」写成案由——交接单就全乱了。"""
     assert "case_type" not in importer.detect_columns(HEADERS)
 
 
@@ -216,8 +216,8 @@ def test_invalid_stage_marked_invalid(tmp_path):
 def test_existing_owner_is_preserved(tmp_path):
     """导出表里的跟进员工能对上名册就派给他本人，不打乱已有对接关系。"""
     store, _, _, settings = make(tmp_path)
-    for uid, name, spec in [("chen", "陈丽娟", "婚姻家事"), ("wei", "魏", "劳动仲裁")]:
-        store.upsert_lawyer(uid, {"name": name, "specialties": spec,
+    for uid, name in [("chen", "陈丽娟"), ("wei", "魏")]:
+        store.upsert_lawyer(uid, {"name": name,
                                   "role": "lawyer", "on_duty": True, "active": True})
     importer.import_leads(store, SHEET, settings=settings)
     # 「陈丽娟1」应当对上「陈丽娟」
@@ -270,9 +270,10 @@ def test_notify_flag_pushes(tmp_path):
     assert snd.direct and snd.direct[0][0] == "reception"
 
 
-def test_import_assigns_by_specialty_when_no_owner_match(tmp_path):
+def test_import_assigns_to_roster_when_no_owner_match(tmp_path):
+    """导出表里的跟进员工在名册里对不上人时，照常走派单（在办最少者接）。"""
     store, _, _, settings = make(tmp_path)
-    store.upsert_lawyer("zhang", {"name": "张", "specialties": "婚姻家事",
+    store.upsert_lawyer("zhang", {"name": "张",
                                   "role": "lawyer", "on_duty": True, "active": True})
     importer.import_leads(store, SHEET, settings=settings)
     assert store.get_lead("dy:13800138002")["assigned_userid"] == "zhang"

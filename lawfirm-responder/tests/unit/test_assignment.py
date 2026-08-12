@@ -1,4 +1,8 @@
-"""派单引擎：粘性 → 专长匹配 → 负载均衡 → 名册为空回落旧链路。"""
+"""派单引擎：粘性 → 负载均衡（在办最少/轮转）→ 名册为空回落旧链路。
+
+**没有专长这一层**（2026-08-12 律所方：「客服不分什么专长不专长」）——
+下面几条用例刻意给不同案件类型，验证的正是「案件类型完全不影响派给谁」。
+"""
 
 from responder import lead
 from responder.config import Settings
@@ -15,9 +19,9 @@ def make(tmp_path):
     return store, settings
 
 
-def add_lawyer(store, userid, name="", specialties="", on_duty=True, active=True):
+def add_lawyer(store, userid, name="", on_duty=True, active=True):
     store.upsert_lawyer(userid, {
-        "name": name or userid, "specialties": specialties,
+        "name": name or userid,
         "role": "lawyer", "on_duty": on_duty, "active": active,
     })
 
@@ -46,10 +50,9 @@ def test_empty_roster_falls_back_to_legacy_target(tmp_path):
     assert store.get_lead("g1")["assigned_userid"] == ""
 
 
-def test_specialty_match_beats_load(tmp_path):
+def test_assigns_to_roster_and_syncs_group_owner(tmp_path):
     store, settings = make(tmp_path)
-    add_lawyer(store, "wei", "魏", "劳动仲裁、工伤")
-    add_lawyer(store, "zhang", "张", "婚姻家事")
+    add_lawyer(store, "wei", "魏")
     group = GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g1", case_type="劳动仲裁")
     snd = Snd()
     lead.dispatch(store, group, _hist(), snd, settings=settings)
@@ -63,8 +66,8 @@ def test_specialty_match_beats_load(tmp_path):
 
 def test_load_balance_picks_least_busy(tmp_path):
     store, settings = make(tmp_path)
-    add_lawyer(store, "a", specialties="劳动仲裁")
-    add_lawyer(store, "b", specialties="劳动仲裁")
+    add_lawyer(store, "a")
+    add_lawyer(store, "b")
     store.upsert_lead("busy1", {"intent": "hot"})
     store.assign_lead("busy1", "a")
     group = GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g2", case_type="劳动仲裁")
@@ -72,19 +75,35 @@ def test_load_balance_picks_least_busy(tmp_path):
     assert store.get_lead("g2")["assigned_userid"] == "b"
 
 
-def test_no_specialty_match_falls_back_to_all_on_duty(tmp_path):
-    """宁可专长不对口，不能没人管。"""
+def test_case_type_does_not_steer_assignment(tmp_path):
+    """取消专长后的核心约束：案件类型不参与挑人，两条线索按轮转分给两个人。
+
+    以前这里靠「案件类型 ⊇ 专长」定人，填错专长就静默派错人。现在只剩
+    「谁在办的最少谁先接、平局谁最久没接谁先接」，案由再不同也一样轮流。
+    """
     store, settings = make(tmp_path)
-    add_lawyer(store, "a", specialties="婚姻家事")
-    group = GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g3", case_type="刑事辩护")
-    lead.dispatch(store, group, _hist(), Snd(), settings=settings)
-    assert store.get_lead("g3")["assigned_userid"] == "a"
+    add_lawyer(store, "a")
+    add_lawyer(store, "b")
+    # 两个不同的手机号：同号会走「跨渠道认人」沿用同一位律师，那是另一条规则
+    lead.dispatch(
+        store, GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g3a",
+                            case_type="劳动仲裁"),
+        _hist("我想委托你们，电话17721275495"), Snd(), settings=settings,
+    )
+    lead.dispatch(
+        store, GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g3b",
+                            case_type="刑事辩护"),
+        _hist("我想委托你们，电话13900001234"), Snd(), settings=settings,
+    )
+    got = {store.get_lead("g3a")["assigned_userid"],
+           store.get_lead("g3b")["assigned_userid"]}
+    assert got == {"a", "b"}
 
 
 def test_off_duty_lawyer_not_assigned(tmp_path):
     store, settings = make(tmp_path)
-    add_lawyer(store, "resting", specialties="劳动仲裁", on_duty=False)
-    add_lawyer(store, "working", specialties="婚姻家事")
+    add_lawyer(store, "resting", on_duty=False)
+    add_lawyer(store, "working")
     group = GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g4", case_type="劳动仲裁")
     lead.dispatch(store, group, _hist(), Snd(), settings=settings)
     assert store.get_lead("g4")["assigned_userid"] == "working"
@@ -103,8 +122,8 @@ def test_all_off_duty_falls_back_to_legacy(tmp_path):
 def test_sticky_assignment_survives_new_messages(tmp_path):
     """已派过的客户再进线不换人——背景不能作废。"""
     store, settings = make(tmp_path)
-    add_lawyer(store, "a", specialties="劳动仲裁")
-    add_lawyer(store, "b", specialties="劳动仲裁")
+    add_lawyer(store, "a")
+    add_lawyer(store, "b")
     group = GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g6", case_type="劳动仲裁")
     lead.dispatch(store, group, _hist(), Snd(), settings=settings)
     first = store.get_lead("g6")["assigned_userid"]
@@ -122,12 +141,12 @@ def test_sticky_assignment_survives_new_messages(tmp_path):
 def test_inactive_assignee_triggers_reroute(tmp_path):
     """离职律师手上的新动态要改派，不能推给一个不存在的人。"""
     store, settings = make(tmp_path)
-    add_lawyer(store, "gone", specialties="劳动仲裁")
+    add_lawyer(store, "gone")
     group = GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g7", case_type="劳动仲裁")
     lead.dispatch(store, group, _hist(), Snd(), settings=settings)
     assert store.get_lead("g7")["assigned_userid"] == "gone"
-    add_lawyer(store, "gone", specialties="劳动仲裁", active=False)
-    add_lawyer(store, "next", specialties="劳动仲裁")
+    add_lawyer(store, "gone", active=False)
+    add_lawyer(store, "next")
     snd = Snd()
     lead.dispatch(
         store, store.get_group("g7"),
@@ -139,7 +158,7 @@ def test_inactive_assignee_triggers_reroute(tmp_path):
 def test_notification_carries_priority_and_factors(tmp_path):
     """交接单首行是层级+时限，随后是评分依据——可解释的排序才会被执行。"""
     store, settings = make(tmp_path)
-    add_lawyer(store, "wei", "魏", "劳动仲裁")
+    add_lawyer(store, "wei", "魏")
     group = GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g8", case_type="劳动仲裁")
     snd = Snd()
     lead.dispatch(store, group, _hist("我想委托你们，电话17721275495"), snd,

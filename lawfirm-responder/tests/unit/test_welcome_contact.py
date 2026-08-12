@@ -486,7 +486,7 @@ def test_winback_can_be_disabled(tmp_path):
 def test_intake_never_names_a_specific_lawyer(tmp_path):
     """一对一进线的对话里不出现具体律师姓名。
 
-    业务决策 2026-08：谁接这单由分案引擎按专长与负载算出来，
+    业务决策 2026-08：谁接这单由分案引擎按在办量算出来，
     客服会话建档时的 lawyer_name 只是配置默认值。说「魏律师会给您回电话」
     而实际派给了别人，客户等的就是个不会来的电话。
     """

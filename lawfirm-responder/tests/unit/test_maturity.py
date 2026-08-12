@@ -218,17 +218,19 @@ def test_lawyer_cannot_note_others_lead(tmp_path):
 
 # ---------------------------------------------------------------- 批量分派
 def test_bulk_assign_unrouted(tmp_path):
-    """先导客资后建名册的典型场景：一键把存量线索按专长分下去。"""
+    """先导客资后建名册的典型场景：一键把存量线索按在办量分下去。"""
     store, snd, _, pipeline, _ = make(tmp_path)
     seed_leads(store)
-    for uid, name, spec in [("wei", "魏来", "劳动仲裁"), ("zhang", "张", "婚姻家事")]:
-        store.upsert_lawyer(uid, {"name": name, "specialties": spec,
+    for uid, name in [("wei", "魏来"), ("zhang", "张")]:
+        store.upsert_lawyer(uid, {"name": name,
                                   "role": "lawyer", "on_duty": True, "active": True})
     client = client_for(store, pipeline, snd)
     r = client.post("/console/leads/assign-unrouted", headers=H()).json()
     assert r["assigned"] == 3
-    assert store.get_lead("dy:13800000001")["assigned_userid"] == "wei"
-    assert store.get_lead("dy:13800000002")["assigned_userid"] == "zhang"
+    # 3 条分给 2 个人：不看案由，只按在办最少轮着来，谁也不会一条不接
+    got = [store.get_lead(g)["assigned_userid"]
+           for g in ("dy:13800000001", "dy:13800000002", "kf:a:x1")]
+    assert set(got) == {"wei", "zhang"}, "3 条不看案由，按在办最少轮着分给 2 个人"
     assert snd.direct == [], "批量分派不推送企微消息"
     # 幂等：再跑一次没有可分派的
     assert client.post("/console/leads/assign-unrouted", headers=H()).json()["assigned"] == 0
@@ -284,7 +286,7 @@ def test_signed_group_keeps_its_lawyer(tmp_path):
     """已成交客户的服务群有固定承办律师，自动派单一律不碰——
     改派会让 AI 在群里点名一个客户从没见过的人。"""
     store, snd, _, pipeline, _ = make(tmp_path)
-    store.upsert_lawyer("other", {"name": "另一位", "specialties": "劳动仲裁",
+    store.upsert_lawyer("other", {"name": "另一位",
                                   "role": "lawyer", "on_duty": True, "active": True})
     store.upsert_group(GroupProfile(
         group_id="signed1", client_status=ClientStatus.SIGNED,

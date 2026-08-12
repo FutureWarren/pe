@@ -621,7 +621,7 @@ body:not([data-role=admin]) .admin-only { display: none !important; }
   <section id="tab-team" hidden>
     <div class="page-title">团队</div>
     <div class="meta" style="margin-bottom:12px">
-      名册里有在班律师时，新线索会按「专长匹配 + 在办最少」自动派单；名册为空则一切照旧。
+      名册里有在班律师时，新线索按「在办最少」自动派单；名册为空则一切照旧。
     </div>
     <div id="teamList"></div>
     <button class="btn-outline" style="width:100%" onclick="editLawyer(null)">
@@ -1038,12 +1038,14 @@ function openStatusPanel() {
               : `正常（${Math.round(h.worker_idle_seconds || 0)} 秒前刚跑过一轮）`)
       }</div></div>
       ${h.kf ? `<div class="srow admin-only"><div class="k">会话转接</div>
-        <div class="v">把客户直接交给律师在原窗口接着聊，不用打电话</div>
-        <button class="btn-outline" style="margin-top:8px" onclick="checkHandoff()">
-          ${ico("users")}检查转接是否就绪
+        <div class="v">把客户直接交给律师在原窗口接着聊，不用打电话。<br>
+          要维护的名单只有两份：<b>这里的律师名册</b> 和 <b>企微后台「升级服务」的范围</b>，
+          两份保持一致就行。</div>
+        <button class="btn-primary" style="margin-top:8px" onclick="checkHandoff()">
+          ${ico("users")}检查两份名单是否一致
         </button>
         <button class="btn-outline" style="margin-top:8px" onclick="addServicers()">
-          ${ico("users")}把名册律师加为接待人
+          ${ico("refresh")}立即同步接待人
         </button>
         <div id="hoResult" class="meta" style="margin-top:8px"></div>
       </div>` : ""}
@@ -1142,8 +1144,12 @@ async function doSwitchMode(mode) {
   } catch (e) { toast("操作失败，请重试", false); }
 }
 
-/* 转接就绪自检。最容易静默失败的是「律师不是客服账号的接待人」——
-   那会让转接在 P0 线索来的那一刻才失败，所以要能提前一键查出来。 */
+/* 转接就绪自检。
+   律所侧要维护的名单**只有两份**，这里就按两份来讲（2026-08-12 律所方要求）：
+     名单一：律师名册 —— 就在「团队」页，人员进出只改这里；
+     名单二：企微后台「微信客服 → 升级服务」的成员范围 —— 只能在企微后台点。
+   企微自己还有第三份「接待人」，但它的内容永远等于名单一，已由程序自动同步，
+   所以不作为一份要人维护的名单呈现——只在同步没跟上时报出来。 */
 async function checkHandoff() {
   const el = document.getElementById("hoResult");
   el.textContent = "检查中……";
@@ -1151,63 +1157,70 @@ async function checkHandoff() {
   try { r = await api("/kf/handoff-probe"); }
   catch (e) { el.textContent = "检查失败，请重试"; return; }
   if (r.error) { el.innerHTML = `<b style="color:var(--danger)">${esc(r.error)}</b>`; return; }
-  const lines = [
-    `${r.ready ? "✅" : "⚠️"} ${esc(r.hint)}`,
-    `律师名册 ${r.roster_size} 位`,
-    /* 把触发条件原样摆出来，而不是一个「P0」——那三个字什么也没说明，
-       所主任看到它只会再问一次「那 P0 是什么」。 */
-    `客户出现下面任一情况就转给律师：${(r.triggers || []).map(esc).join(" · ")}`,
-  ];
+  const nm = p => esc(p.name || p.userid);
+  const lines = [`${r.ready ? "✅" : "⚠️"} ${esc(r.hint)}`];
   if (!r.enabled) lines.push("⚠️ 转接开关是关的（RESPONDER_HANDOFF_ENABLED）");
   if (r.mode !== "live") lines.push(`⚠️ 当前是${esc(r.mode)}模式，不会真的转接`);
-  for (const a of r.accounts) {
-    if (a.in_use === false) {
-      lines.push(`「${esc(a.name || a.open_kfid)}」—— 没有客户从这里进来，不归我们管，忽略`);
-      continue;
-    }
-    lines.push(`「${esc(a.name || a.open_kfid)}」接待人 ${a.servicers.length} 位`);
-    if (a.missing.length) {
-      lines.push(`　❌ 不是接待人：${a.missing.map(m => esc(m.name || m.userid)).join("、")}`);
-    }
+
+  /* ---- 名单一：律师名册（我们这边，您维护） */
+  lines.push(`<br><b>名单一 · 律师名册（在「团队」页改）</b>`);
+  lines.push(r.roster_size
+    ? `　在职 ${r.roster_size} 位：${(r.roster || []).map(nm).join("、")}`
+    : `　❌ 一个人都没有 —— 转接没有对象，先去「团队」页加人`);
+
+  /* ---- 名单二：企微后台（律所自己在企微管理后台点） */
+  const up = r.upgrade || {};
+  lines.push(`<br><b>名单二 · 企微后台「微信客服 → 升级服务」</b>`);
+  if (up.error) {
+    lines.push(`　⚠️ 读不到：${esc(up.hint || up.error)}`);
+  } else if (up.departments) {
+    lines.push(`　已配 ${up.departments} 个部门`
+      + (up.userids.length ? ` + ${up.userids.length} 位成员` : ""));
+    lines.push(`　<span class="muted">配的是部门（邀约谈案部这种），里面具体有谁企微不让我读——`
+      + `请确认<b>名单一里的每个人都在那个部门里</b>，否则他的名片推不给客户</span>`);
+  } else if (!up.userids || !up.userids.length) {
+    lines.push(`　❌ 一个人都没配 —— 律师名片推不给客户，去企微后台把名单一的人加进去`);
+  } else {
+    lines.push(`　已配 ${up.userids.length} 位`);
+    lines.push((up.missing || []).length
+      ? `　❌ 名单一有人不在这里：${up.missing.map(nm).join("、")}　—— 他们的名片推不给客户`
+      : `　✅ 与名单一一致`);
+  }
+
+  /* ---- 企微接待人：程序自动同步，只在没跟上时才说话 */
+  const behind = (r.accounts || []).filter(a => a.in_use !== false && a.missing.length);
+  lines.push(`<br><span class="muted">企微「接待人」名单由程序自动跟随名单一，不用您管`
+    + (r.servicer_sync ? `（${esc(r.servicer_sync)}）` : "") + `</span>`);
+  for (const a of behind) {
+    lines.push(`　❌ 「${esc(a.name || a.open_kfid)}」还差：${a.missing.map(nm).join("、")}`
+      + `　—— 点下面的「立即同步接待人」`);
     if (a.hint) lines.push(`　<b style="color:var(--gold,#C6A15B)">👉 ${esc(a.hint)}</b>`);
   }
-  /* 升级服务的专员名单：**第三份名单**，跟律师名册、客服接待人都不是一回事。
-     三份都得有他，缺一份就是一种不同的静默失败。 */
-  const up = r.upgrade || {};
-  if (up.error) {
-    lines.push(`⚠️ 升级服务配置读不到：${esc(up.hint || up.error)}`);
-  } else if (up.departments) {
-    lines.push(`升级服务：已配 ${up.userids.length} 位专员 + ${up.departments} 个部门`);
-    lines.push(`　<span class="muted">配的是部门，里面有谁我这边看不到——`
-      + `名册里的律师都要在那个部门里，否则名片推不出去（95021）</span>`);
-  } else if (!up.userids || !up.userids.length) {
-    lines.push(`⚠️ 升级服务一个专员都没配 —— 律师名片推不给客户`);
-  } else {
-    lines.push(`升级服务：已配 ${up.userids.length} 位专员`);
-    if ((up.missing || []).length) {
-      lines.push(`　❌ 不在专员名单：${up.missing.map(m => esc(m.name || m.userid)).join("、")}`
-        + `　—— 他们的名片推不给客户`);
-    }
-  }
+  if (!r.servicer_auto) lines.push(`　⚠️ 自动同步是关的（RESPONDER_KF_SERVICER_SYNC_SECONDS=0）`);
+
+  /* ---- 转接触发条件：把条件原样摆出来，而不是一个「P0」——
+         那三个字什么也没说明，所主任看到它只会再问一次「那 P0 是什么」 */
+  lines.push(`<br><b>什么时候转给律师</b>`);
+  lines.push(`　客户出现下面任一情况：${(r.triggers || []).map(esc).join(" · ")}`);
   const sp = r.state_probe || {};
-  if (sp.ok) lines.push(`✅ 转接接口已连通（当前会话状态 ${sp.service_state}）`);
-  else if (sp.error) lines.push(`❌ 接口探测失败：${esc(sp.error)}`);
-  else if (sp.reason) lines.push(`… ${esc(sp.reason)}`);
+  if (sp.ok) lines.push(`　✅ 转接接口已连通（当前会话状态 ${sp.service_state}）`);
+  else if (sp.error) lines.push(`　❌ 接口探测失败：${esc(sp.error)}`);
+  else if (sp.reason) lines.push(`　… ${esc(sp.reason)}`);
   el.innerHTML = lines.join("<br>");
 }
 
-/* 一键把「团队」页名册里的律师加为客服账号接待人。
-   律师不是接待人，转接就会被企微当场拒掉——而这一步在微信客服后台不好点：
-   那个账号由企微应用托管，后台里点「开始使用」反而会夺走管理权、打断消息推送。
-   所以由服务器直接调接口加，加完立刻回读列表确认。 */
+/* 立刻把名册同步成客服账号的接待人。**平时不用点**——后台每次名册变动都会自动跑，
+   这个按钮只是「我不想等」。留着它是因为出问题时人需要一个能当场按、当场看结果的东西。
+   为什么不能在企微后台点：那个账号由企微应用托管，后台里点「开始使用」反而会夺走
+   管理权、打断消息推送。所以由服务器直接调接口加，加完立刻回读列表确认。 */
 async function addServicers() {
   /* 「状态」面板和「团队」页都能调它，所以结果面板取当前存在的那一个 */
   const el = document.getElementById("hoResult") || document.getElementById("teamSvHint");
-  el.textContent = "正在添加……";
+  el.textContent = "正在同步……";
   let r;
   try { r = await api("/kf/servicers/add", { method: "POST" }); }
-  catch (e) { el.innerHTML = `<b style="color:var(--danger)">${esc(e.detail || "添加失败，请重试")}</b>`; return; }
-  const lines = [r.ok ? "✅ 名册律师已全部是接待人" : "⚠️ 有人没加上"];
+  catch (e) { el.innerHTML = `<b style="color:var(--danger)">${esc(e.detail || "同步失败，请重试")}</b>`; return; }
+  const lines = [r.ok ? "✅ 企微那边已经跟名册一致了" : "⚠️ 有人没同步上"];
   if ((r.skipped || []).length) {
     lines.push(`<span class="muted">没动这些账号（没有客户从那里进来）：${r.skipped.map(esc).join("、")}</span>`);
   }
@@ -1780,7 +1793,7 @@ async function openAssign(leadId) {
   if (!usable.length) {
     openSheet(`<h2>指派律师</h2>
       <p class="meta" style="margin-top:10px">名册还是空的。先在「团队」里添加律师，
-      之后新线索会按专长与在办量自动派单，这里用于手动调整。</p>
+      之后新线索按在办量自动派单，这里用于手动调整。</p>
       <button class="btn-primary xl" style="margin-top:14px" onclick="forceCloseSheet();setTab('team')">去添加律师</button>`);
     return;
   }
@@ -1817,7 +1830,7 @@ async function loadTeam() {
   loadedOnce.team = true;
   if (!teamCache.length) {
     el.innerHTML = emptyState("briefcase", "还没有律师账号",
-      "添加律师后：新线索按专长自动派单；每位律师用自己的登录链接进工作台，只看派给自己的客户。");
+      "添加律师后：新线索按在办量轮流派单；每位律师用自己的登录链接进工作台，只看派给自己的客户。");
     return;
   }
   el.innerHTML = teamCache.map(l => `
@@ -1833,9 +1846,6 @@ async function loadTeam() {
           <span></span>
         </label>
       </div>
-      <div class="meta" style="margin-top:4px">
-        ${l.specialties ? "专长：" + esc(l.specialties) : "未填专长（将参与所有类型派单）"}
-      </div>
       <div class="meta" style="margin-top:2px">在办 ${l.open} 单${l.p0 ? ` · 其中 P0 待联系 ${l.p0} 单` : ""}
         ${l.has_token ? "" : " · 尚未开通登录"}</div>
       <div class="meta" style="margin-top:2px" data-sv="${esc(l.userid)}"></div>
@@ -1849,12 +1859,15 @@ async function loadTeam() {
   paintServicerBadges();
 }
 
-/* 「他是不是微信客服的接待人」——转接的硬前置，画在人名底下。
+/* 「这个人在企微那边配齐了没有」——转接的硬前置，画在他本人那张卡上。
    律所方原话：「EZID 都配对了，也收得到每日 update，就是收不到转接」。
-   这不矛盾：**那是两份互不相干的名单**——日报走自建应用的可见范围，
-   转接走客服账号的接待人列表，企微里两者完全不通消息。
-   所以这条状态必须画在他本人那张卡上；藏在一个要点右上角才能打开的
-   面板里，等于没有。 */
+   这不矛盾：**那是几份互不相干的名单**——日报走自建应用的可见范围，
+   转接走客服账号的接待人列表，推名片走企微后台的升级服务范围，
+   企微里它们完全不通消息。所以这条状态必须画在他本人那张卡上；
+   藏在一个要点右上角才能打开的面板里，等于没有。
+
+   接待人那份由程序自动同步（见 responder/kfroster.py），所以这里对它的措辞是
+   「同步中」而不是「你去加」；真正要人动手的只有企微后台那一份。 */
 async function paintServicerBadges() {
   const slots = document.querySelectorAll("[data-sv]");
   if (!slots.length) return;
@@ -1873,34 +1886,53 @@ async function paintServicerBadges() {
     name: a.name || a.open_kfid, set: new Set(a.servicers || []),
   }));
   if (!accs.length) return;   // 企业名下的其它客服账号不是我们这条链路，不评价
+  /* 企微后台「升级服务」那份名单：只有配的是具体成员时才能逐人核对。
+     配的是部门（律所现在配的是「邀约谈案部」）时，里面有谁企微不让我们读——
+     **读不到就一个字都不下结论**，否则会把整份名册误报成没配好。 */
+  const up = r.upgrade || {};
+  const upSet = (!up.error && !up.departments && (up.userids || []).length)
+    ? new Set(up.userids) : null;
   let needAdd = false;
   for (const el of slots) {
     const uid = el.getAttribute("data-sv");
     const l = (teamCache || []).find(x => x.userid === uid) || {};
     const bad = accs.filter(a => !a.set.has(uid)).map(a => a.name);
-    if (!bad.length) { el.innerHTML = `<span style="color:var(--ok)">✓ 可接收客户转接</span>`; continue; }
-    const where = accs.length > 1 ? `在「${esc(bad.join("」「"))}」` : "";
-    if (l.active) {
-      needAdd = true;
-      el.innerHTML = `<b style="color:var(--danger)">⚠️ ${where}还不是接待人 —— 从那个入口进来的客户转接不到他</b>`;
-    } else if (l.open) {
+    const noCard = upSet && !upSet.has(uid);   // 不在企微后台那份名单里
+    if (!l.active) {
       /* 停用 + 名下有单 = 最安静的那种坏：单子看着有人管，实际转不过去 */
-      el.innerHTML = `<b style="color:var(--warn,#E0A458)">⚠️ 已停用，名下 ${l.open} 单转接不过去，请先改派</b>`;
-    } else {
-      el.innerHTML = `<span class="muted">已停用，不参与转接</span>`;
+      el.innerHTML = l.open
+        ? `<b style="color:var(--warn,#E0A458)">⚠️ 已停用，名下 ${l.open} 单转接不过去，请先改派</b>`
+        : `<span class="muted">已停用，不参与转接</span>`;
+      continue;
     }
+    if (bad.length) needAdd = true;
+    const bits = [];
+    if (bad.length) {
+      /* 接待人是自动同步的，所以这是「还没轮到」而不是「你漏配了」 */
+      const where = accs.length > 1 ? `「${esc(bad.join("」「"))}」的` : "";
+      bits.push(`<span style="color:var(--warn,#E0A458)">⏳ ${where}接待人还在同步（约一分钟）</span>`);
+    }
+    if (noCard) {
+      bits.push(`<b style="color:var(--danger)">⚠️ 不在企微后台「升级服务」名单里 —— 他的名片推不给客户</b>`);
+    }
+    el.innerHTML = bits.length ? bits.join("<br>")
+      : `<span style="color:var(--ok)">✓ 可接收客户转接</span>`;
   }
   const hint = document.getElementById("teamSvHint");
   if (!hint) return;
-  /* 账号没托管给应用时，按钮点了也只会再拿一次 48007——先把原因摆出来 */
+  /* 账号没托管给应用时，自动同步也一样会拿 48007——先把原因摆出来，
+     否则「⏳ 同步中」会一直转下去，而没人知道它其实永远不会成功 */
   const blocked = r.accounts.filter(a => a.hint).map(a => `「${esc(a.name || a.open_kfid)}」${esc(a.hint)}`);
   hint.innerHTML = (blocked.length ? `<b style="color:var(--gold,#C6A15B)">👉 ${blocked.join("<br>👉 ")}</b><br>` : "")
-    + (needAdd ? `<button class="btn-outline" style="width:100%;margin-top:6px" onclick="addServicers()">一键把在职律师加为接待人</button>` : "");
+    + `<span class="muted">这份名册就是客服名单。企微那边的「接待人」由系统自动跟着改，
+       您只需要另外确认一件事：企微后台「微信客服 → 升级服务」里配的部门/成员，
+       要把这里的人都包含进去。</span>`
+    + (needAdd ? `<button class="btn-outline" style="width:100%;margin-top:6px" onclick="addServicers()">不想等，现在就同步</button>` : "");
 }
 
 function editLawyer(userid) {
   const l = teamCache.find(x => x.userid === userid) ||
-    { userid: "", name: "", specialties: "", role: "lawyer", on_duty: true, active: true };
+    { userid: "", name: "", role: "lawyer", on_duty: true, active: true };
   const isNew = !userid;
   openSheet(`<h2>${isNew ? "添加律师" : "编辑律师"}</h2>
     <div class="field"><label>企微账号（userid）</label>
@@ -1909,10 +1941,6 @@ function editLawyer(userid) {
       ${isNew ? `<div class="help">在企业微信管理后台 → 通讯录 → 成员详情里能看到</div>` : ""}
     </div>
     <div class="field"><label>姓名</label><input id="lw_name" value="${esc(l.name)}" placeholder="张三"></div>
-    <div class="field"><label>专长领域（顿号分隔）</label>
-      <input id="lw_spec" value="${esc(l.specialties)}" placeholder="劳动仲裁、工伤、合同纠纷">
-      <div class="help">新线索按案件类型匹配专长派单；留空则参与所有类型的派单</div>
-    </div>
     <div class="row" style="margin:8px 0">
       <label style="display:flex;align-items:center;gap:8px;font-size:14px">
         <input type="checkbox" id="lw_admin" ${l.role === "admin" ? "checked" : ""}>管理权限（看全所数据）
@@ -1999,7 +2027,6 @@ async function saveLawyer(isNew) {
   if (!userid) { toast("请填写企微账号", false); return; }
   const body = {
     name: document.getElementById("lw_name").value.trim(),
-    specialties: document.getElementById("lw_spec").value.trim(),
     role: document.getElementById("lw_admin").checked ? "admin" : "lawyer",
     on_duty: true,
     active: isNew ? true : document.getElementById("lw_active").checked,
@@ -2023,7 +2050,7 @@ async function toggleDuty(userid, input) {
     await api(`/lawyers/${encodeURIComponent(userid)}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: l.name, specialties: l.specialties, role: l.role,
+        name: l.name, role: l.role,
         on_duty: input.checked, active: !!l.active,
       }),
     });
@@ -2043,8 +2070,8 @@ async function refreshBulkAssign() {
 }
 function askBulkAssign() {
   openSheet(`<h2>自动分派未指派线索？</h2>
-    <p style="font-size:15px;margin:12px 0 8px">按「专长匹配 + 在办最少」把所有未指派的
-    待跟进/已联系线索分给在班律师。</p>
+    <p style="font-size:15px;margin:12px 0 8px">按「谁在办的最少谁先接」把所有未指派的
+    待跟进/已联系线索分给在班客服。</p>
     <p class="meta" style="margin-bottom:16px">不会给律师发企微消息——分派结果直接出现在
     各自的工作台里，避免一次性弹几百条通知。</p>
     <button class="btn-primary xl" onclick="doBulkAssign()">开始分派</button>

@@ -230,7 +230,6 @@ class Runner:
             return "缺 userid，没加"
         self.store.upsert_lawyer(userid, {
             "name": str(item.get("name", "") or userid),
-            "specialties": str(item.get("specialties", "")),
             "role": str(item.get("role", "lawyer")),
             "on_duty": True,
             "active": True,

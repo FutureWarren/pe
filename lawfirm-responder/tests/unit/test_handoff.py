@@ -8,6 +8,7 @@
 """
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -405,6 +406,79 @@ def test_add_servicers_needs_a_roster_first(tmp_path):
     assert "名册" in r.json()["detail"]
 
 
+# ------------------------------------------ 接待人自动同步：只让人维护两份名单
+# 律所方 2026-08-12：「我们应该只有两个名单，为什么现在有三个名单？」
+# 第三份（企微客服账号的「接待人」）的正确内容永远等于律师名册，所以由程序保持一致。
+# 靠人记得去点一个按钮，等于把一次静默失败（转接被企微当场拒）押在记性上。
+def test_new_lawyer_is_synced_into_servicers_without_anyone_clicking(tmp_path):
+    from responder.worker import Worker
+
+    store, _, p = make(tmp_path)
+    kf = ProbeKf(servicers=())
+    w = Worker(p, store, sender=Snd(), kf_client=kf)
+    store.upsert_lawyer("zhang", {"name": "张", "role": "lawyer", "active": True})
+
+    w.tick()
+
+    assert kf.servicers == ["wei", "zhang"], "名册里的人应当自动成为接待人"
+
+
+def test_servicer_sync_does_not_hammer_wecom_every_tick(tmp_path):
+    """名册没动就别去调企微。每 10 秒一次的心跳乘以一天 = 八千多次无谓调用。"""
+    from responder.worker import Worker
+
+    store, _, p = make(tmp_path)
+    kf = ProbeKf(servicers=())
+    w = Worker(p, store, sender=Snd(), kf_client=kf)
+    w.tick()
+    calls = len(kf.servicers)
+    kf.servicers = []          # 假装企微那边被人清空了，但我们还没到兜底时间
+    w.tick()
+    assert calls and kf.servicers == [], "名册没变、也没到兜底间隔，不该再调一次"
+
+
+def test_drift_in_wecom_is_repaired_on_the_next_sweep(tmp_path):
+    """有人在企微后台手工删掉了接待人——这种漂移没有任何征兆，
+    只有下一次转接失败时才暴露，所以要定期兜底修回来。"""
+    from responder.worker import Worker
+
+    store, _, p = make(tmp_path, kf_servicer_sync_seconds=60)
+    kf = ProbeKf(servicers=())
+    w = Worker(p, store, sender=Snd(), kf_client=kf)
+    w.tick()
+    kf.servicers = []
+    w.tick(datetime.now() + timedelta(seconds=120))
+    assert kf.servicers == ["wei"], "兜底间隔到了就该把企微那边修回名册的样子"
+
+
+def test_sync_failure_is_retried_not_swallowed(tmp_path):
+    """同步失败必须还回脏标记，否则这次失败会被当成「已同步」永久丢掉——
+    而它的表现是转接在 P0 线索来的那一刻才失败。"""
+    from responder import kfroster
+    from responder.worker import Worker
+
+    store, _, p = make(tmp_path)
+    kf = ProbeKf(servicers=())
+    kf.account_list = lambda: (_ for _ in ()).throw(RuntimeError("企微超时"))
+    w = Worker(p, store, sender=Snd(), kf_client=kf)
+    w.tick()
+    assert kfroster.is_dirty(store), "没跑成就该留着脏标记，下一轮重试"
+
+
+def test_probe_tells_the_firm_it_only_has_two_lists(tmp_path):
+    """自检要把「您要管两份名单」这件事说清楚，并如实带出接待人上次同步的时间。"""
+    from fastapi.testclient import TestClient
+
+    store, _, p = make(tmp_path, admin_token="")
+    store.upsert_group(kf_group())
+    data = TestClient(_probe_app(store, p.settings, ProbeKf())).get(
+        "/console/kf/handoff-probe").json()
+    assert [x["userid"] for x in data["roster"]] == ["wei"]  # 名单一：律师名册
+    assert "upgrade" in data                                # 名单二：企微后台
+    assert data["servicer_auto"] is True                    # 第三份由程序自动跟随
+    assert "两份名单一致" in data["hint"]
+
+
 # ------------------------------------------------ 手动转接：律师自己决定接手
 # 自动转接只在 P0/紧急时触发，但律师常常是看完交接单**自己判断**这单该接。
 # 没有这条路，他就只剩打电话——而打电话正是转接要取代的那一环。
@@ -649,7 +723,6 @@ def test_a_brand_new_deployment_still_checks_every_account(tmp_path):
 def test_diagnose_separates_a_stuck_conversation_from_a_dead_channel(tmp_path):
     """「这一通卡住了」和「整条回调断了」在客户那头长得一模一样——一片空白——
     但修法天差地别。没有这个区分，只能一通一通试。"""
-    from datetime import datetime
 
     from fastapi.testclient import TestClient
 

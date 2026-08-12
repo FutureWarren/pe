@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from responder import kfroster
 from responder.compliance import forbidden
 from responder.config import persist_setting
 from responder.engine import priority
@@ -330,7 +331,7 @@ def assign_unrouted(
     request: Request,
     store: Store = Depends(get_store), _: Principal = Depends(require_admin),
 ):
-    """把所有未指派的在办线索按规则批量分派（专长匹配 + 负载均衡）。
+    """把所有未指派的在办线索按规则批量分派（负载均衡：谁在办的最少谁先接）。
 
     典型场景：先导入了几百条客资、后建的律师名册——存量线索不会自动补派
     （派单只在新消息触达时发生），这里一键补齐。只动 new/contacted，
@@ -345,7 +346,7 @@ def assign_unrouted(
             if group is None:
                 skipped += 1
                 continue
-            law = assignment.pick(store, row.get("case_type") or group.case_type)
+            law = assignment.pick(store)
             if law is None:
                 # 名册为空/无人在班：直接结束，不用把剩下几百条都试一遍
                 return {"ok": True, "assigned": done, "skipped": skipped,
@@ -808,19 +809,8 @@ def _douyin_diag(s, store: Store) -> dict:
 
 
 
-def _kf_accounts_in_use(store: Store) -> set[str]:
-    """真正有客户从这里进来的客服账号。
-
-    企微会把**企业名下所有**客服账号都列出来，其中很可能有跟我们无关的
-    （真机 2026-08-09：律所另有一个「上海松沪律师事务所在线客服」，
-    人工在接，从没交给自建应用管）。对那种账号做任何管理动作都会拿到
-    48007，于是一个碰不着的账号把整块自检染成红色——
-    **说错「坏了」和漏报一样贵**，人会跑去修一个没坏的东西。
-
-    还没有任何会话时（刚上线）退回「全都算」，否则第一天什么都检查不了。
-    """
-    used = {g.get("kf_open_kfid") for g in store.list_groups() if g.get("kf_open_kfid")}
-    return used
+# 「哪些客服账号真的在用」的判定挪到了 kfroster（worker 也要用同一份逻辑）
+_kf_accounts_in_use = kfroster.accounts_in_use
 
 
 @router.get("/kf/handoff-probe")
@@ -830,8 +820,20 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
     做成控制台端点而不是命令行脚本，是因为企微 API 受可信 IP 限制、只有服务器
     调得通，而律所侧没有 SSH。点一下按钮即可，返回结果直接贴给开发看。
 
-    最要紧的一项是**名册与接待人的差集**：律师不在客服账号的接待人列表里，
-    转接接口会直接失败，而它失败的时机恰恰是 P0 线索来的那一刻。
+    ## 律所侧要维护的名单只有两份
+
+    1. **律师名册**——控制台「团队」页那一份。人员进出只改这里。
+    2. **企微后台**「微信客服 → 升级服务」的成员范围（现在配的是「邀约谈案部」）。
+       这份只能在企微管理后台点，我们的应用对它是只读的。
+
+    企微其实还有第三份——客服账号的**接待人**列表。但它的正确内容永远等于第一份，
+    所以由程序自动同步（`responder/kfroster.py`），不作为一份要人记着维护的名单
+    呈现。这里仍然把差集报出来，因为同步失败时人要看得见。
+
+    三份里缺任何一份，失败方式都不一样，而且都很安静：
+      · 不在律师名册 → 分案引擎根本不会派给他，转接无从谈起；
+      · 不在接待人   → 转接被企微当场拒（48007 那一档）；
+      · 不在升级服务范围 → 名片推不出去（95021），客户什么也没收到。
     """
     store: Store = request.app.state.store
     s = request.app.state.pipeline.settings
@@ -870,11 +872,8 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
     state = _probe_state_endpoint(store, client, s)
     if state.get("error"):
         ready = False
-    # 「升级服务」的专员名单是**第三份名单**，跟律师名册、客服接待人都不是一回事。
-    # 三份都得有他，缺一份就是一种静默失败：
-    #   不在律师名册 → 分案引擎根本不会派给他，名片无从谈起；
-    #   不在接待人   → 转接被企微当场拒；
-    #   不在专员名单 → 名片推不出去（95021），而表现是「客户什么也没收到」。
+    # 企微后台那份名单（「微信客服 → 升级服务」的成员范围）。这是律所侧真正
+    # 需要自己维护的第二份，我们只能读不能写——配的人不对，名片就推不出去。
     upgrade = {"userids": [], "departments": 0, "error": "", "hint": ""}
     if hasattr(client, "upgrade_service_config"):
         cfg = client.upgrade_service_config()
@@ -902,70 +901,55 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
         "mode": s.mode,
         "triggers": [label for _, label in priority.WANTS_HUMAN],
         "accounts": out,
+        "roster": sorted(
+            ({"userid": u, "name": names.get(u, "")} for u in roster),
+            key=lambda x: x["userid"],
+        ),
         "roster_size": len(roster),
         "reclaim_seconds": s.handoff_reclaim_seconds,
         "state_probe": state,
         "upgrade": upgrade,
+        # 接待人是程序自动同步的，把「上次同步于何时、结果如何」如实带出来：
+        # 自动化最怕的不是失败，是失败得没人知道
+        "servicer_sync": store.get_note(kfroster.SYNCED_NOTE),
+        "servicer_auto": bool(s.kf_servicer_sync_seconds),
         "hint": (
             "律师名册为空：先在「团队」页添加律师，转接才有对象"
             if not roster
-            else "有律师不是接待人，转接会失败——到企微后台把他们加进「接待人员」"
+            else "有律师还没同步成接待人，转接会失败——点下面的「立即同步」"
             if not ready and any(a["missing"] for a in out)
             else f"接口路径探测失败：{state.get('error', '')}"
             if state.get("error")
-            else "接待人齐、接口通，转接的前置条件已满足"
+            else "两份名单一致、接口通，转接的前置条件已满足"
             if state.get("ok")
-            else "接待人齐；接口路径还没验过（等一通真实客服会话进来后再点一次）"
+            else "两份名单一致；接口路径还没验过（等一通真实客服会话进来后再点一次）"
         ),
     }
 
 
 @router.post("/kf/servicers/add")
 def add_kf_servicers(request: Request, _: Principal = Depends(require_admin)):
-    """把名册里的律师批量加为客服账号的接待人（转接的硬前置）。
+    """立刻把名册推成客服账号的接待人。**平时不用点**——后台线程已经在自动同步。
+
+    企微的「接待人」不是一份要人维护的名单，它的正确内容永远等于律师名册；
+    所以名册一改就自动同步（`responder/kfroster.py`），这个按钮只是「现在就同步」，
+    留着是因为出问题时人需要一个能当场按、当场看到结果的东西。
 
     为什么由程序代劳：这个客服账号是企微应用托管的，kf.weixin.qq.com 顶部横幅
     「正在通过企业微信应用管理相关能力」即指此事——在那个后台点「开始使用」会把
     管理权夺回网页侧，打断消息推送，代价远大于收益。既然程序有权限，就程序来加。
-
-    幂等：已经是接待人的再加一次也无妨；加完立刻回读一次列表，
-    以**回读结果**为准报成功与否，不信写接口自己说的话。
     """
     store: Store = request.app.state.store
     client = getattr(request.app.state.pipeline, "_kf_client", None)
     if client is None or not client.available():
         raise HTTPException(400, "微信客服通道未配置")
 
-    userids = [law["userid"] for law in store.list_lawyers(active_only=True)
-               if law.get("userid")]
-    if not userids:
-        raise HTTPException(400, "律师名册为空：先在「团队」页添加律师")
-    accounts = client.account_list()
-    if not accounts:
-        raise HTTPException(400, "取不到客服账号：检查 Secret 与企微可信 IP")
-
-    used = _kf_accounts_in_use(store)
-    out, skipped = [], []
-    for a in accounts:
-        kfid = a.get("open_kfid", "")
-        if used and kfid not in used:
-            # 别去动一个没有客户从中进来的账号：多半根本没交给我们管，
-            # 加不上是正常的，报红反而误导人去修一个没坏的东西
-            skipped.append(a.get("name", "") or kfid)
-            continue
-        raw = client.servicer_add(kfid, userids)
-        after = set(client.servicer_list(kfid))
-        out.append({
-            "open_kfid": kfid,
-            "name": a.get("name", ""),
-            "added": sorted(set(userids) & after),
-            "failed": sorted(set(userids) - after),
-            "error": raw.get("error", ""),
-            # 48007/60030 这类错误码对律所侧等于乱码，翻成一句能照着点的中文
-            "hint": raw.get("hint", "") or kf_errors.err_hint(raw),
-        })
-    ok = bool(out) and all(not a["failed"] for a in out)
-    return {"ok": ok, "accounts": out, "roster": userids, "skipped": skipped}
+    result = kfroster.sync(store, client, _kf_accounts_in_use(store))
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    kfroster.clear_dirty(store)
+    kfroster.record(store, result)
+    return result
 
 
 def _probe_state_endpoint(store: Store, client, s) -> dict:
@@ -1376,7 +1360,7 @@ def take_over(
         if target not in set(client.servicer_list(group.kf_open_kfid)):
             raise HTTPException(
                 400, "该律师不是这个客服账号的接待人，企微会拒绝转接。"
-                     "请在「状态」面板点「把名册律师加为接待人」",
+                     "接待人本该自动同步，请在「状态」面板点「立即同步接待人」看报错",
             )
     except HTTPException:
         raise
@@ -1456,8 +1440,10 @@ def export_leads(
 
 # ================================================================ 团队管理
 class LawyerIn(BaseModel):
+    """名册档案。**没有「专长」字段**——2026-08-12 律所方：「客服不分什么专长不专长」，
+    派单只看谁在办的最少（见 `responder/assignment.py`）。"""
+
     name: str = ""
-    specialties: str = ""  # 顿号/逗号分隔，如「劳动仲裁、工伤」
     role: str = "lawyer"  # lawyer | admin
     on_duty: bool = True
     active: bool = True

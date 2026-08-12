@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from responder import lead, memory
+from responder import kfroster, lead, memory
 from responder.compliance.guard import guard
 from responder.engine import signals
 from responder.gateway import bot, douyin, wecom_kf
@@ -66,6 +66,9 @@ class Worker:
         self._guard: threading.Thread | None = None
         # 启动后先隔一个间隔再查更新：刚重启完不该立刻又想着升级
         self._last_update_check = datetime.now()
+        # 接待人同步：启动后先跑一轮（epoch 时间戳保证第一次 tick 就到期），
+        # 这样重启即自愈——不用等到下一个整点，也不用人记得去点按钮
+        self._last_servicer_sync = datetime.fromtimestamp(0)
 
     # ------------------------------------------------------------ 生命周期
     def start(self) -> None:
@@ -193,13 +196,60 @@ class Worker:
         for sweep in (
             self._sweep_idle_leads, self._sweep_customer_memory,
             self._sweep_lead_sla, self._sweep_winback,
-            self._sweep_channel_health, self._maybe_auto_update,
+            self._sweep_channel_health, self._sweep_servicers,
+            self._maybe_auto_update,
             self._maybe_daily_digest,
         ):
             try:
                 sweep(now)
             except Exception:
                 logger.exception("定时事务失败: %s", sweep.__name__)
+
+    def _sweep_servicers(self, now: datetime) -> None:
+        """让企微的「接待人」名单自动跟上律师名册。
+
+        律所侧只该维护两份名单：**律师名册**（控制台「团队」页）和**企微后台**
+        「微信客服 → 升级服务」里的成员范围。企微的接待人是第三份，但它的正确内容
+        永远等于第一份——所以由程序保持一致，不让它成为又一件要人记着做的事。
+
+        触发有两种，缺一不可：
+          · 名册刚改过（脏标记）——加了人立刻就得能接单，不能等下一个整点；
+          · 定期兜底——有人在企微后台手工删过接待人，或上次同步正好赶上网络抖动。
+            这类漂移没有任何征兆，只有下一次转接失败时才暴露。
+        """
+        s = self.pipeline.settings
+        client = self.kf_client
+        if client is None or not client.available():
+            return
+        if not s.kf_servicer_sync_seconds:  # 置 0 = 关掉自动同步，只留手动按钮
+            return
+        dirty = kfroster.is_dirty(self.store)
+        due = (now - self._last_servicer_sync).total_seconds() >= max(
+            60, s.kf_servicer_sync_seconds
+        )
+        if not dirty and not due:
+            return
+        self._last_servicer_sync = now
+        if not self.store.list_lawyers(active_only=True):
+            # 名册为空：转接功能本就未启用，别去空跑企微接口。
+            # 标记要清掉——留着它会让「有事要做」这个状态永远为真，
+            # 而下次真有事时就分不出是新的还是上次剩的。
+            kfroster.clear_dirty(self.store)
+            return
+        # 先清脏标记再同步：同步中途万一有人改名册，下一轮还会再跑一次；
+        # 反过来（后清）则会把那次改动一起吞掉。宁可多跑一轮。
+        kfroster.clear_dirty(self.store)
+        try:
+            result = kfroster.sync(
+                self.store, client, kfroster.accounts_in_use(self.store)
+            )
+        except Exception:
+            logger.exception("servicer sync failed")
+            kfroster.mark_dirty(self.store)  # 没跑成就还给下一轮
+            return
+        kfroster.record(self.store, result)
+        if not result.get("ok"):
+            logger.warning("servicer sync incomplete: %s", result)
 
     def _sweep_channel_health(self, now: datetime) -> None:
         """外部渠道的死活自查。

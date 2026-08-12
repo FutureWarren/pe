@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS kf_cursors (
 CREATE TABLE IF NOT EXISTS lawyers (
     userid TEXT PRIMARY KEY,          -- 企微 userid，同时是登录身份
     name TEXT DEFAULT '',
-    specialties TEXT DEFAULT '',      -- 顿号/逗号分隔的专长领域，派单匹配用
+    specialties TEXT DEFAULT '',      -- 已弃用：2026-08-12 取消专长派单，列留着只为兼容旧库
     role TEXT DEFAULT 'lawyer',       -- lawyer | admin（个人令牌也可拥有管理权限）
     on_duty INTEGER DEFAULT 1,        -- 停诊/休假时关掉，不再接新派单
     active INTEGER DEFAULT 1,         -- 停用即禁止登录；不物理删除，保留分案历史归属
@@ -1384,7 +1384,8 @@ class Store:
     # ------------------------------------------------------------ 律师名册
     def upsert_lawyer(self, userid: str, fields: dict) -> None:
         """新建/更新律师档案。fields 只含要改的列；token_hash 走专用方法。"""
-        allowed = {"name", "specialties", "role", "on_duty", "active"}
+        # specialties 不在白名单里：专长派单已于 2026-08-12 取消，旧列只读不写
+        allowed = {"name", "role", "on_duty", "active"}
         cols = [c for c in fields if c in allowed]
         vals = [
             int(fields[c]) if c in ("on_duty", "active") else fields[c] for c in cols
@@ -1397,6 +1398,7 @@ class Store:
                     {','.join(f'{c}=excluded.{c}' for c in cols)}""",
                 (userid, *vals, datetime.now().isoformat()),
             )
+        self._mark_roster_dirty()
 
     def get_lawyer(self, userid: str) -> dict | None:
         with self._conn() as conn:
@@ -1419,6 +1421,18 @@ class Store:
         这正确：那单当时确实是他跟的。"""
         with self._conn() as conn:
             conn.execute("DELETE FROM lawyers WHERE userid=?", (userid,))
+        self._mark_roster_dirty()
+
+    def _mark_roster_dirty(self) -> None:
+        """名册一变就打个标记，后台线程会把企微那边的「接待人」名单同步成一样。
+
+        放在 Store 这一层而不是控制台接口里，是因为改名册的路不止一条：
+        控制台、运维指令（`opscmd`）、客资导入都会写。漏掉任何一条，
+        企微那边就会悄悄跟名册不一致——而不一致的表现是转接当场失败。
+        """
+        from responder import kfroster
+
+        kfroster.mark_dirty(self)
 
     def last_inbound_at(self, prefix: str) -> datetime | None:
         """这个客服账号最近一次收到**客户**消息是什么时候（跨所有会话）。

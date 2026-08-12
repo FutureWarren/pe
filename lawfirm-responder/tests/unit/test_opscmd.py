@@ -251,7 +251,7 @@ def test_add_lawyer_also_fixes_the_silent_notification_hole(env):
     settings.default_notify_userid = ""
     write_commands(repo, [{
         "id": "c1", "op": "add_lawyer", "to": "future",
-        "userid": "future", "name": "魏涞", "specialties": "劳动仲裁",
+        "userid": "future", "name": "魏涞",
     }])
 
     Runner(settings, store, sender=Snd()).run_pending()

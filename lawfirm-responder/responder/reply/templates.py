@@ -24,7 +24,7 @@ def _lawyer(group: GroupProfile) -> str:
 
     只有已委托客户才点名。业务决策 2026-08：新咨询一律不说具体是谁——
 
-      1. **可能说错人**：谁接这单是分案引擎按专长与负载算出来的
+      1. **可能说错人**：谁接这单是分案引擎按在办量算出来的
          （见 docs/lead-routing.md），而客服/私信会话建档时填的 lawyer_name
          只是一个配置默认值（`kf_default_lawyer_name`）。AI 说「魏律师会给您
          回电话」、实际派给了别人，客户等的就是个不会来的电话。
@@ -164,7 +164,7 @@ def greeting_opener(group: GroupProfile, seed: str = "", contact_left: bool = Fa
     if contact_left:
         L = _lawyer(group)
         variants = [
-            # 不用「他」：接单律师由分案引擎按专长与负载算出，性别未知，
+            # 不用「他」：接单律师由分案引擎按在办量算出，性别未知，
             # 而这句话是发给客户看的，猜错就是当着人面把人叫错。
             f"好的，您的联系方式我已经记下，稍后由{L}与您电话联系。",
             f"收到，电话我记下来了。我先把您的情况整理给{L}，尽快与您联系。",

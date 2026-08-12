@@ -51,9 +51,9 @@ def H(tok):
     return {"x-admin-token": tok}
 
 
-def create_lawyer_with_login(client, userid, name, specialties=""):
+def create_lawyer_with_login(client, userid, name):
     r = client.put(f"/console/lawyers/{userid}",
-                   json={"name": name, "specialties": specialties}, headers=H(ADMIN))
+                   json={"name": name}, headers=H(ADMIN))
     assert r.status_code == 200
     r = client.post(f"/console/lawyers/{userid}/token", headers=H(ADMIN))
     assert r.status_code == 200
@@ -111,8 +111,8 @@ def test_send_login_dm_contains_hash_fragment_link(tmp_path):
 
 # ---------------------------------------------------------------- 数据隔离
 def seed_two_lawyers_with_leads(store, snd, pipeline, client):
-    wei = create_lawyer_with_login(client, "wei", "魏", "劳动仲裁")
-    zhang = create_lawyer_with_login(client, "zhang", "张", "婚姻家事")
+    wei = create_lawyer_with_login(client, "wei", "魏")
+    zhang = create_lawyer_with_login(client, "zhang", "张")
     for gid, case, text in [
         ("kf:a:c1", "劳动仲裁", "拖欠工资，想委托你们，电话17721275495"),
         ("kf:a:c2", "婚姻家事", "想离婚，约时间面谈，电话13912345678"),
@@ -246,9 +246,13 @@ def test_team_page_shows_whether_each_lawyer_can_receive_transfers():
     """「他是不是微信客服接待人」必须画在他本人那张卡上。
 
     律所方原话：「EZID 都配对了，也收得到每日 update，就是收不到转接」。
-    这两件事不矛盾——**它们查的是两份互不相干的名单**：日报走自建应用的
-    可见范围，转接走客服账号的接待人列表。把这个区别藏在一个要点右上角
-    才能打开的面板里，等于没有说。
+    这两件事不矛盾——**它们查的是几份互不相干的名单**：日报走自建应用的
+    可见范围，转接走客服账号的接待人列表，推名片走企微后台的升级服务范围。
+    把这个区别藏在一个要点右上角才能打开的面板里，等于没有说。
+
+    其中接待人那份已由程序自动同步（2026-08-12，律所方：「我们应该只有两个名单」），
+    所以卡片上对它的措辞必须是「同步中」而不是「你去加」——把一件系统自己会做的事
+    写成待办，人就会跑去做一件不用做的事，然后怀疑其它提示是不是也是假的。
     """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -261,15 +265,16 @@ def test_team_page_shows_whether_each_lawyer_can_receive_transfers():
 
     assert 'data-sv="' in html, "团队卡片要有画接待人状态的位置"
     assert "paintServicerBadges" in html
-    assert "还不是接待人" in html
+    assert "接待人还在同步" in html
     # 停用但名下还压着单的律师：那些单一样转不过去，必须说出来
     assert "转接不过去" in html
     # 判据要用接待人全集，不能用 probe 的 missing（它只算在职律师）
     assert "a.servicers" in html
     # 多个客服账号时逐个算，不取交集：一个没配好的账号会把所有人都染红，
     # 而客户实际走的那个入口可能完全是通的（真机 2026-08-09：律所有两个账号）
-    assert "从那个入口进来的客户转接不到他" in html
     assert "不取交集" in html
+    # 真正需要人动手的只有企微后台那一份，卡片上要点名说出来
+    assert "不在企微后台「升级服务」名单里" in html
 
 
 def _forget_app(tmp_path, kf=None):
