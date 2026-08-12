@@ -870,6 +870,32 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
     state = _probe_state_endpoint(store, client, s)
     if state.get("error"):
         ready = False
+    # 「升级服务」的专员名单是**第三份名单**，跟律师名册、客服接待人都不是一回事。
+    # 三份都得有他，缺一份就是一种静默失败：
+    #   不在律师名册 → 分案引擎根本不会派给他，名片无从谈起；
+    #   不在接待人   → 转接被企微当场拒；
+    #   不在专员名单 → 名片推不出去（95021），而表现是「客户什么也没收到」。
+    upgrade = {"userids": [], "departments": 0, "error": "", "hint": ""}
+    if hasattr(client, "upgrade_service_config"):
+        cfg = client.upgrade_service_config()
+        upgrade["error"] = cfg.get("error", "")
+        upgrade["hint"] = cfg.get("hint", "")
+        rng = cfg.get("member_range") or {}
+        upgrade["userids"] = sorted(rng.get("userid_list") or [])
+        upgrade["departments"] = len(rng.get("department_id_list") or [])
+    # **配的是部门时不下结论。** 展开部门要通讯录权限，我们未必有；
+    # 而「说错坏了」和漏报一样贵——人会跑去修一个没坏的东西。
+    # 读不到配置时**一个字都不下结论**——读不到不等于没配。
+    # 上一版这里把「读失败」也算成「谁都不在名单里」，于是整份名册被点名，
+    # 而那正是「说错坏了」：人会跑去修一个没坏的东西。
+    missing_specialist = (
+        sorted(roster - set(upgrade["userids"]))
+        if upgrade["userids"] and not upgrade["departments"] and not upgrade["error"]
+        else []
+    )
+    upgrade["missing"] = [
+        {"userid": u, "name": names.get(u, "")} for u in missing_specialist
+    ]
     return {
         "ready": ready,
         "enabled": s.handoff_enabled,
@@ -879,6 +905,7 @@ def handoff_probe(request: Request, _: Principal = Depends(require_admin)):
         "roster_size": len(roster),
         "reclaim_seconds": s.handoff_reclaim_seconds,
         "state_probe": state,
+        "upgrade": upgrade,
         "hint": (
             "律师名册为空：先在「团队」页添加律师，转接才有对象"
             if not roster

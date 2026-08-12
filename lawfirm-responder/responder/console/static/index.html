@@ -1171,6 +1171,24 @@ async function checkHandoff() {
     }
     if (a.hint) lines.push(`　<b style="color:var(--gold,#C6A15B)">👉 ${esc(a.hint)}</b>`);
   }
+  /* 升级服务的专员名单：**第三份名单**，跟律师名册、客服接待人都不是一回事。
+     三份都得有他，缺一份就是一种不同的静默失败。 */
+  const up = r.upgrade || {};
+  if (up.error) {
+    lines.push(`⚠️ 升级服务配置读不到：${esc(up.hint || up.error)}`);
+  } else if (up.departments) {
+    lines.push(`升级服务：已配 ${up.userids.length} 位专员 + ${up.departments} 个部门`);
+    lines.push(`　<span class="muted">配的是部门，里面有谁我这边看不到——`
+      + `名册里的律师都要在那个部门里，否则名片推不出去（95021）</span>`);
+  } else if (!up.userids || !up.userids.length) {
+    lines.push(`⚠️ 升级服务一个专员都没配 —— 律师名片推不给客户`);
+  } else {
+    lines.push(`升级服务：已配 ${up.userids.length} 位专员`);
+    if ((up.missing || []).length) {
+      lines.push(`　❌ 不在专员名单：${up.missing.map(m => esc(m.name || m.userid)).join("、")}`
+        + `　—— 他们的名片推不给客户`);
+    }
+  }
   const sp = r.state_probe || {};
   if (sp.ok) lines.push(`✅ 转接接口已连通（当前会话状态 ${sp.service_state}）`);
   else if (sp.error) lines.push(`❌ 接口探测失败：${esc(sp.error)}`);

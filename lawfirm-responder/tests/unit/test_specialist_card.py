@@ -161,3 +161,77 @@ def test_95021_is_translated_into_something_actionable():
 
     hint = err_hint("kf kf/customer/upgrade_service failed: {'errcode': 95021}")
     assert "专员名单" in hint and "升级服务" in hint
+
+
+# ------------------------------------------- 三份名单，缺一份就是一种静默失败
+class ProbeKf(Kf):
+    """就绪自检用的桩。"""
+
+    def __init__(self, cfg=None, servicers=("wei",)):
+        super().__init__()
+        self._cfg = cfg if cfg is not None else {
+            "member_range": {"userid_list": ["wei"], "department_id_list": []}
+        }
+        self._servicers = list(servicers)
+
+    def account_list(self):
+        return [{"open_kfid": OPEN_KFID, "name": "松沪律所咨询"}]
+
+    def servicer_raw(self, kfid):
+        return {"servicer_list": [{"userid": u} for u in self._servicers]}
+
+    def servicer_list(self, kfid):
+        return list(self._servicers)
+
+    def post_raw(self, path, payload):
+        return {"service_state": 1, "servicer_userid": ""}
+
+    def upgrade_service_config(self):
+        return dict(self._cfg)
+
+
+def _probe(tmp_path, kf):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from responder.console.api import router
+
+    s = Settings(mode="live", db_path=str(tmp_path / "p.db"), admin_token="",
+                 llm_provider="none", wecom_kf_secret="k")
+    store = Store(s.db_path)
+    store.upsert_lawyer("wei", {"name": "魏涞", "active": True})
+    store.upsert_lawyer("qian", {"name": "魏谦", "active": True})
+    store.upsert_group(GroupProfile(
+        group_id=GID, kf_open_kfid=OPEN_KFID, kf_external_userid=EXT,
+        client_status=ClientStatus.PROSPECT))
+    app = FastAPI()
+    app.state.store = store
+    app.state.pipeline = Pipeline(store, None, s, kf_client=kf)
+    app.include_router(router)
+    return TestClient(app).get("/console/kf/handoff-probe").json()
+
+
+def test_the_selfcheck_names_who_is_missing_from_the_specialist_list(tmp_path):
+    """名单里没有他 → 他的名片推不给客户，而表现是「客户什么也没收到」。"""
+    r = _probe(tmp_path, ProbeKf())
+    assert r["upgrade"]["userids"] == ["wei"]
+    assert [m["name"] for m in r["upgrade"]["missing"]] == ["魏谦"]
+
+
+def test_a_department_configuration_is_not_reported_as_broken(tmp_path):
+    """律所配的是**部门**（「邀约谈案部」）。展开部门要通讯录权限，我们未必有，
+    所以这时**不下结论**——「说错坏了」和漏报一样贵，人会跑去修一个没坏的东西。
+    """
+    kf = ProbeKf(cfg={"member_range": {"userid_list": ["wei"],
+                                       "department_id_list": ["7"]}})
+    r = _probe(tmp_path, kf)
+    assert r["upgrade"]["departments"] == 1
+    assert r["upgrade"]["missing"] == [], "配了部门就不该点名说谁缺"
+
+
+def test_an_unreadable_config_says_so_instead_of_guessing(tmp_path):
+    kf = ProbeKf(cfg={"error": "kf get_upgrade_service_config failed: 48007",
+                      "hint": "去后台把账号交给应用管理"})
+    r = _probe(tmp_path, kf)
+    assert "48007" in r["upgrade"]["error"]
+    assert r["upgrade"]["missing"] == []
