@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     # 转接只解决「谁来回这句话」，名片解决「客户认识了谁」——后者才是
     # 从一次咨询变成长期关系的那一步。推荐语留空＝用企微后台配好的那句，
     # 话术留在律所自己手上。
+    # 面谈邀约里点名的资历（律所方 2026-08-12：「重点是要邀约到所里边来，
+    # 我们这边有专业的主任律师」）。**留空即不提**——律协禁止虚假/夸大宣传，
+    # 所以这句话必须是真的：真由主任律师接待才写「主任律师」。
+    office_senior_title: str = "主任律师"
     upgrade_service_enabled: bool = True
     upgrade_service_wording: str = ""
     kf_trans_path: str = "kf/service_state/trans"

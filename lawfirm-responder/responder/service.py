@@ -196,8 +196,10 @@ class Pipeline:
                 msg.created_at + timedelta(seconds=required + 1),
             )
 
-        want_contact = self._should_ask_contact(group, decision, convo)
-        want_office = (not want_contact) and self._should_invite_office(
+        # **邀约先于要电话**（律所方 2026-08-12）：面谈才是高客单价单子的成交点，
+        # 号码只是退而求其次。两者互斥，一条消息里只做一件事。
+        want_office = self._should_invite_office(group, decision, convo)
+        want_contact = (not want_office) and self._should_ask_contact(
             group, decision, convo
         )
         # 承接类回复本身是死胡同（「我帮您问下律师，请您稍等」说完客户只能干等）。
@@ -738,6 +740,12 @@ class Pipeline:
             return False
         if signals.scan(convo)[1]:
             return False
+        # **邀约排在要电话前面**（律所方 2026-08-12 复盘：真正高客单价的单子
+        # 几乎都是线下见过面之后才签的）。所以第一拍请他来所里，
+        # 他没接这一茬，才退而求其次要个号码——从大到小是让步，读起来自然；
+        # 反过来先要号码再请人跑一趟，是层层加码，客户会觉得被追。
+        if not self._recent_marker(group.group_id, templates.OFFICE_INVITE_MARKERS):
+            return False
         # 同一个接管窗口里只要一次号码。问第二遍就是催单，
         # 而催单是客户判断「对面是不是机器人」最强的一条线索。
         return not self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
@@ -747,13 +755,19 @@ class Pipeline:
     ) -> bool:
         """该不该邀他来所里当面聊。
 
-        **和要电话分开、并且晚一步。** 原来这两件事挤在同一条消息里
+        **这是收口的第一拍，不是补充说明。** 律所方 2026-08-12 跟所里同事
+        复盘后的结论：真正高客单价的单子，几乎都是线下见过面之后才签的。
+        线上聊得再好也只是筛查——把人请到所里，成交率是另一个量级。
+        所以顺序是：**先请他来所里，他没接这一茬，才退而求其次要个号码。**
+        （反过来先要号码再请人跑一趟，是层层加码，客户会觉得被追。）
+
+        **和要电话分开说。** 原来这两件事挤在同一条消息里
         （「留个手机号吧……当面聊也可以，地址是××路 88 号平高广场 11 楼」），
         律所方实测的原话是「这一长串的说话方式，让客户一看就会觉得这是不是 AI」。
         真人不会在刚听完一句话之后，把电话和地址一口气报出来。
 
-        所以拆成两拍：先只要电话；号码还是没留、而他仍在聊，才补一句所址。
-        客户自己表达了想见面的（`meeting` 信号）也直接给。
+        触发条件跟要电话那一拍同一套（聊够了、把事说出来过、还没留联系方式），
+        差别只在顺序。客户自己表达了想见面的（`meeting` 信号）则直接给，不用等。
         """
         if not group.is_kf or group.client_status != ClientStatus.PROSPECT:
             return False
@@ -763,11 +777,22 @@ class Pipeline:
             return False  # 号码已经有了，该打电话而不是请人跑一趟
         if self._recent_marker(group.group_id, templates.OFFICE_INVITE_MARKERS):
             return False  # 邀第二遍就成了催
-        hits = signals.scan(convo)[2]
-        if "meeting" in hits:
+        if "meeting" in signals.scan(convo)[2]:
             return True  # 他自己说想来，那就别绕
-        # 否则：得是「已经问过号码但他没给」的那一步
-        return self._recent_marker(group.group_id, templates.ASK_CONTACT_MARKERS)
+        # 否则跟「要电话」同样的火候：聊够了、且他确实把事说出来过。
+        # 太早请人跑一趟，跟太早要号码一样像推销。
+        threshold = self.settings.ask_contact_after_messages
+        if threshold <= 0:
+            return False
+        spoken = [
+            m for m in convo
+            if not m.get("sender_is_staff")
+            and m.get("msg_type") != "event"
+            and (m.get("content") or "").strip()
+        ]
+        if len(spoken) < threshold:
+            return False
+        return any(rules.has_substance(m.get("content", "")) for m in spoken)
 
     # ------------------------------------------------------------ 发送
     def _is_kf(self, group: GroupProfile) -> bool:

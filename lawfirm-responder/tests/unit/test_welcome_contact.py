@@ -221,26 +221,42 @@ THREE = [
 ]
 
 
-def test_ask_contact_after_threshold(tmp_path):
-    """聊到第 3 条还没留电话 → 开口要手机号。**这一条里不报地址**。"""
+def test_the_first_close_is_an_invitation_to_the_office(tmp_path):
+    """聊到第 3 条还没留电话 → **先请他来所里**，而不是先要号码。
+
+    律所方 2026-08-12 跟所里同事复盘后的结论：真正高客单价的单子，
+    几乎都是线下见过面之后才签的。线上聊得再好也只是筛查。
+    所以第一拍是邀约，号码是退而求其次的第二拍——从大到小是让步，
+    读起来自然；反过来先要号码再请人跑一趟，是层层加码，客户会觉得被追。
+    """
     _, kf = _chat(tmp_path, THREE)
     text = kf.texts()
-    assert "手机号" in text
-    assert ADDRESS not in text, "第一拍只要电话，所址是下一拍的事"
+    assert ADDRESS in text, "第一拍应该是邀约到所"
+    assert "主任律师" in text, "稀缺性是客户愿意专程跑一趟的主要理由"
+    assert "手机号" not in text, "号码是下一拍的事"
 
 
-def test_office_invite_comes_one_beat_later(tmp_path):
-    """号码还是没留、而他仍在聊，才补一句所址。
-
-    两拍分开是律所方 2026-08-08 的实测要求：原来这两件事挤在同一条里，
-    「留个手机号吧……当面聊也可以，地址是××路 88 号平高广场 11 楼」——
-    一看就是机器。真人不会在刚听完一句话之后把电话和地址一口气报出来。
-    """
+def test_asking_for_a_number_is_the_fallback_beat(tmp_path):
+    """他没接邀约那一茬，才退而求其次要个号码。"""
     _, kf = _chat(tmp_path, THREE + ["那我先准备着，还有别的要注意吗"])
     text = kf.texts()
-    assert "手机号" in text and ADDRESS in text
+    assert ADDRESS in text and "手机号" in text
     for _, _, one in kf.sent:
         assert not ("手机号" in one and ADDRESS in one), f"又挤一条里了：{one}"
+
+
+def test_the_invitation_never_promises_a_free_consult(tmp_path):
+    """律所方要求用「免费咨询」吸引到店，但全国律协《律师业务推广行为规则》
+    第十条把「以不收费或减低收费招揽业务」列为禁止行为，出口闸门也会整段拦掉——
+    真写进去的结果是客户什么都收不到。
+
+    客户真正在意的是「我会不会被绑住」，而那层意思由「聊完您心里有个数、
+    接下来怎么走再定」传达，既准确又不踩线。
+    """
+    _, kf = _chat(tmp_path, THREE)
+    text = kf.texts()
+    for banned in ("免费", "不收费", "不要钱", "0元", "零元"):
+        assert banned not in text, f"话术里不该出现「{banned}」"
 
 
 def test_ask_contact_not_before_threshold(tmp_path):
@@ -289,11 +305,15 @@ def test_ask_contact_threshold_configurable(tmp_path):
     assert "手机号" not in kf.texts()
 
 
-def test_ask_contact_falls_back_without_address(tmp_path):
-    """地址留空时只留电话、不报地址——不能出现空括号。"""
+def test_the_invitation_survives_a_missing_address(tmp_path):
+    """所址没配时仍然发得出邀约，只是不报门牌——**不能出现空括号**。
+
+    邀约的价值不在那串地址，在「主任律师当面帮您看」。地址缺了照样能约，
+    而一个「（）」会让整条消息看起来像坏掉的模板。
+    """
     _, kf = _chat(tmp_path, THREE, office_address="")
     text = kf.texts()
-    assert "手机号" in text
+    assert "来所里" in text or "过来一趟" in text
     assert "（）" not in text and "()" not in text
 
 
