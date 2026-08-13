@@ -84,6 +84,16 @@ def err_hint(payload: dict | str) -> str:
         return ""
 
 
+class KfUnavailable(RuntimeError):
+    """这次**没读到**（网络抖动/限流/token 失效），而不是「读到了，里面是空的」。
+
+    区分这两者的代价是真金白银：把「读不到」当成「一个接待人都没有」，
+    会让最该转人工的那一单静默转不成，同时在自检页上报一个假故障——
+    而律所修那个假故障的动作（去企微网页端手工点接待人）会把管理权夺回网页侧，
+    打断消息推送，整套 AI 当场哑掉。**说错「坏了」和漏报一样贵。**
+    """
+
+
 class KfClient:
     """微信客服 API 客户端。sync 在任何模式下都要工作（收），send 由管道按模式门控（发）。"""
 
@@ -139,23 +149,46 @@ class KfClient:
         return self._post(path, payload)
 
     # ------------------------------------------------------------ 收
-    def sync_msg(self, token: str, open_kfid: str, cursor: str = "", limit: int = 1000) -> dict:
-        """拉取一批消息。返回 {msg_list, next_cursor, has_more}；失败返回空批次。"""
+    def sync_msg(
+        self, token: str, open_kfid: str, cursor: str = "", limit: int = 1000,
+        *, attempts: int = 3,
+    ) -> dict:
+        """拉取一批消息。返回 {msg_list, next_cursor, has_more, failed}。
+
+        **失败要当场重试两次，别直接放弃。** 企微这个接口会因为「系统繁忙」(-1)、
+        限流 (45009)、token 过期 (40001) 或一次网络抖动而失败，而回调已经秒回过
+        success，企微不会再推第二遍。放弃的后果是这批消息要等**这个客服账号下一次
+        有人来**才被补拉——安静的账号上可能是好几个小时。
+
+        最贵的两种情形：丢的是**首次进线那一批**（这时库里一条记录都没有，
+        静默挽留和线索兜底都看不见他，律所永远不知道这个人来过），
+        或者是当天最后一条（「你们地址在哪，我明天带材料过去」）。
+        而「拉取在失败」和「真的没人说话」长得一模一样，从外面看不出来。
+
+        `failed` 让调用方能把这件事记成一个数——失败得没人知道比失败本身更糟。
+        """
         payload = {"token": token, "limit": limit}
         if cursor:
             payload["cursor"] = cursor
         if open_kfid:
             payload["open_kfid"] = open_kfid
-        try:
-            data = self._post("kf/sync_msg", payload)
-        except Exception:
-            logger.exception("kf sync_msg error (open_kfid=%s)", open_kfid)
-            return {"msg_list": [], "next_cursor": cursor, "has_more": 0}
-        return {
-            "msg_list": data.get("msg_list") or [],
-            "next_cursor": data.get("next_cursor") or cursor,
-            "has_more": data.get("has_more", 0),
-        }
+        last = None
+        for i in range(max(1, attempts)):
+            try:
+                data = self._post("kf/sync_msg", payload)
+                return {
+                    "msg_list": data.get("msg_list") or [],
+                    "next_cursor": data.get("next_cursor") or cursor,
+                    "has_more": data.get("has_more", 0),
+                    "failed": False,
+                }
+            except Exception as e:
+                last = e
+                if i + 1 < max(1, attempts):
+                    time.sleep(0.5 * (2 ** i))  # 0.5s → 1s：限流时密集重试只会更糟
+        logger.exception("kf sync_msg error after retries (open_kfid=%s): %s",
+                         open_kfid, last)
+        return {"msg_list": [], "next_cursor": cursor, "has_more": 0, "failed": True}
 
     def servicer_raw(self, open_kfid: str) -> dict:
         """接待人接口的原始返回（诊断用：接待人取不到时要能看清是为什么）。"""
@@ -170,9 +203,36 @@ class KfClient:
 
         status 字段各版本语义不一（0/1 都出现过表示可接待），因此只要有 userid
         就收下——宁可多一个候选人，也不要因为字段语义变化导致提醒无人可收。
+
+        **读失败时抛，不返回空列表。** 一次网络抖动返回 `[]`，调用方读到的是
+        「这个账号一个接待人都没有」，于是：客户已经说了「我想委托你们」，
+        校验接待人时判定「张律师不在名单里」，最该转的那一单静默没转成；
+        自检页同时红着提示「有人没加上」，点了同步还是红——
+        而律所下一步很可能自己跑去企微网页端手工点接待人，
+        那会把管理权夺回网页侧、**打断消息推送、整套 AI 当场哑掉**。
+        「读不到」和「读到了空」是两回事，说错「坏了」和漏报一样贵。
         """
         data = self.servicer_raw(open_kfid)
+        if data.get("error"):
+            raise KfUnavailable(data["error"])
         return [s["userid"] for s in (data.get("servicer_list") or []) if s.get("userid")]
+
+    def servicer_del(self, open_kfid: str, userids: list[str]) -> dict:
+        """把人从接待人名单里移除。名册的反向同步用。
+
+        没有这一步，律所在「团队」页删掉一个人、所有人都以为处理完了，
+        而他的企微客服工作台照样能看到所里新进来的咨询、照样能接走会话——
+        **一个刚离职的人能看到并抢走每天的新客资。**
+        """
+        if not userids:
+            return {}
+        try:
+            return self._post(
+                "kf/servicer/del", {"open_kfid": open_kfid, "userid_list": userids}
+            )
+        except Exception as e:
+            logger.exception("kf servicer/del error (open_kfid=%s)", open_kfid)
+            return {"error": str(e)[:200]}
 
     def servicer_add(self, open_kfid: str, userids: list[str]) -> dict:
         """把律师加为该客服账号的接待人。返回原始结果（含逐人 errcode）。

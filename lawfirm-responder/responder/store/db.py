@@ -869,6 +869,22 @@ class Store:
             rows = conn.execute("SELECT key, n, updated_at FROM counters").fetchall()
         return {r["key"]: {"n": r["n"], "at": r["updated_at"]} for r in rows}
 
+    def counter(self, key: str) -> dict | None:
+        """单个计数器（重试次数与上次时间）。不存在返回 None。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT n, updated_at FROM counters WHERE key=?", (key,)
+            ).fetchone()
+        return {"n": row["n"], "at": row["updated_at"]} if row else None
+
+    def reset_counter(self, key: str) -> None:
+        """清零。成功之后必须清——不清的话下一次出问题时重试次数已经用完了。"""
+        try:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM counters WHERE key=?", (key,))
+        except Exception:
+            logger.exception("reset counter failed: %s", key)
+
     def set_note(self, key: str, text: str) -> None:
         """运维小记：给远程排障留一行能读到的证据（复用 ops_commands 表）。
 
@@ -881,6 +897,15 @@ class Store:
                 " created_at=excluded.created_at",
                 (f"_{key}", text[:300], datetime.now().isoformat()),
             )
+
+    def notes_by_prefix(self, prefix: str) -> dict[str, str]:
+        """按前缀取一批运维小记。战报里的「系统自检」要一次看到所有同类问题。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, result FROM ops_commands WHERE id LIKE ?",
+                (f"_{prefix}%",),
+            ).fetchall()
+        return {r["id"][1:]: (r["result"] or "") for r in rows}
 
     def get_note(self, key: str) -> str:
         with self._conn() as conn:

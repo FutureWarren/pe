@@ -14,6 +14,7 @@
 
 import logging
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from responder.config import Settings
@@ -101,7 +102,11 @@ def start_update(settings: Settings) -> dict:
         encoding="utf-8",
     )
     script.chmod(0o700)
-    log = open(settings.update_log, "w", encoding="utf-8")  # noqa: SIM115 (交给子进程)
+    # 追加而不是覆盖。覆盖的话日志里永远只有最后一次，
+    # 而「服务器每 5 分钟重启两次、永远出不来」这种循环恰恰只能从多次记录里看出来。
+    log = open(settings.update_log, "a", encoding="utf-8")  # noqa: SIM115 (交给子进程)
+    log.write(f"\n===== {datetime.now().isoformat()} 开始升级 =====\n")
+    log.flush()
     subprocess.Popen(  # noqa: S603
         ["/usr/bin/env", "bash", str(script)],
         stdout=log, stderr=subprocess.STDOUT,
@@ -136,7 +141,7 @@ def remote_commit(settings: Settings) -> str:
         return ""
 
 
-def auto_update_tick(settings: Settings, *, busy: bool = False) -> dict:
+def auto_update_tick(settings: Settings, *, busy: bool = False, store=None) -> dict:
     """自动升级：发现远端有新提交就自己拉下来重启。
 
     存在的理由很实在：运维侧不一定够得着这台服务器（网络策略/没有 SSH），
@@ -153,9 +158,60 @@ def auto_update_tick(settings: Settings, *, busy: bool = False) -> dict:
     remote = remote_commit(settings)
     if not remote or remote == local:
         return {"checked": True, "updated": False, "commit": local}
+    # **这个版本刚试过、并且失败回滚了，就别再试。**
+    # 回滚做的正是 `git reset --hard $PREV`，于是 local != remote 立刻又成立，
+    # 五分钟后原样再来一遍：服务器每 5 分钟重启两次、每次一分多钟不可用，
+    # 而且**永远出不来**。这些窗口里企微回调没人应答（重试几次就放弃）、
+    # 内存队列里的消息全丢，整个过程零告警——律所侧只会隐约觉得
+    # 「这两天怎么好些人没回」。
+    if store is not None and _failed_before(store, remote):
+        return {"checked": True, "updated": False, "commit": local,
+                "reason": f"{remote[:8]} 上次起不来，已跳过"}
     logger.info("auto-update: %s → %s", local or "?", remote)
     result = start_update(settings)
     return {"checked": True, "updated": bool(result.get("ok")), "from": local, "to": remote}
+
+
+_FAILED_NOTE = "update_failed_sha"
+
+
+def _failed_before(store, sha: str) -> bool:
+    try:
+        return sha in (store.get_note(_FAILED_NOTE) or "")
+    except Exception:
+        return False
+
+
+def mark_update_failed(store, sha: str, reason: str = "") -> None:
+    """记下这个版本起不来。只留最近几个——表越长越没人看。
+
+    由 worker 在「升级跑完但版本没变」时调用：脚本自己回滚之后本地 HEAD 退回旧版，
+    从外面看就是「升过了但还是旧的」，那就是失败。
+    """
+    if not sha:
+        return
+    try:
+        prev = [x for x in (store.get_note(_FAILED_NOTE) or "").split(",") if x]
+        if sha in prev:
+            return
+        store.set_note(_FAILED_NOTE, ",".join(([sha] + prev)[:5]))
+        store.set_note(
+            "update_blocked",
+            f"{datetime.now().strftime('%m-%d %H:%M')} 新版本 {sha[:8]} 起不来，"
+            f"已自动回滚并停止重试{('：' + reason) if reason else ''}。"
+            f"修好之后推一个新提交即可（同一个提交不会再试）。",
+        )
+    except Exception:
+        logger.exception("mark update failed: %s", sha)
+
+
+def clear_update_failures(store) -> None:
+    """人工点「升级到最新版」＝明确表示要再试一次，把黑名单清掉。"""
+    try:
+        store.set_note(_FAILED_NOTE, "")
+        store.set_note("update_blocked", "")
+    except Exception:
+        logger.exception("clear update failures")
 
 
 def update_log_tail(settings: Settings, lines: int = 40) -> str:

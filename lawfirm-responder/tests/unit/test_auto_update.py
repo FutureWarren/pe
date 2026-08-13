@@ -34,7 +34,7 @@ class Spy:
     def __init__(self):
         self.calls = []
 
-    def __call__(self, settings, *, busy=False):
+    def __call__(self, settings, *, busy=False, store=None):
         self.calls.append(busy)
         return {"checked": not busy}
 

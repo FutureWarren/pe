@@ -8,6 +8,7 @@
 import logging
 from datetime import datetime, timedelta
 
+from responder import retry
 from responder.config import Settings, get_settings
 from responder.gateway.sender import WeComSender
 from responder.models import Category, Decision, GroupProfile, IncomingMessage, Reminder
@@ -97,9 +98,27 @@ def escalate_overdue(
         backup = (group.backup_userid if group else "") or settings.default_notify_userid
         if not (backup and sender):
             continue
-        if not sender.send_direct_text(backup, f"【升级提醒】\n{r['summary']}"):
-            logger.warning("escalation send failed, will retry: reminder=%s", r["id"])
+        ident = str(r["id"])
+        # **有限次 + 退避。** 原来失败就 `continue`，下一轮（10 秒后）再来一次，
+        # 永不停止。一位律师离职被移出应用可见范围、或备用接收人写错一个字母，
+        # 这里就会每 10 秒重试上百次——而这个循环占用的正是处理所有客户消息的
+        # 那唯一一条线程，同时把企微打到限流，之后交接单、督办、战报、告警
+        # 全部一起静默失效。**系统亲手拆掉了「出事有人知道」这条链。**
+        if not retry.should_try(store, "escalation", ident, now=now):
+            if retry.exhausted(store, "escalation", ident):
+                store.set_reminder_status(r["id"], "escalation-failed")
+                retry.give_up(
+                    store, "escalation", ident,
+                    f"加急提醒升级不出去（收件人 {backup}）。"
+                    f"多半是这个人不在自建应用的可见范围里，或者账号已停用——"
+                    f"去企微后台确认，然后在「状态」页看这条小记是否消失。",
+                )
             continue
+        if not sender.send_direct_text(backup, f"【升级提醒】\n{r['summary']}"):
+            n = retry.record_failure(store, "escalation", ident)
+            logger.warning("escalation send failed (%s 次): reminder=%s", n, r["id"])
+            continue
+        retry.succeeded(store, "escalation", ident)
         store.set_reminder_status(r["id"], "escalated")
         escalated.append(r["id"])
     return escalated

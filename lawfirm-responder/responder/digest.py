@@ -47,6 +47,9 @@ def build_digest(
         # 说清楚「没线索」和「系统坏了」的区别——否则连着几天零线索时，
         # 没人分得清是淡季还是通道断了，而后者每多一天都是真金白银
         lines.append("（若这不符合预期，请检查客服通道与二维码是否正常）")
+        # **零线索这一天尤其要出自检。** 「昨天没有新线索」正是通道断掉时的症状，
+        # 而这条分支原来直接 return，把唯一那份健康报告漏在了最该看到它的那天。
+        lines += _self_check(store, settings)
         return "\n".join(lines)
 
     lines += [
@@ -77,10 +80,55 @@ def build_digest(
     if agg.get("unassigned"):
         lines.append(f"\n⚠️ {agg['unassigned']} 条线索还没派给任何人")
 
+    lines += _self_check(store, settings)
+
     base = settings.public_base_url.rstrip("/")
     if base:
         lines += ["", f"完整表格与看板：{base}/ui"]
     return "\n".join(lines)
+
+
+def _self_check(store: Store, settings: Settings) -> list[str]:
+    """战报里固定的一段「系统自检」。
+
+    **这是律所侧唯一一条不用打开任何页面就能看到系统健康状况的通道。**
+    体检结论原话：出事之后没有任何人会知道，因为所有故障痕迹都只写在服务器日志里，
+    而律所这边看不到日志、也没有 SSH。
+
+    一切正常时只有一行（「系统自检：正常」），不占篇幅也不制造噪音——
+    每天都在喊的告警等于没有告警。有问题时把该做什么直接写出来。
+    """
+    bad: list[str] = []
+
+    beat = store.get_note("worker_heartbeat")
+    if beat:
+        try:
+            idle = (datetime.now() - datetime.fromisoformat(beat)).total_seconds()
+            if idle > 600:
+                bad.append(
+                    f"❌ 后台处理线程已经 {int(idle / 60)} 分钟没动静了——"
+                    f"这段时间进来的客户消息可能一条都没处理。请打开控制台「状态」页看一眼。"
+                )
+        except ValueError:
+            pass
+
+    if store.get_note("worker_restarted"):
+        bad.append("· 后台线程曾意外退出、已被自动拉起（不影响使用，记录在案）")
+    if blocked := store.get_note("update_blocked"):
+        bad.append(f"❌ 自动升级停了：{blocked}")
+
+    # 重试试到放弃的事：每一条都意味着「系统以为做完了，其实没做成」
+    gave_up = [
+        (k, v) for k, v in store.notes_by_prefix("gaveup:").items() if v
+    ]
+    for _key, text in gave_up[:3]:
+        bad.append(f"❌ {text}")
+    if len(gave_up) > 3:
+        bad.append(f"· 另有 {len(gave_up) - 3} 条同类记录，详见控制台「状态」页")
+
+    if not bad:
+        return ["", "系统自检：正常 ✅"]
+    return ["", "系统自检："] + bad
 
 
 def digest_target(store: Store, settings: Settings) -> str:

@@ -177,6 +177,7 @@ class Pipeline:
             classification=self._classify(msg, group, history),
         )
         self._avoid_repeat_greeting(decision, msg)
+        self._release_stale_handoff(decision, group)
 
         if decision.action == Action.SILENCE:
             self.store.save_decision(decision)
@@ -688,6 +689,30 @@ class Pipeline:
     def _recent_cta(self, group_id: str) -> bool:
         """接管时间窗内该群是否已发过带面谈引导/收尾语的回复——有则本次不再带（防套路感）。"""
         return self._recent_marker(group_id, templates.CTA_MARKERS)
+
+    def _release_stale_handoff(self, decision: Decision, group: GroupProfile) -> None:
+        """彻底放弃等人之后，把「已转人工」这条记录清掉。
+
+        2026-08-12 体检查出的一条永久性损失：`handoff:reclaimed` 此前**只是一个
+        写进判断日志的字符串**，`handoff_userid` 谁也不清。而它正是转接的六个前提
+        之一（「本会话未转过」）——于是这个客户后面再怎么明确说「我要委托」
+        「让律师给我打电话」，系统都会以「已经转过了」为由**永远拒绝再转真人**，
+        只能靠人工去控制台补救，而没有任何地方会说明原因。
+
+        清的时机就是 `decision` 已经判定的那一刻：宽限期内不动（律师可能正要打开），
+        `handoff:no-show` 也不动（AI 只是先陪着，他随时能接手），
+        只有过了 `handoff_reclaim_seconds`——语义上「彻底放弃等人」——才清。
+        """
+        if "handoff:reclaimed" not in decision.reasons or not group.handoff_userid:
+            return
+        self.store.set_handoff(group.group_id, "")
+        group.handoff_userid, group.handoff_at = "", None
+        self.store.set_note(
+            f"handoff_released:{group.group_id}",
+            f"{datetime.now().isoformat()} 转给的人一直没露面，已收回给 AI；"
+            f"客户再表达强意愿时可以重新转",
+        )
+        logger.info("stale handoff released: %s", group.group_id)
 
     def _awaiting(self, group: GroupProfile) -> str:
         """我们上一句在等客户点头吗——在等什么。

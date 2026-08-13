@@ -792,9 +792,14 @@ def set_admin_token(
 
 @router.post("/update")
 def self_update(request: Request, _: Principal = Depends(require_admin)):
-    """拉取配置分支的最新代码并重启服务（命令写死，不接受请求参数）。"""
+    """拉取配置分支的最新代码并重启服务（命令写死，不接受请求参数）。
+
+    人工点这个按钮＝明确表示「我知道上次没起来，再试一次」，
+    所以顺手把自动升级的失败黑名单清掉（见 `ops.mark_update_failed`）。
+    """
     from responder import ops
 
+    ops.clear_update_failures(request.app.state.store)
     return ops.start_update(request.app.state.pipeline.settings)
 
 

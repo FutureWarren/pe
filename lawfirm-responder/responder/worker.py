@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from responder import kfroster, lead, memory
+from responder import kfroster, lead, memory, retry
 from responder.compliance.guard import guard
 from responder.engine import signals
 from responder.gateway import bot, douyin, wecom_kf
@@ -69,6 +69,9 @@ class Worker:
         # 接待人同步：启动后先跑一轮（epoch 时间戳保证第一次 tick 就到期），
         # 这样重启即自愈——不用等到下一个整点，也不用人记得去点按钮
         self._last_servicer_sync = datetime.fromtimestamp(0)
+        # 上一轮刚试过的新版本（判「它是不是自己回滚了」用，见 _maybe_auto_update）
+        self._pending_update_sha = ""
+        self._pending_update_before = ""
 
     # ------------------------------------------------------------ 生命周期
     def start(self) -> None:
@@ -362,7 +365,19 @@ class Worker:
         try:
             from responder import ops
 
-            ops.auto_update_tick(s, busy=busy)
+            before = ops.current_commit(s.update_repo_dir)
+            result = ops.auto_update_tick(s, busy=busy, store=self.store)
+            # 升级脚本是异步跑的（它要重启我们自己），所以这里看不到结果；
+            # 真正的判据留到**下一轮**：那时若本地版本仍等于升级前的样子，
+            # 说明脚本自己回滚了 → 把那个 sha 拉黑，别每 5 分钟原样重放一遍。
+            if self._pending_update_sha and before == self._pending_update_before:
+                ops.mark_update_failed(self.store, self._pending_update_sha)
+                self._pending_update_sha = ""
+            elif self._pending_update_sha:
+                self._pending_update_sha = ""  # 版本真的变了＝上去了
+            if result.get("updated") or result.get("to"):
+                self._pending_update_sha = result.get("to", "")
+                self._pending_update_before = before
         except Exception:
             logger.exception("auto update check failed")
         self._run_ops_commands()
@@ -432,6 +447,18 @@ class Worker:
         )
         if not self.pipeline._can_send(group):
             return
+        # **有限次 + 退避。** 判重用的是「有没有**实发过**」，而发失败不算实发——
+        # 于是这条会每 10 秒重发一次、连打 24 小时（约 8000 次），
+        # 还会把抖音那 6 条的发送配额算成早就用光，最要紧的「要电话」
+        # 和「邀约到所」反而发不出去。挽留只是锦上添花，不该有这种代价。
+        if not retry.should_try(self.store, "winback", group_id):
+            if retry.exhausted(self.store, "winback", group_id):
+                retry.give_up(
+                    self.store, "winback", group_id,
+                    "这个客户的挽留话术一直发不出去（多半会话已过 48 小时窗口，"
+                    "或者他把客服号删了）。不影响别的功能，知道有这么回事即可。",
+                )
+            return
         marker = f"winback-{group_id}"
         text = templates.winback(group, spoke, seed=marker, settings=s)
         result = guard(text, Action.ANSWER, templates.safe_fallback(group),
@@ -441,6 +468,10 @@ class Worker:
             marker, group_id, result.text, "live" if sent else "failed",
             result.passed, category="winback", parts=parts,
         )
+        if sent:
+            retry.succeeded(self.store, "winback", group_id)
+        else:
+            retry.record_failure(self.store, "winback", group_id)
         logger.info("winback %s: %s", "sent" if sent else "failed", group_id)
 
     def _sweep_idle_leads(self, now: datetime) -> None:
@@ -662,6 +693,19 @@ class Worker:
             # 拉回来几条。回调来了但这个数一直是 0 = 游标卡住或 Token 过期，
             # 跟「回调没来」是两码事，修法也完全不同。
             self.store.bump("kf_synced", len(batch["msg_list"]))
+            # **拉失败要单独计数。** 它和「真的没人说话」长得一模一样，
+            # 不数出来就永远看不见——而丢的那批可能正是某个客户的第一句话。
+            if batch.get("failed"):
+                self.store.bump("kf_sync_failed")
+                self.store.set_note(
+                    "kf_sync_failed_last",
+                    f"{datetime.now().strftime('%m-%d %H:%M')} 从企微拉消息失败"
+                    f"（账号 {job.open_kfid}）。重试过 3 次仍不成，"
+                    f"这一批消息要等这个账号下次有人进线才补得回来。",
+                )
+                logger.error("kf sync failed for %s, batch lost until next callback",
+                             job.open_kfid)
+                return
             if batch["msg_list"]:
                 first = batch["msg_list"][0]
                 self.store.set_note(
@@ -808,10 +852,26 @@ class Worker:
             return
         if group.handoff_userid and self.pipeline._being_handled(group):
             return  # 人正在跟，别把他踢开
+        # **刚转过去的头一会儿也别动。** 律师可能正要点开企微，而这段时间
+        # AI 本来就是沉默的（`gate:handed-off`），把归属抢回来只有坏处：
+        # 他打开工作台时那通对话已经不在他名下了。
+        if group.handoff_userid and group.handoff_at is not None:
+            waited = (datetime.now() - group.handoff_at).total_seconds()
+            if waited < self.pipeline.settings.handoff_grace_seconds:
+                return
         now = time.time()
+        # 节流状态落库：只放内存的话，每次自动升级重启都清零，
+        # 而这条路径每条客户消息都会走——重启频繁时等于没有节流。
+        last = self.store.get_note(f"robot_check:{group_id}")
+        try:
+            if last and (datetime.now() - datetime.fromisoformat(last)).total_seconds() < 600:
+                return
+        except ValueError:
+            pass
         if now - self._robot_state_checked.get(group_id, 0.0) < 600:
             return
         self._robot_state_checked[group_id] = now
+        self.store.set_note(f"robot_check:{group_id}", datetime.now().isoformat())
         getter = getattr(self.kf_client, "service_state", None)
         if getter is None:
             return  # 老版本客户端/测试桩没有这个能力，跳过而不是报错

@@ -103,17 +103,48 @@ def sync(store, client, in_use: set[str] | None = None) -> dict:
             skipped.append(a.get("name", "") or kfid)
             continue
         raw = client.servicer_add(kfid, userids)
-        after = set(client.servicer_list(kfid))
+        try:
+            after = set(client.servicer_list(kfid))
+        except Exception as e:
+            # 读不到 ≠ 一个都没加上。这时**什么结论都不下**，下一轮再来——
+            # 报一个假的「谁都没加上」，律所会跑去企微网页端手工点接待人，
+            # 而那会夺走管理权、打断消息推送，整套 AI 当场哑掉。
+            logger.warning("servicer readback failed (%s): %s", kfid, e)
+            out.append({
+                "open_kfid": kfid, "name": a.get("name", ""),
+                "added": [], "failed": [], "removed": [],
+                "error": str(e)[:200], "hint": "这次没读上来，下一轮会自动重试",
+                "unknown": True,
+            })
+            continue
+        # **反向删除**：名册里没有的人要从接待人名单里拿掉。
+        # 少了这一步，律所在「团队」页删掉一个人、所有人都以为处理完了，
+        # 而他的企微客服工作台照样能看到所里新进来的咨询、照样能接走会话——
+        # 一个刚离职的人能看到并抢走每天的新客资。
+        stale = sorted(after - set(userids))
+        removed = []
+        if stale and hasattr(client, "servicer_del"):
+            client.servicer_del(kfid, stale)
+            try:
+                after = set(client.servicer_list(kfid))
+            except Exception:
+                pass
+            removed = sorted(x for x in stale if x not in after)
         out.append({
             "open_kfid": kfid,
             "name": a.get("name", ""),
             "added": sorted(set(userids) & after),
             "failed": sorted(set(userids) - after),
+            "removed": removed,
+            "stale": sorted(after - set(userids)),  # 该删没删掉的，要看得见
             "error": raw.get("error", ""),
             # 48007/60030 这类错误码对律所侧等于乱码，翻成一句能照着点的中文
             "hint": raw.get("hint", "") or kf_errors.err_hint(raw),
+            "unknown": False,
         })
-    ok = bool(out) and all(not a["failed"] for a in out)
+    ok = bool(out) and all(
+        not a["failed"] and not a.get("stale") and not a.get("unknown") for a in out
+    )
     return {"ok": ok, "accounts": out, "roster": userids, "skipped": skipped,
             "error": ""}
 
