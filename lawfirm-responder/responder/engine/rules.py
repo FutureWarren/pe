@@ -55,6 +55,32 @@ CLIENT_MONEY = re.compile(
     r"能(拿|要|争取|追)(回|到)|拿得?回|要得?回|追得?回)"
 )
 
+# 「你们咨询要钱吗」——**这不是在问律师费，是在问「我敢不敢往下说」。**
+#
+# 2026-08-12 体检：AI 已经在开场白、邀约到所、静默挽留三处主动说「咨询是免费的」，
+# 可客户一旦反问，得到的却是「这个得律师结合您的情况来说才准确」。
+# 在客户眼里这就是**广告写免费、一问就含糊**——他不会问第二遍，直接去问下一家。
+# 而问这句的人最常是被辞退、被欠薪、手头正紧的：这是他开口的唯一门槛，
+# 损失正落在漏斗上最贵的那一段（416 人进私信 → 90 人开口）。
+#
+# 与费用层的分界线是**问的是哪一笔钱**：咨询这一次收不收 → 律所已授权正面回答；
+# 案子怎么收费 → 照旧承接、绝不报价。同句出现律师费/代理费即归后者。
+#
+# **必须带疑问标记**（吗 / 么 / ？ / 收不收）。少了这道，我们自己的商品名
+# 「【婚姻家事】律师一对一30分钟免费法律咨询」就会被判成客户在问价——
+# 这个坑 2026-08-10 已经踩过一次（导入历史客资每条白加一笔费用分），
+# 不能因为新加一层又踩回去。`test_our_own_marketing_copy_is_not_a_fee_question` 守着。
+CONSULT_FREE_QUESTION = re.compile(
+    r"("
+    r"(咨询|问问|问一下|问下|聊聊|聊一下|说说|了解|你们|这个)[^。！？!?]{0,6}"
+    r"(收费|收钱|要钱|花钱|免费|付费)[^。！？!?]{0,4}[吗么呢?？]"
+    r"|(收不收费|要不要钱|花不花钱|收不收钱|是不是免费|免不免费)"
+    r"|^(免费的?吗|要钱吗|收费吗|收钱吗|花钱吗|要收费吗|是免费的吗)[?？!！。]*$"
+    r")"
+)
+# 明确在问「案子怎么收费」——这一层压过上面那条，永远走承接、永远不报价
+CASE_FEE_QUESTION = re.compile(r"(律师费|代理费|办案费|服务费|诉讼费|风险代理|打官司.{0,4}多少)")
+
 FEE_PATTERNS = [
     r"(多少钱|几多钱|什么价|啥价)",
     r"(收费|费用|价格|报价|价位)(是|大概|多少|怎么|如何|标准)?",
@@ -341,6 +367,11 @@ def is_chasing(text: str, category: Category) -> bool:
     """
     if wants_lawyer_contact(text):
         return False  # 「怎么联系律师」是往前走，不是在催
+    # 客户刚把号码打出来。这是整通对话里最强的交付动作，**绝不是在催**——
+    # 判成催的后果是回一句「抱歉让您久等了，我刚又跟律师那边催了一下」，
+    # 而他没在等，他刚给完号码。他的合理解读是「我白给了，这边根本没人看」。
+    if _PHONE_LEFT.search(text):
+        return False
     return category == Category.CONTACT or is_presence_check(text)
 
 
@@ -376,6 +407,33 @@ _CHITCHAT = re.compile(
 # 礼貌语兜底（放在所有承接层之后判定，避免吞掉「麻烦帮我催一下」这类请求）
 _COURTESY = re.compile(r"^(谢谢|多谢|感谢|辛苦|麻烦)[^？?！!]{0,10}[!！。~～]*$")
 
+# 一声「好的」——**只在我们刚问过一句、正等他点头的时候**才认。
+#
+# 2026-08-12 复查发现的最贵一处：AI 发完完整邀约（「您方便的话来所里一趟，
+# 主任律师帮您把材料过一遍，咨询是免费的」），客户回一句「好的」，
+# 然后**对面再没有任何声音**——上面的 `_CHITCHAT` 快速通道把它判成闲聊、
+# 直接沉默。没约哪天、没说带什么、没有任何东西告诉他对面还有人。
+# 半小时后补发的挽留，内容恰好是把他刚答应过的事再邀请一遍。
+#
+# 词表比 `_CHITCHAT` 窄：**只收「他答应了」，不收「他要结束了」。**
+# 「谢谢」「辛苦了」是收尾语，客户说完就准备走，追一句反而黏人；
+# 招呼语更不算——那是一通对话的开头，不是对某个问题的回答。
+_AFFIRM = re.compile(
+    r"^(好|好的|好呀|好啊|好吧|好嘞|好滴|行|行的|行吧|可以|可以的|没问题|"
+    r"OK|ok|okay|Ok|嗯|嗯嗯|嗯呢|恩|唔|是的|是|对|对的|要的|愿意|方便|中|阔以|"
+    r"没事|那行|那好)[\s,，。.!！~～、]*$",
+)
+
+# 我们上一句在等什么。空串＝没在等谁点头，此时一声「好的」照旧沉默。
+AWAIT_OFFICE = "office"    # 刚邀约他来所里
+AWAIT_CONTACT = "contact"  # 刚请他留手机号
+AWAIT_INTAKE = "intake"    # 刚问了他案情
+
+
+def is_affirmation(text: str) -> bool:
+    """这是一句纯粹的「答应了」（而不是新问题、新情况、或告别）。"""
+    return bool(_AFFIRM.match((text or "").strip()))
+
 
 def _match_any(patterns: list[re.Pattern], text: str) -> str | None:
     for p in patterns:
@@ -386,7 +444,7 @@ def _match_any(patterns: list[re.Pattern], text: str) -> str | None:
 
 def classify(
     content: str, msg_type: str = "text", *, is_one_on_one: bool = False,
-    in_consultation: bool = False,
+    in_consultation: bool = False, awaiting: str = "",
 ) -> tuple[Action, Category, bool, list[str]]:
     """返回 (action, category, urgent, reasons)。
 
@@ -412,6 +470,12 @@ def classify(
     if msg_type != "text" or not text:
         return Action.SILENCE, Category.CHITCHAT, False, ["non-text-or-empty"]
 
+    # 「好的」——**必须排在闲聊快速通道之前**，否则整条就没了。
+    # 只在一对一窗口、且我们上一句确实在等他点头时成立：群聊里承办律师在场，
+    # 客户应一声不需要 AI 接话；没有上下文时「好的」判沉默也依然是对的。
+    if is_one_on_one and awaiting and is_affirmation(text):
+        return Action.HANDOFF, Category.OTHER, False, [f"affirm:{awaiting}"]
+
     if _CHITCHAT.match(text):
         return Action.SILENCE, Category.CHITCHAT, False, ["chitchat-fastpath"]
 
@@ -431,6 +495,19 @@ def classify(
     # 要律师电话：比费用问题更强的信号，先判，别让「多少钱」把它盖过去
     if _match_any(_WANT_LAWYER_CONTACT, text):
         return Action.HANDOFF, Category.CONTACT, False, ["want-lawyer-contact"]
+
+    # 「你们咨询要钱吗」——排在费用层之前，因为它问的不是同一笔钱。
+    # 客户问的是「我敢不敢往下说」，而律所已经授权正面回答这一句
+    # （`Settings.approved_claims`，2026-08-12 拍板主打免费法律咨询）。
+    # 含糊其辞的代价是他不会问第二遍，直接去问下一家。
+    # **仍然叫人**（Category.FEE → 信号层的 `fee` → 转人工）：问价的人正在比较，
+    # 而比较时听到的是不是真人，直接决定他去谁那儿。答一句和叫个人是两件事。
+    if (
+        is_one_on_one
+        and CONSULT_FREE_QUESTION.search(text)
+        and not CASE_FEE_QUESTION.search(text)
+    ):
+        return Action.HANDOFF, Category.FEE, False, ["fee:consult-free"]
 
     # 费用层只管「我们收多少」。客户问「他能拿到多少赔偿」是法律问题，
     # 不是费用问题——除非他同时提到律师费，那才是真在问我们。

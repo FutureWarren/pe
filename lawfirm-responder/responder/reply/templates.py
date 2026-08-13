@@ -57,6 +57,32 @@ def _pick(variants: list[str], seed: str) -> str:
     return variants[zlib.crc32(seed.encode()) % len(variants)]
 
 
+def free_claim(settings: Settings | None = None) -> str:
+    """律所授权可以对客说出口的那句「免费」原话。**唯一真相来源。**
+
+    出口闸门（`compliance/forbidden.py`）的做法是：先把 `approved_claims` 里的
+    原话从文本里抠掉，再跑禁止事项规则。于是**授权的那句能说，别的关于钱的说法
+    一句也漏不过去**（「打三折」「代理费一万」照拦）。
+
+    这意味着话术里那句「免费」必须与配置**一字不差**。2026-08-12 体检发现它被
+    硬编码在七个地方：谁把它润色成「首次咨询不收费」，或者律所改了授权措辞，
+    出口闸门就会把**整条邀约**丢掉——地址、主任律师、带材料、免费四样一起没了，
+    换成一句「这个得让律师来说比较准确」，恰好在最该请客户到所里的那一秒。
+
+    所以所有话术一律从这里取。`approved_claims` 清空即全部不提「免费」，
+    话术照样通顺——那是律所收回授权时应有的行为。
+    """
+    raw = (settings or get_settings()).approved_claims
+    phrases = [p.strip() for p in raw.split("|") if p.strip()]
+    return phrases[0] if phrases else ""
+
+
+def _free_clause(settings: Settings | None = None, sep: str = "，") -> str:
+    """把授权原话拼成一个可以直接嵌进句子的从句（未授权时返回空串）。"""
+    claim = free_claim(settings)
+    return f"{sep}{claim}" if claim else ""
+
+
 # ---------------------------------------------------------------- ② 承接类
 # 语感依据见 docs/voice-guide.md：先接住，再给预期；短句；不打公文腔。
 def handoff_case_status(group: GroupProfile, seed: str = "") -> str:
@@ -72,17 +98,52 @@ def handoff_case_status(group: GroupProfile, seed: str = "") -> str:
 def handoff_fee(group: GroupProfile, seed: str = "") -> str:
     L = _lawyer(group)
     if group.client_status == ClientStatus.PROSPECT:
+        # **不带 OFFICE_INVITE_MARKERS 里的词。** 原来第二条写着「来所里坐坐」，
+        # 于是这句纯费用承接被判成「已经邀约过了」，此后半小时压掉唯一那条
+        # 带地址、带主任律师、带「免费」的正式邀约——恰好在最该请他来的那一秒。
         variants = [
-            f"收到。费用这块跟案子具体情况关系很大，得{L}了解情况后才能给您准数，我已经转达了。\n"
-            f"方便的话可以约个时间当面聊，把您的情况一次说清楚。",
-            f"这个得{L}结合您的情况来说才准确，我让他尽快跟您联系哈。"
-            f"要是方便，也欢迎约个时间来所里坐坐，当面把情况理一理。",
+            f"收到。这块跟案子的具体情况关系很大，得{L}了解清楚才能给您准数，我已经转达了。\n"
+            f"方便的话约个时间当面聊，把您的情况一次说透。",
+            f"这个得{L}结合您的情况来说才准确，我让他尽快跟您联系哈。\n"
+            f"方便的话约个时间当面聊，材料先发我也行，他看了心里更有数。",
         ]
     else:
         variants = [
             f"收到，费用的事由{L}跟您直接确认，我已经提醒他了，稍等哈。",
             f"看到您消息了。这块{L}会跟您直接沟通，我这边也催着，请您稍等。",
         ]
+    return _pick(variants, seed)
+
+
+def consult_is_free(
+    group: GroupProfile, seed: str = "", settings: Settings | None = None
+) -> str:
+    """客户直接问「你们咨询要钱吗」。**正面回答，不绕。**
+
+    2026-08-12 体检发现的三层叠加里的第一层：AI 在开场白、邀约、挽留三处主动说
+    「咨询是免费的」，可客户一反问就变成「这个得律师结合您的情况来说才准确」——
+    广告写免费、一问就含糊。他不会问第二遍，直接去问下一家。
+    问这句的人最常是被辞退、被欠薪、手头正紧的，这是他敢不敢往下说的唯一门槛。
+
+    两句话，界线画清楚：
+      1. **咨询这一次不收钱**——用律所授权的那句原话（`free_claim`，一字不差，
+         否则出口闸门会把整段拦掉）；
+      2. **案子怎么收由律师跟您谈**——绝不报价、绝不给区间。费用闸门一个字没动。
+
+    授权被收回（`approved_claims` 清空）时自动退回纯承接：不能替律所许一个
+    它没许过的承诺。
+    """
+    settings = settings or get_settings()
+    L = _lawyer(group)
+    claim = free_claim(settings)
+    if not claim:
+        return handoff_fee(group, seed)
+    variants = [
+        f"{claim}，您先把情况说给我就行。\n"
+        f"真要办的话具体怎么收费，{L}会当面跟您讲清楚，不会有别的名目。",
+        f"不用担心这个，{claim}。您有什么想问的尽管说。\n"
+        f"后面如果决定要办，费用怎么算{L}会跟您当面谈明白。",
+    ]
     return _pick(variants, seed)
 
 
@@ -103,6 +164,68 @@ def handoff_contact(group: GroupProfile, seed: str = "") -> str:
         f"在的。{L}可能暂时腾不出手，我已经跟他说了，看到就回您哈。",
         f"收到，我这就帮您叫一下{L}，他看到会尽快回复您。",
     ]
+    return _pick(variants, seed)
+
+
+def contact_received(
+    group: GroupProfile, seed: str = "", settings: Settings | None = None
+) -> str:
+    """客户刚把手机号打出来。**这是整通对话里最强的成交动作。**
+
+    2026-08-12 复查前，这一刻走的是 `handoff_contact`——三条变体里两条开口是
+    「律师这会儿应该在忙 / 可能暂时腾不出手」。客户交出号码，换回一句「他在忙」，
+    合理解读只有一个：**我白给了，这边根本没人看。**
+
+    所以这句话必须先做一件事：**当着他的面确认号码收到了**。
+    然后才是「谁来打、大概多久」——一个具体的时间预期，比任何安抚都管用。
+    不点名具体律师（见 `_lawyer`），因为谁接这单是分案引擎算出来的。
+    """
+    settings = settings or get_settings()
+    L = _lawyer(group)
+    variants = [
+        f"号码收到了。我这就把您的情况整理给{L}，他会直接打给您。",
+        f"好的，您的手机号我记下了，转给{L}那边，会尽快跟您联系。",
+        f"收到，号码我存下了。这边把您说的情况一并转给{L}，等他电话就行。",
+    ]
+    return _pick(variants, seed)
+
+
+def affirm_followthrough(
+    group: GroupProfile, kind: str, seed: str = "", settings: Settings | None = None
+) -> str:
+    """客户对我们上一句问话点了头，把这一拍接住。
+
+    2026-08-12 复查里最贵的一条：AI 发完完整邀约，客户回一句「好的」，
+    **然后对面再没有任何声音**——那声「好的」被当成闲聊判了沉默。
+    没约哪天、没说带什么、没有任何东西告诉他对面还有人；
+    半小时后补发的挽留，内容恰好是把他刚答应过的事再邀请一遍。
+
+    每一档都必须落到**一个他此刻就能做的具体动作**上，不能只回一句「好的呢」——
+    那和沉默的差别只是多了一条消息。
+    """
+    settings = settings or get_settings()
+    L = _lawyer(group)
+    who = settings.office_senior_title.strip() or "律师"
+    if kind == "office":
+        # 答应来所里。定时间 + 说带什么——「带了材料的人」到场率高得多
+        variants = [
+            f"好嘞。您看这两天哪天方便？我先帮您跟{who}那边排个时间。\n"
+            f"过来的时候材料带上就行——合同、聊天记录、工资条这类，有什么带什么。",
+            "那太好了。您方便的话说个大概时间，上午下午都行，我这边去排。\n"
+            "手上的材料记得带着，一次说清楚，省得来回跑。",
+        ]
+    elif kind == "contact":
+        # 答应留号。别再客套，直接请他发过来，并给一个时间预期
+        variants = [
+            f"好，那您把号码发过来就行。我转给{L}，一般当天就会给您回电话。",
+            f"行，手机号发我这儿。{L}那边看到会直接联系您，不用您再等消息。",
+        ]
+    else:
+        # 答应说案情。接着问最要紧的两件事，别让他自己想「该说什么」
+        variants = [
+            "那您说说看——这事大概什么时候开始的，现在走到哪一步了？",
+            "好，您大概讲一下：什么时候的事，现在是个什么状况？",
+        ]
     return _pick(variants, seed)
 
 
@@ -144,7 +267,10 @@ def handoff_noted(group: GroupProfile, seed: str = "") -> str:
     return _pick(variants, seed)
 
 
-def greeting_opener(group: GroupProfile, seed: str = "", contact_left: bool = False) -> str:
+def greeting_opener(
+    group: GroupProfile, seed: str = "", contact_left: bool = False,
+    settings: Settings | None = None,
+) -> str:
     """一对一客服的开场引导：接住客户，并请他说明情况（首轮筛查的第一步）。
 
     这是整条管道上最贵的一句话——抖音后台数据：416 人进私信只有 90 人开口，
@@ -161,6 +287,7 @@ def greeting_opener(group: GroupProfile, seed: str = "", contact_left: bool = Fa
     客户刚留下联系方式时必须换一套话术——此时再问「您是什么情况」既冒犯又像机器人。
     不含任何法律实质内容，因此走确定性模板即可，无需模型。
     """
+    settings = settings or get_settings()
     if contact_left:
         L = _lawyer(group)
         variants = [
@@ -175,14 +302,15 @@ def greeting_opener(group: GroupProfile, seed: str = "", contact_left: bool = Fa
     # 法律咨询」）。放这儿而不是别处，是因为漏斗上最贵的断点就在这一句：
     # 416 人进私信只有 90 人开口，78% 的人看完第一句就走了——
     # 而挡住他们的除了「不知道怎么说」，就是「随便问一句会不会要钱」。
+    free = _free_clause(settings)
     variants = [
-        "您好，这里是上海松沪律师事务所，咨询是免费的。\n"
+        f"您好，这里是{settings.office_name}{free}。\n"
         "您把遇到的情况说两句就行，不用特意组织语言——"
         "比如「公司欠了我三个月工资，还把我辞退了」这样，我先帮您理一理。",
-        "您好，上海松沪律师事务所，我在的，咨询是免费的。\n"
+        f"您好，{settings.office_name}，我在的{free}。\n"
         "您遇到的是什么事？简单说个大概就可以，"
         "比如「对方借钱不还，有转账记录」，我帮您看看该怎么处理。",
-        "您好，这里是上海松沪律师事务所，免费咨询。\n"
+        f"您好，这里是{settings.office_name}{free}。\n"
         "麻烦您把情况大致讲一下，怎么想的就怎么说，"
         "比如「准备离婚，孩子抚养权想争取」，我先了解清楚再给您建议。",
     ]
@@ -464,14 +592,18 @@ def office_invite(
       · **带什么** —— 让他带材料。一个具体的准备动作，比空邀约有效得多，
         而且带了材料的人来的概率高很多。
       · **没有压力** —— 「聊完您心里有个数，接下来怎么走再定」。
+      · **免费** —— 由 `free_claim()` 取律所授权的那句原话（2026-08-12 拍板）。
+        **必须从那里取，不能在这里另写一句。** 出口闸门是靠「与授权原话逐字相同」
+        放行的：谁把它润色成「首次咨询不收费」，整条邀约会被当成报价整段丢掉，
+        地址、主任律师、带材料、免费四样一起没，换成一句「这个得让律师来说」——
+        恰好在最该请客户到所里的那一秒。授权收回（配置清空）时这句自动消失，
+        其余三样照常，句子仍然通顺。
 
-    **不写「免费」。** 律所方明确要求过用「免费咨询」吸引到店，但全国律协
-    《律师业务推广行为规则》第十条把「以不收费或减低收费招揽业务」列为
-    禁止行为（法律援助案件除外），出口闸门（`quote-fee`）也会整段拦掉——
-    真写进去的结果是客户什么都收不到。而客户真正在意的其实是
-    「我会不会被绑住」，上面第三点把这层意思说得更准，也更像人说的话。
-    要打「免费」这张牌，应该由律所自己的物料去打（企微欢迎语、抖音主页、
-    升级服务推荐语），那是律所署名的宣传，不是 AI 逐句生成的对客发言。
+    > 落这条之前我两次提出全国律协《律师业务推广行为规则》第十条把
+    > 「以不收费或减低收费招揽业务」列为禁止行为（法律援助案件除外），
+    > 律所方重申「你不要管，按我说的做」。**这是律所的执业判断，由律所承担。**
+    > 让步只有一处，且不再让：只放行 `approved_claims` 里逐字定下的那几句，
+    > 费用闸门本身一个字不动——模型仍然编不出律所没授权的价格承诺。
 
     和要电话分开、且晚一步（见 `service._should_invite_office`）：真人不会在
     刚听完一句话之后，把电话和地址一口气报出来。
@@ -481,12 +613,14 @@ def office_invite(
     where = f"{settings.office_name}（{addr}）" if addr else settings.office_name
     who = settings.office_senior_title.strip()
     by = f"{who}" if who else "律师"
+    free = _free_clause(settings, sep="——") or "——"
+    free_mid = _free_clause(settings)
     variants = [
         f"这种事当面说清楚得多。您方便的话来所里一趟，"
-        f"{by}帮您把材料过一遍——咨询是免费的，看看能走哪条路。我们在{where}。",
-        f"要不您找个时间过来一趟？带上手上的材料，{by}当面帮您理一遍，"
-        f"咨询是免费的，聊完您心里有个数，接下来怎么走再定。{where}。",
-        f"建议还是来所里当面聊一次，{by}会亲自看您这个情况，免费咨询，"
+        f"{by}帮您把材料过一遍{free}，看看能走哪条路。我们在{where}。",
+        f"要不您找个时间过来一趟？带上手上的材料，{by}当面帮您理一遍"
+        f"{free_mid}，聊完您心里有个数，接下来怎么走再定。{where}。",
+        f"建议还是来所里当面聊一次，{by}会亲自看您这个情况{free_mid}，"
         f"材料带上一次说清楚，比在这儿来回打字省事。地址在{where}。",
     ]
     return _pick(variants, seed)
@@ -533,12 +667,13 @@ def winback(
     addr = settings.office_address
     where = f"{settings.office_name}（{addr}）" if addr else settings.office_name
     who = settings.office_senior_title.strip() or "律师"
+    free = _free_clause(settings)
     variants = [
         f"您的情况我这边大致了解了。\n"
-        f"要不找个时间来所里一趟？{who}当面帮您把材料过一遍，咨询是免费的，"
+        f"要不找个时间来所里一趟？{who}当面帮您把材料过一遍{free}，"
         f"我们在{where}。来不了的话留个手机号也行，我安排{L}给您回电话。",
         f"刚才说的我都记下了。\n"
-        f"方便的话来所里坐坐，{who}亲自看看您这个情况，免费咨询，地址是{where}。"
+        f"方便的话来所里当面聊聊，{who}亲自看看您这个情况{free}，地址是{where}。"
         f"不方便过来就留个手机号，{L}那边直接联系您。",
     ]
     return _pick(variants, seed)

@@ -434,7 +434,8 @@ class Worker:
             return
         marker = f"winback-{group_id}"
         text = templates.winback(group, spoke, seed=marker, settings=s)
-        result = guard(text, Action.ANSWER, templates.safe_fallback(group))
+        result = guard(text, Action.ANSWER, templates.safe_fallback(group),
+                       settings=self.pipeline.settings)
         sent, parts = self.pipeline._send_group(group, group_id, result.text)
         self.store.save_reply(
             marker, group_id, result.text, "live" if sent else "failed",
@@ -863,7 +864,8 @@ class Worker:
             if returning
             else templates.greeting_opener(group, seed=marker)
         )
-        result = guard(text, Action.ANSWER, templates.safe_fallback(group))
+        result = guard(text, Action.ANSWER, templates.safe_fallback(group),
+                       settings=self.pipeline.settings)
         if not client.send_text(open_kfid, external_userid, result.text):
             # **没发出去就绝不能记账。** 记了 `has_greeting` 就为真，
             # `_avoid_repeat_greeting` 从此认定「打过招呼了」，于是客户扫码进来
@@ -959,7 +961,8 @@ class Worker:
         if client is None:
             return
         text = templates.greeting_opener(group, seed=marker)
-        result = guard(text, Action.ANSWER, templates.safe_fallback(group))
+        result = guard(text, Action.ANSWER, templates.safe_fallback(group),
+                       settings=self.pipeline.settings)
         ok = client.send_text(env.open_id, result.text)
         self.store.save_reply(
             marker, group_id, result.text, "live" if ok else "failed",

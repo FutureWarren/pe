@@ -119,7 +119,7 @@ def generate(
     if any(r.startswith("office-fact:") for r in decision.reasons):
         return guard(
             templates.office_fact(group, seed=msg.msg_id, settings=settings),
-            Action.ANSWER, fallback,
+            Action.ANSWER, fallback, settings=settings,
         )
 
     # 客服开场引导：确定性话术，不含法律实质内容，不进模型。
@@ -132,14 +132,43 @@ def generate(
             text = templates.greeting_opener(
                 group, seed=msg.msg_id,
                 contact_left="kf:contact-ack" in decision.reasons,
+                settings=settings,
             )
-        return guard(text, Action.ANSWER, fallback)
+        return guard(text, Action.ANSWER, fallback, settings=settings)
 
     if decision.action == Action.HANDOFF:
+        # 客户对我们上一句点了头。接住这一拍——它自带下一步，不套 _close
+        # （刚答应来所里就再问一次电话，等于没听见他说的话）
+        affirm = next(
+            (r.split(":", 1)[1] for r in decision.reasons if r.startswith("affirm:")),
+            None,
+        )
+        if affirm:
+            return guard(
+                templates.affirm_followthrough(
+                    group, affirm, seed=msg.msg_id, settings=settings
+                ),
+                Action.HANDOFF, fallback, settings=settings,
+            )
+        # 「你们咨询要钱吗」：正面答，用律所授权的原话。自带下一步，不套 _close
+        if "fee:consult-free" in decision.reasons:
+            return guard(
+                templates.consult_is_free(group, seed=msg.msg_id, settings=settings),
+                Action.HANDOFF, fallback, settings=settings,
+            )
+        # 客户刚把号码打出来：**先确认收到**，再说谁打、多久。
+        # 走专属话术而不是通用的 CONTACT 承接——后者开口是「律师这会儿在忙」，
+        # 对着一个刚交出号码的人说这句，等于告诉他没人看。
+        if "contact-left" in decision.reasons:
+            return guard(
+                templates.contact_received(group, seed=msg.msg_id, settings=settings),
+                Action.HANDOFF, fallback, settings=settings,
+            )
         # 两类消息有专属答法，且都自带下一步，不再套 _close（会变成问两遍电话）
         if "identity-question" in decision.reasons:
             return guard(
-                templates.who_we_are(group, seed=msg.msg_id), Action.HANDOFF, fallback
+                templates.who_we_are(group, seed=msg.msg_id), Action.HANDOFF,
+                fallback, settings=settings,
             )
         if "kf:intake" in decision.reasons or "kf:intake-quiet" in decision.reasons:
             # 追问本身就是下一步，不再套 _close（问完三句再问电话就成了查户口）
@@ -148,15 +177,15 @@ def generate(
                     group, seed=msg.msg_id, settings=settings,
                     ask_phone="kf:intake-quiet" not in decision.reasons,
                 ),
-                Action.HANDOFF, fallback,
+                Action.HANDOFF, fallback, settings=settings,
             )
         if "want-lawyer-contact" in decision.reasons:
             return guard(
                 templates.exchange_contact(group, seed=msg.msg_id, settings=settings),
-                Action.HANDOFF, fallback,
+                Action.HANDOFF, fallback, settings=settings,
             )
         text = _close(templates.build_handoff(decision.category, group, seed=msg.msg_id))
-        return guard(text, Action.HANDOFF, fallback)
+        return guard(text, Action.HANDOFF, fallback, settings=settings)
 
     # ANSWER：优先 Claude 生成一般性框架；失败/示弱时确定性降级为承接式回答
     body = _llm_answer_body(msg, group, history, settings, now, knowledge_text, memory_text)
@@ -176,5 +205,6 @@ def generate(
             include_cta=include_cta and not (ask_contact or next_step or office_invite),
         )
     return guard(
-        _close(text), Action.ANSWER, fallback, require_disclaimer=require_disclaimer
+        _close(text), Action.ANSWER, fallback,
+        require_disclaimer=require_disclaimer, settings=settings,
     )

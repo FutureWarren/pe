@@ -18,12 +18,15 @@ class GuardResult:
 
 
 def guard(
-    text: str, action: Action, safe_fallback: str, *, require_disclaimer: bool = False
+    text: str, action: Action, safe_fallback: str, *,
+    require_disclaimer: bool = False, settings=None,
 ) -> GuardResult:
-    violations = forbidden.check(text)
+    """`settings` 透传给禁止事项清单：授权原话（`approved_claims`）取自哪份配置，
+    比对就得用哪份，否则话术与闸门会悄悄错开（见 `forbidden.check`）。"""
+    violations = forbidden.check(text, settings)
     if violations:
         # 回退文本同样过一遍闸门要求：不允许回退模板本身违规
-        assert not forbidden.check(safe_fallback), "safe_fallback 违反禁止事项清单"
+        assert not forbidden.check(safe_fallback, settings), "safe_fallback 违反禁止事项清单"
         return GuardResult(text=safe_fallback, passed=False, violations=violations)
 
     if action == Action.ANSWER and require_disclaimer:

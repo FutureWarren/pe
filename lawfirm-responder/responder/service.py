@@ -69,6 +69,7 @@ class Pipeline:
         action, category, urgent, reasons = rules.classify(
             msg.content, msg.msg_type, is_one_on_one=group.is_kf,
             in_consultation=self._in_consultation(group, history),
+            awaiting=self._awaiting(group),
         )
         if (
             action == Action.SILENCE
@@ -332,13 +333,21 @@ class Pipeline:
         """
         if not self.settings.lead_brief_enabled:
             return False
+        # 「好的」这类点头字面上一个信号词都不命中，可它恰恰是最值钱的那一个：
+        # 客户已经答应来所面谈了。判断层认出来了，这里负责把它带进线索——
+        # 不带的后果是律师收到一张既没电话、也没写「他答应来了」的冷单。
+        extra_hits = ["meeting"] if "affirm:office" in decision.reasons else None
         urgent_kf = group.is_kf and decision.urgent
         # 冷消息不在这里出单，但**不是被丢掉**：等这通对话安静下来，
         # `worker._sweep_idle_leads` 会补一张完整的单并推给客服
         # （notify_all_leads，业务决策 2026-08）。
         # 当场推的问题是客户才说了一句「在吗」——那张单上什么也没有，
         # 三十秒后他讲完案情还得再推一张。
-        if not urgent_kf and signals.detect(msg.content)[0] == signals.COLD:
+        # `extra_hits` 非空＝这一条虽然字面平淡，却带着一个硬信号
+        # （典型：一声「好的」＝答应来所面谈）。它必须走完整出单路径——
+        # 走冷分支的话，首次进线那一刻库里还没有线索行，整条就地丢掉，
+        # 而丢掉的恰恰是漏斗上最值钱的那个动作。
+        if not urgent_kf and not extra_hits and signals.detect(msg.content)[0] == signals.COLD:
             # 这一条本身不出单，但**分数要照算**。客户是边聊边变强的：
             # 留了电话（40 分）之后接着问「赔多少」「地址在哪」，
             # 每一句都在加分——旧写法在这里直接 return，于是那些后续加分
@@ -351,6 +360,7 @@ class Pipeline:
                     row = lead.dispatch(
                         self.store, group, convo, self.sender,
                         settings=self.settings, summarize=False,
+                        extra_hits=extra_hits,
                     )
                     # 重算出来的分数**也要能触发转接**。原来这里算完就 return，
                     # 于是「客户在一句看似平淡的追问里跨过 P0 门槛」这条路上，
@@ -369,6 +379,7 @@ class Pipeline:
             row = lead.dispatch(
                 self.store, group, convo, self.sender,
                 settings=self.settings, force=urgent_kf, urgent=decision.urgent,
+                extra_hits=extra_hits,
             )
             if row:
                 self._maybe_handoff(group, row, urgent=decision.urgent)
@@ -453,7 +464,8 @@ class Pipeline:
         text = templates.handing_over(seed=group.group_id)
         from responder.compliance.guard import guard
 
-        checked = guard(text, Action.HANDOFF, templates.safe_fallback(group))
+        checked = guard(text, Action.HANDOFF, templates.safe_fallback(group),
+                        settings=self.settings)
         sent, _parts = self._send_group(group, group.group_id, checked.text)
         if not sent:
             # 这句话没送到，就绝不能转。转了之后 `gate:handed-off` 让 AI 闭嘴，
@@ -676,6 +688,35 @@ class Pipeline:
     def _recent_cta(self, group_id: str) -> bool:
         """接管时间窗内该群是否已发过带面谈引导/收尾语的回复——有则本次不再带（防套路感）。"""
         return self._recent_marker(group_id, templates.CTA_MARKERS)
+
+    def _awaiting(self, group: GroupProfile) -> str:
+        """我们上一句在等客户点头吗——在等什么。
+
+        判据刻意只看**最后一条实发回复**，不看更早的：一声「好的」只有紧跟在
+        我们那句问话之后才明确是在答应它；隔了几轮再冒出来，谁也说不准他答应的是啥。
+
+        没有这一层，2026-08-12 复查里最贵的那一幕就会一直发生：完整邀约发出去，
+        客户回「好的」，AI 判成闲聊直接沉默——他答应来所里了，而对面再没有声音。
+        """
+        if not group.is_kf:
+            return ""  # 群聊里承办律师在场，客户应一声不需要 AI 接话
+        rows = self.store.list_replies(group.group_id, limit=4)
+        last = next((r for r in rows if r["mode"] == "live"), None)
+        if last is None:
+            return ""
+        age = (datetime.now() - datetime.fromisoformat(last["created_at"])).total_seconds()
+        if age >= self.settings.takeover_seconds:
+            return ""  # 隔了太久，这声「好的」多半不是在答我们那句
+        text = last["text"] or ""
+        # 邀约 > 要电话 > 追问：同一条回复里若不止一个，取「最重」的那个，
+        # 因为答应来所面谈是这三者里最值钱的一档
+        if any(m in text for m in templates.OFFICE_INVITE_MARKERS):
+            return rules.AWAIT_OFFICE
+        if any(m in text for m in templates.ASK_CONTACT_MARKERS):
+            return rules.AWAIT_CONTACT
+        if any(m in text for m in templates.INTAKE_MARKERS):
+            return rules.AWAIT_INTAKE
+        return ""
 
     def _recent_marker(self, group_id: str, markers: tuple[str, ...], limit: int = 6) -> bool:
         """接管时间窗内最近几条实发回复里是否出现过某类话术标记。"""
@@ -945,7 +986,8 @@ class Pipeline:
             # 合规护栏「所有 AI 生成文本都要过 guard」不接受任何绕行
             from responder.compliance.guard import guard
 
-            checked = guard(body, Action.HANDOFF, templates.safe_fallback(group))
+            checked = guard(body, Action.HANDOFF, templates.safe_fallback(group),
+                            settings=self.settings)
             return checked.text
         # **不要在这里改 decision.urgent。** 这里的「紧急」只是想让升级提醒
         # 走加急通道，可 decision 随后要交给线索评分——urgent 会加 25 分、
@@ -962,7 +1004,8 @@ class Pipeline:
             from responder.compliance.guard import guard
 
             body = templates.third_touch(group, seed=msg.msg_id, settings=self.settings)
-            return guard(body, Action.HANDOFF, templates.safe_fallback(group)).text
+            return guard(body, Action.HANDOFF, templates.safe_fallback(group),
+                         settings=self.settings).text
         decision.reasons.append("followup:suppressed-escalated")
         return None
 

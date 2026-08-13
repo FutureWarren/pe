@@ -81,6 +81,7 @@ def build_and_store(
     summarize: bool = True,
     previous: dict | None = None,
     urgent: bool = False,
+    extra_hits: list[str] | None = None,
 ) -> dict | None:
     """生成/更新线索并入库，返回线索记录。历史为空则不生成。
 
@@ -92,7 +93,7 @@ def build_and_store(
         return None
     history = current_session(history, settings.lead_session_gap_seconds)
 
-    intent, contact, hits = signals.scan(history)
+    intent, contact, hits = signals.scan(history, extra_hits)
     brief = (
         llm.extract_lead(
             prompts.format_history(history, max_chars_each=200),
@@ -337,7 +338,7 @@ def _any_recipient(store: Store, group: GroupProfile, settings: Settings) -> boo
 def dispatch(
     store: Store, group: GroupProfile, history: list[dict], sender, *,
     settings: Settings | None = None, force: bool = False, urgent: bool = False,
-    summarize: bool | None = None,
+    summarize: bool | None = None, extra_hits: list[str] | None = None,
 ) -> dict | None:
     """生成线索 →（按需）推送接待人。sender 为 None（影子模式）时只入库。
 
@@ -351,7 +352,9 @@ def dispatch(
     if not history:
         return None
     previous = store.get_lead(group.group_id)
-    intent, _, _ = signals.scan(current_session(history, settings.lead_session_gap_seconds))
+    intent, _, _ = signals.scan(
+        current_session(history, settings.lead_session_gap_seconds), extra_hits
+    )
     # force（紧急）也要节流：客户连发五条急消息，律师不该连收五张几乎一样的
     # 交接单（每张还烧一次模型）。刚推过就只更新入库，升级由 reminders 那条链管。
     if force and _notified_within(previous, settings.lead_force_cooldown_seconds):
@@ -368,7 +371,7 @@ def dispatch(
     lead = build_and_store(
         store, group, history, settings=settings,
         summarize=notify if summarize is None else summarize,
-        previous=previous, urgent=urgent,
+        previous=previous, urgent=urgent, extra_hits=extra_hits,
     )
     if lead is None:
         return lead
@@ -384,7 +387,7 @@ def dispatch(
         if summarize is None:
             lead = build_and_store(
                 store, group, history, settings=settings, summarize=True,
-                previous=previous, urgent=urgent,
+                previous=previous, urgent=urgent, extra_hits=extra_hits,
             ) or lead
     # 派单在通知之前：交接单要推给被派到的律师，而不是笼统的接待人。
     # 名册为空时 ensure 回落旧链路（会话承办人/全局兜底），行为与旧版完全一致。

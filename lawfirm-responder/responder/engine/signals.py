@@ -136,12 +136,20 @@ def rank(*levels: str) -> str:
     return COLD
 
 
-def scan(history: list[dict]) -> tuple[str, str, list[str]]:
+def scan(
+    history: list[dict], extra_hits: list[str] | None = None
+) -> tuple[str, str, list[str]]:
     """扫一段对话的全部客户发言，返回 (意向, 联系方式, 信号)。
 
     纯规则、零成本——先用它决定「要不要花钱调模型」，而不是反过来。
+
+    `extra_hits`：**光看字面看不出来的信号**。典型是一声「好的」——
+    它本身一个词都不命中，可如果我们上一句正是「来所里一趟」，
+    那这声「好的」就是「客户已答应面谈」，是整条漏斗上最值钱的一个信号。
+    判断层已经认出来了（`rules.classify(awaiting=)`），这里只负责别把它丢掉：
+    丢了的后果是律师收到一张既没电话、也没写「他答应来了」的冷单。
     """
-    contact, hits, levels = "", set(), []
+    contact, hits, levels = "", set(extra_hits or []), []
     for m in history:
         if m.get("sender_is_staff"):
             continue

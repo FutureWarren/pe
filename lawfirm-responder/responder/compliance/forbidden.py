@@ -21,13 +21,26 @@ FORBIDDEN: list[tuple[str, str]] = [
     # 系统提示直接把模型推进了闸门的盲区。于是「我们一般收标的额的百分之十到二十」
     # 「赔偿大概三万块」这类句子 guard 全部 passed=True、violations=[]，
     # 当着客户的面报价而且完全无痕。
-    ("quote-fee", r"(收费|费用|律师费|报价|价格).{0,12}[\d〇零一二两三四五六七八九十百千万]"),
+    # 计价口径也算报价：「每小时」「起步价」「定金」后面跟一个数就是在开价。
+    # 2026-08-12 补——原来只认「收费/费用/律师费/报价/价格」这几个词，
+    # 于是「首次咨询免费，之后每小时 800」在授权原话被抠掉后**整句放行**：
+    # 剩下的「之后每小时 800」既没有费用词、也没有货币单位，两条规则都够不着。
+    ("quote-fee", r"(收费|费用|律师费|代理费|咨询费|服务费|报价|价格|价位|"
+                  r"起步价|封顶|定金|预付款?)[^。！？!?]{0,12}"
+                  r"[\d〇零一二两三四五六七八九十百千万]"),
+    ("quote-fee", r"每\s*(小时|次|件|个案|案|月)[^。！？!?]{0,4}"
+                  r"[\d〇零一二两三四五六七八九十百千万]"),
     ("quote-fee", r"[\d〇零一二两三四五六七八九十百千万][\d〇零一二两三四五六七八九十百千万.,]*"
-                  r"\s*(万元|万块|万|千元|千块|元|块钱|块)"),
+                  r"\s*(万元|万块|万|千元|千块|千|元|块钱|块)"),
     ("quote-fee", r"百分之[\d〇零一二两三四五六七八九十]+"),
     ("quote-fee", r"[〇零一二两三四五六七八九十\d]\s*成(的)?(费|佣|提成|收|律师费)"),
     ("quote-fee", r"(按|收|抽|提)\s*[〇零一二两三四五六七八九十\d]+\s*(个)?点"),
-    ("quote-fee", r"(给你|可以|能)(便宜|优惠|打折|减免)"),
+    # 打折同样是改价。原来写作 `(给你|可以|能)(便宜|优惠|打折|减免)`，
+    # 要求两截**紧挨着**，于是「可以给您打三折」——中间隔了「给您」——整句漏过去，
+    # 而这正是最典型的一句招揽话。折扣本身也补上：「打三折」单独出现照拦。
+    ("quote-fee", r"(打|降到?|减到?)\s*[〇零一二两三四五六七八九十\d.]+\s*折"),
+    ("quote-fee", r"(给你|给您|可以|能|帮你|帮您|我们|这边)[^。！？!?]{0,6}"
+                  r"(便宜|优惠|打折|减免|少收|降价)"),
     # 「免费」也是报价——零也是一个价。抖音那套话术里满屏「电话咨询免费」
     # 「免费沟通」，它们此前一条都拦不住：规则只认带数字的金额，而
     # 承诺不收钱恰恰是最容易被客户拿来说事的一种价格承诺。
@@ -60,11 +73,11 @@ _COMPILED = [(name, re.compile(pat)) for name, pat in FORBIDDEN]
 _MASK = "\x00"
 
 
-def _mask_approved(text: str) -> str:
+def _mask_approved(text: str, settings=None) -> str:
     from responder.config import get_settings
 
     try:
-        raw = get_settings().approved_claims
+        raw = (settings or get_settings()).approved_claims
     except Exception:
         return text
     for phrase in (p.strip() for p in raw.split("|")):
@@ -73,7 +86,13 @@ def _mask_approved(text: str) -> str:
     return text
 
 
-def check(text: str) -> list[str]:
-    """返回命中的规则名列表，空列表 = 通过。"""
-    masked = _mask_approved(text)
+def check(text: str, settings=None) -> list[str]:
+    """返回命中的规则名列表，空列表 = 通过。
+
+    `settings` 必须能显式传进来：话术是从**注入的**配置里取那句授权原话的
+    （`templates.free_claim`），而这里若一律读全局配置，两边就能悄悄错开——
+    结果是话术里写着一句配置 A 授权的话，闸门却拿配置 B 去比对，
+    整段被当成报价丢掉。默认仍读全局，生产里两者本就是同一个对象。
+    """
+    masked = _mask_approved(text, settings)
     return [name for name, pat in _COMPILED if pat.search(masked)]
