@@ -113,7 +113,10 @@ class Settings(BaseSettings):
     # 只放行逐字定下的这几句，**不等于把费用闸门拆掉**：模型仍然不能
     # 自己编出「打三折」「代理费一万」这类律所没授权也不知情的话。
     # 改这一项等于改一次对外承诺，须律所方本人确认。
-    approved_claims: str = "咨询是免费的|免费咨询|首次咨询免费"
+    # 列表**第一句是主打的那句**（`templates.free_claim()` 取它），
+    # 其余几句同样授权、同样放行，只是不作为默认。
+    # 2026-08-12 律所方定稿：主打「免费咨询」。
+    approved_claims: str = "免费咨询|咨询是免费的|首次咨询免费"
     upgrade_service_enabled: bool = True
     upgrade_service_wording: str = ""
     kf_trans_path: str = "kf/service_state/trans"

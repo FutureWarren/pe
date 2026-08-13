@@ -214,3 +214,37 @@ def test_the_fee_gate_is_untouched(bad):
 
 def test_the_authorized_phrase_alone_still_passes():
     assert forbidden.check("咨询是免费的") == []
+
+
+# ------------------------------------------------ ④ 同音字：咨询 ≠ 资讯
+def test_the_homophone_never_reaches_a_customer():
+    """「资讯」和「咨询」拼音完全相同（zīxùn），输入法会挑错——这次就挑错了一回。
+
+    但两个词意思差得远：**「免费资讯」是免费的新闻消息，「免费咨询」才是
+    免费的法律咨询**。前者印在律所的对客话术里，客户读到的是一家不会用词的律所；
+    而这句话恰恰是我们主打的那张牌，出现在开场白、邀约到所、静默挽留、
+    正面回答四个位置上。
+
+    所以钉死在测试里：授权名单和所有对客话术里都不许出现「资讯」。
+    """
+    from pathlib import Path
+
+    import responder
+
+    assert "资讯" not in Settings().approved_claims
+
+    root = Path(responder.__file__).resolve().parent
+    for path in (root / "reply/templates.py", root / "console/static/index.html"):
+        assert "资讯" not in path.read_text(), (
+            f"{path.name} 里出现了「资讯」——律所这句是「免费咨询」，"
+            f"拼音输入法同音挑错了"
+        )
+
+
+def test_the_headline_phrase_is_what_the_firm_signed_off_on():
+    """律所 2026-08-12 定稿：主打「免费咨询」。改这一句等于改一次对外承诺。"""
+    assert templates.free_claim(Settings()) == "免费咨询"
+    # 另两句仍在授权名单里——同样能说，只是不作为默认
+    for alt in ("咨询是免费的", "首次咨询免费"):
+        assert alt in Settings().approved_claims
+        assert forbidden.check(alt) == []

@@ -139,7 +139,7 @@ def consult_is_free(
     if not claim:
         return handoff_fee(group, seed)
     variants = [
-        f"{claim}，您先把情况说给我就行。\n"
+        f"我们这边{claim}，您先把情况说给我就行。\n"
         f"真要办的话具体怎么收费，{L}会当面跟您讲清楚，不会有别的名目。",
         f"不用担心这个，{claim}。您有什么想问的尽管说。\n"
         f"后面如果决定要办，费用怎么算{L}会跟您当面谈明白。",
