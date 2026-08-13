@@ -162,6 +162,25 @@ def test_a_fresh_handoff_is_kept_while_the_ai_accompanies(tmp_path):
     assert d.should_speak is True, "转接后客户来话，AI 得接着回，不能晾着"
 
 
+def test_the_ai_keeps_screening_after_the_handoff(tmp_path):
+    """律所方 2026-08-13：「转人工后如果人工没有及时的回复，AI 也应该先试着
+    陪客户聊，去问案件详情，然后等人工真正发消息了再闭嘴转接。」
+
+    所以转接**不是筛查的终点**：真人开口之前，AI 接着把还缺的那几件问出来。
+    等律师接手时，案情比转接那一刻更全——这才是转接早一点的意义。
+    """
+    store, kf, p = make(tmp_path)
+    store.upsert_group(kf_group())
+    p._maybe_handoff(store.get_group(GID), lead_row(), urgent=False)
+    n = len(kf.sent)
+
+    d = p.handle(msg("对方是家建筑公司，合同我手上有", mid="m2"))
+
+    assert d.should_speak is True, "真人还没开口，AI 不能停"
+    assert len(kf.sent) > n, "客户补充了案情，AI 得接着往下问"
+    assert "handoff:accompanying" in d.reasons
+
+
 def test_minutes_of_accompanying_do_not_clear_it_either(tmp_path):
     """陪了几分钟也不清状态——离「彻底放弃等这个人」还远。"""
     store, _, p = make(tmp_path, handoff_reclaim_seconds=1800)

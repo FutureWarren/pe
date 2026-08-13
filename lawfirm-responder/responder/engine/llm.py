@@ -262,6 +262,7 @@ def generate_intake_body(
     history_text: str = "",
     handed_off: bool = False,
     is_night: bool = False,
+    missing: list[str] | None = None,
     max_tokens: int = 500,
     timeout: float = 15.0,
     settings: Settings | None = None,
@@ -278,6 +279,7 @@ def generate_intake_body(
         return None
     user = prompts.intake_user_prompt(
         latest, case_type, history_text, handed_off=handed_off, is_night=is_night,
+        missing=missing,
     )
     try:
         if provider.name == "deepseek":

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from responder import lead, memory
 from responder.config import Settings, get_settings
-from responder.engine import llm, priority, rules, signals
+from responder.engine import llm, priority, rules, screening, signals
 from responder.engine.decision import decide, wait_seconds
 from responder.gateway.sender import WeComSender
 from responder.models import (
@@ -338,6 +338,31 @@ class Pipeline:
         decision.category = Category.OTHER
         decision.reasons.append("greeting:already-sent")
 
+    def _screening(
+        self, group: GroupProfile, convo: list[dict]
+    ) -> "screening.Progress":
+        """这通对话的筛查进度：四件事问到了几件、AI 已经问了几轮。
+
+        轮次用「**本次咨询**里我们实发过几条回复」来数，而不是数追问模板的
+        标记词——话术松绑之后回复是模型即兴写的，模板标记根本不会出现，
+        照旧数标记的话轮次永远是 0，「问满上限就放行」那条兜底当场失效。
+        按本次咨询切片同理：老客户隔周回来，上一次的十条回复不该算成
+        「这次已经问过十轮了」，那会让他一开口就被判成问不动了。
+        """
+        session = lead.current_session(convo, self.settings.lead_session_gap_seconds)
+        since = session[0].get("created_at") if session else None
+        rounds = 0
+        for r in self.store.list_replies(group.group_id, limit=30):
+            if r["mode"] != "live":
+                continue
+            if since and str(r["created_at"]) < str(since):
+                continue
+            rounds += 1
+        return screening.scan(
+            session, min_slots=self.settings.screening_min_slots,
+            max_rounds=self.settings.screening_max_rounds, rounds=rounds,
+        )
+
     def _maybe_dispatch_lead(
         self, msg: IncomingMessage, decision: Decision, group: GroupProfile,
         convo: list[dict],
@@ -357,15 +382,16 @@ class Pipeline:
         extra: list[str] = []
         if "affirm:office" in decision.reasons:
             extra.append("meeting")
-        # 应转尽转（2026-08-12 律所方）：客户把自己的情况说出来了就叫人，
-        # 不再等他喊出「我要委托」「很紧急」。判据跨**整段对话**看——
-        # 案情在第一句、意愿藏在第三句是常态，只看当前这条会来回丢信号。
+        # 筛查达标才叫人（律所方 2026-08-13：「不能在客户都没有描述清楚案情的
+        # 情况下就转接给人工啊，那人工还是得再问一轮」）。判据跨**整段对话**累计，
+        # 不看当前这一条——案情在第一句、材料在第三句是常态。
         # 只在一对一进线窗口注入：群聊里承办律师本人在场，不存在「叫人」。
-        if group.is_kf and any(
-            rules.has_substance(m.get("content") or "")
-            for m in convo if not m.get("sender_is_staff")
-        ):
-            extra.append("substance")
+        # 注意这只影响**信息型**转接；客户主动要人（engage/want-contact/contact…）
+        # 走的是清单上面那些条，一秒都不会被这道门槛拦住。
+        if group.is_kf:
+            progress = self._screening(group, convo)
+            if screening.ready(progress, min_slots=self.settings.screening_min_slots):
+                extra.append("screened")
         extra_hits = extra or None
         urgent_kf = group.is_kf and decision.urgent
         # 冷消息不在这里出单，但**不是被丢掉**：等这通对话安静下来，
@@ -668,8 +694,15 @@ class Pipeline:
         换回一句套话。这一刻是整通对话里信息量最大的一刻，接住它的方式是追问。
 
         只在一对一进线窗口做：群聊里承办律师本人在场，AI 追着问情况是越界。
-        只做一次：问第二遍就成了查户口。
-        已经留了联系方式的不问：那时候该做的是把人交出去，不是继续采集。
+
+        **问几轮由筛查进度说了算**（2026-08-13 改）。原来是「一通对话只问一次」，
+        那是模板时代的限制：模板每次问的是同样两句，问第二遍确实成了查户口。
+        松绑之后每一轮问的是模型看着上下文挑出来的**还缺的那一件**，
+        再卡「只问一次」就等于规定筛查最多做到四分之一——而律所方要的正是
+        「客户描述清楚了再转人工，否则人工还得再问一轮」。
+        所以判据换成：四件事还没齐、且没问满上限，就接着问。
+        已经留了联系方式**不再是**停止追问的理由，只是不再追着要号码——
+        号码有了不等于案情清楚了。
         """
         if not group.is_kf:
             return
@@ -691,16 +724,27 @@ class Pipeline:
             return
         elif decision.category not in (Category.OTHER, Category.CASE_STATUS):
             return
-        if group.client_status != ClientStatus.PROSPECT or group.handoff_userid:
+        if group.client_status != ClientStatus.PROSPECT:
             return
-        # 已经留了联系方式的不再追问要电话——追问话术里带着「留个手机号」，
-        # 对一个刚给过号码的人再问一次，就是在证明没人在听
-        if signals.scan(convo)[1]:
-            return
+        # **已转人工不再是停止追问的理由**（2026-08-13 律所方：「转人工后如果人工
+        # 没有及时的回复，AI 也应该先试着陪客户聊，去问案件详情」）。
+        # 真人一开口，判断层的 `gate:handed-off` 会整条按住 AI，轮不到这里；
+        # 所以能走到这一步就说明那边还没人应声——这时候停下来问，等于把客户
+        # 交给一间空屋子，而案情本还没问全。
         # 太短的消息没有可追问的内容（「嗯」「好的」），泛泛追问反而更像机器人
         if len(_norm(msg.content)) < 6:
             return
-        if self._recent_marker(group.group_id, templates.INTAKE_MARKERS, limit=20):
+        # 四件事齐了、或者问满上限了就收手：再问下去是查户口，该把人交出去了
+        progress = self._screening(group, convo)
+        if screening.ready(progress, min_slots=self.settings.screening_min_slots):
+            return
+        # **模板路径仍然只问一次。** 多轮筛查成立的前提是每轮问的是不同的那一件，
+        # 而那要靠模型看着「还缺什么」现挑（见 reply/prompts.INTAKE_SYSTEM）。
+        # 模板手上只有固定的那两句，连问两遍就是原样复读——那正是
+        # 「一通对话只问一次」当初要挡的东西。模型不可用时退回老规矩。
+        if not (
+            self.settings.llm_answer_enabled and llm.llm_available(self.settings)
+        ) and self._recent_marker(group.group_id, templates.INTAKE_MARKERS, limit=20):
             return
         # 追问里那句「留个手机号」受同一条业务规则约束：聊够了才开口。
         # 客户刚说第一句就被问号码，像推销；刚问过又问，像催单。两种都要让。

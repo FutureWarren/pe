@@ -139,12 +139,11 @@ def test_handoff_reply_is_logged(tmp_path):
 
 # ---------------------------------------------------------------- 不该转的不转
 def test_a_customer_who_has_said_nothing_yet_is_not_transferred(tmp_path):
-    """应转尽转（2026-08-12）的边界：客户**说出任何情况**（substance，由
-    service 在一对一窗口注入）或**表现出任何意愿**（engage/contact/fee……）
-    都转；这条守的是唯一剩下的不转——他还什么都没说。
+    """转接清单的两类：**意愿型**（engage/contact/fee…，客户在伸手要人，立刻转）
+    与**信息型**（screened，案情问清楚了才转，2026-08-13）。这条守的是两类都不占。
 
     单独一声「急」不带任何案情时，工作台里还没有律师能跟进的东西；
-    AI 先问一句，客户只要答上半句案情，substance 立刻触发转接。
+    AI 先问，等他把情况说清楚（或自己开口要人）再转。
     （urgent-plea 不能直接进清单：detect() 没有渠道上下文，群聊里
     每句带「急/马上」的话都会被推成热线索。）
     """
@@ -269,7 +268,7 @@ def test_decision_keeps_accompanying_after_handoff(tmp_path):
     (["meeting"], True),         # 想来所里
     (["wechat"], True),          # 要加微信
     (["fee"], True),             # 问收费＝在做决策，律所方 2026-08-10 拍板要叫人
-    (["substance"], True),       # 应转尽转：说出自己的情况就叫人（2026-08-12）
+    (["screened"], True),        # 案情问清楚了 → 交给人工（2026-08-13）
     (["urgent-plea"], False),    # 单独一声「急」还没有可跟进的东西（见上）
     (["depth"], False),          # 聊得久说明案子复杂，不说明他想找人
     ([], False),
@@ -630,37 +629,74 @@ def test_score_crossing_p0_on_a_quiet_follow_up_still_transfers(tmp_path):
     )
 
 
-# ------------------------------------------------ 应转尽转：说出情况就叫人
-def test_a_customer_who_only_described_their_case_is_transferred(tmp_path):
-    """2026-08-12 律所方拍板：「但凡客户提供了他们的任何信息，或者客户体现出了
-    任何的意愿，我们都把他们转接到人工客服。」
+# ------------------------------------ 筛查达标才转：说清楚了才叫人（2026-08-13）
+def test_one_sentence_of_case_facts_is_not_enough_to_transfer(tmp_path):
+    """律所方 2026-08-13 的原话：「我们不能在客户都没有描述清楚案情的情况下
+    就转接给人工啊，那人工还是得再问一轮。」
 
-    这句话没带任何强信号——没说委托、没留电话、没喊急——只是把事情说了出来。
-    这就够了。旧规则下他会一直留在 AI 手里，直到自己喊出「我很紧急」；
-    喊不出口的那些人就流失了，律所方算过这笔账：那是最大的一笔损失。
+    这句「公司拖欠我三个月工资，还把我辞退了」信息量不小——但律师接手后
+    仍然得从头问：对方是哪家公司？有没有合同工资条？您想要什么结果？
+    第一稿在这里就转了，于是 AI 这一环等于没有，观感是「有 AI 和没 AI 没区别」。
+    现在这一句只让 AI 开始筛查。
     """
     store, kf, p = make(tmp_path)
     store.upsert_group(kf_group())
 
-    d = p.handle(IncomingMessage(
+    p.handle(IncomingMessage(
         msg_id="s-1", group_id=GID, sender_id=EXT_USER,
         content="公司拖欠我三个月工资，还把我辞退了",
     ))
 
-    assert kf.transfers == [(OPEN_KFID, EXT_USER, "wei")], (
-        f"没转成：{store.get_note(f'handoff_skip:{GID}')}｜{d.reasons}"
-    )
-    assert store.get_group(GID).handoff_userid == "wei"
-    assert kf.sent, "转接不打断承接：这一轮客户照样要收到回复"
+    assert not kf.transfers, "案情还没说清楚，不该这就交给人工"
+    assert kf.sent, "但客户必须收到回复——AI 要接着往下问"
 
 
-def test_a_bare_hello_is_still_not_transferred(tmp_path):
-    """应转尽转不等于逢人就转：一声「你好」既没有情况也没有意愿，
-    工作台里没有律师能跟进的东西。AI 先把情况问出来——下一句就够了。"""
+def test_a_screened_case_is_transferred(tmp_path):
+    """把四件事答出三件（时间线、对方、材料）→ 案情清楚了 → 该叫人了。
+
+    这时候律师打开工作台，看到的是一份能直接接着往下办的东西，
+    而不是一句「公司拖欠我工资」。
+    """
     store, kf, p = make(tmp_path)
     store.upsert_group(kf_group())
 
-    p.handle(IncomingMessage(msg_id="s-2", group_id=GID, sender_id=EXT_USER,
+    for i, line in enumerate([
+        "公司拖欠我三个月工资，还把我辞退了",      # 时间线（三个月）
+        "对方是一家建筑公司，老板一直躲着不见",     # 对方是谁
+        "劳动合同和工资条都在我手里，还有考勤记录",  # 材料
+    ]):
+        p.handle(IncomingMessage(msg_id=f"s2-{i}", group_id=GID,
+                                 sender_id=EXT_USER, content=line))
+
+    assert kf.transfers == [(OPEN_KFID, EXT_USER, "wei")], (
+        f"筛查已达标却没转：{store.get_note(f'handoff_skip:{GID}')}"
+    )
+    assert store.get_group(GID).handoff_userid == "wei"
+
+
+def test_a_customer_asking_for_a_human_skips_the_screening_gate(tmp_path):
+    """**客户自己伸手要人时，筛查门槛一律不生效。**
+
+    让一个已经开口说「我要委托」的人先答完四道题才叫人，是本末倒置——
+    应转尽转（2026-08-12）守的正是这一条，这次抬门槛不能把它撞掉。
+    """
+    store, kf, p = make(tmp_path)
+    store.upsert_group(kf_group())
+
+    p.handle(IncomingMessage(msg_id="s-3", group_id=GID, sender_id=EXT_USER,
+                             content="我想委托你们，让律师直接联系我"))
+
+    assert kf.transfers == [(OPEN_KFID, EXT_USER, "wei")], (
+        f"客户在要人却没转：{store.get_note(f'handoff_skip:{GID}')}"
+    )
+
+
+def test_a_bare_hello_is_still_not_transferred(tmp_path):
+    """下限没变：一声「你好」什么都没说，工作台里没有律师能跟进的东西。"""
+    store, kf, p = make(tmp_path)
+    store.upsert_group(kf_group())
+
+    p.handle(IncomingMessage(msg_id="s-4", group_id=GID, sender_id=EXT_USER,
                              content="你好"))
 
     assert not kf.transfers

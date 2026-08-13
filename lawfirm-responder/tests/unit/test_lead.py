@@ -81,25 +81,38 @@ def _msg(content, mid):
     )
 
 
-def test_a_substantive_question_creates_and_notifies_the_lead(tmp_path):
-    """应转尽转（2026-08-12 律所方）：「试用期被辞退有补偿吗？」已经是案情——
-    试用期、被辞退，两个可跟进的事实。不再等他喊出「我要委托」或留下电话，
-    线索当场建、交接单当场推；留号码只是后续的升级。"""
+def test_one_question_waits_but_a_screened_case_is_pushed(tmp_path):
+    """筛查门槛（律所方 2026-08-13）：一句「试用期被辞退有补偿吗？」还不到
+    惊动律师的时候——律师拿到也只能从头问。AI 先把情况问清楚。
+
+    等四件事里够了三件（时间线、对方、材料），单子才推出去，
+    而且**单上写着筛查完成度**——律师一眼知道 AI 替他做了多少、还缺什么。
+    （客户就此不再说话也不会掉队：`worker._sweep_idle_leads` 静默后补一张。）
+    """
     store, sender, p = make(tmp_path)
     p.handle(_msg("试用期被辞退有补偿吗？", "m1"))
-    lead = store.get_lead("kf:acct:cust")
-    assert lead and lead["intent"] == "hot", "说出情况的客户就该被人工看见"
-    assert sender.leads
+    assert sender.leads == [], "案情还没说清楚，先别推给律师"
+
+    # 这一句同时补上了「什么时候」和「对方是谁」——加上第一句里的诉求（补偿），
+    # 四件够三件，达标
+    p.handle(_msg("上个月刚被辞的，公司是家餐饮店", "m2"))
+
+    assert sender.leads, "筛查达标就该推了"
     to, text = sender.leads[-1]
     assert to == "weilai"
+    assert "筛查完成度：3/4" in text
+    assert "还缺：手上有哪些材料" in text, "缺口要写出来——律师才知道自己得补问什么"
     # 降级路径下摘要取客户原话，绝不编造
-    assert "试用期被辞退有补偿吗？" in text
+    assert "上个月刚被辞的" in text
 
-    p.handle(_msg("可以的呀我的电话是17721275495", "m2"))
+
+def test_leaving_a_phone_number_updates_the_lead(tmp_path):
+    """留号码是「客服会做出不同动作」的变化：号码要落库，也要出现在单子上。"""
+    store, sender, p = make(tmp_path)
+    p.handle(_msg("我想委托你们，电话17721275495", "m1"))
     lead = store.get_lead("kf:acct:cust")
-    assert lead["contact"] == "17721275495"
+    assert lead and lead["contact"] == "17721275495"
     assert lead["status"] == "new"
-    # 刚拿到号码是「客服会做出不同动作」的变化，要再响一次，且号码可见
     assert "17721275495" in sender.leads[-1][1]
 
 

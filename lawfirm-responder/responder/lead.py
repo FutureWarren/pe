@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 from responder import assignment
 from responder.config import Settings, get_settings
-from responder.engine import llm, priority, signals
+from responder.engine import llm, priority, screening, signals
 from responder.models import GroupProfile
 from responder.reply import prompts
 from responder.store.db import Store
@@ -181,6 +181,11 @@ def format_notification(
         lines.append("关键信息：")
         lines += [f"  · {f}" for f in facts]
     lines.append(f"联系方式：{lead.get('contact') or '客户未留，需在会话中继续沟通'}")
+    # 筛查完成度：律师一眼看出这单的成色，以及**还有哪几件得他自己问**。
+    # 没有这一行，「AI 到底替我做了多少」只能靠翻聊天记录去感觉，
+    # 而感觉出来的结论（2026-08-13）是「有 AI 和没 AI 完全没区别」。
+    if lead.get("screening"):
+        lines.append(lead["screening"])
     # 末尾这一行原来是句死路：「完整对话见控制台」——律师得开浏览器、找地址、
     # 登录、翻列表、找到人，五步，所以他不会做。改成可点的深链，一步直达。
     # public_base_url 没配时退回原文案（本机开发/未定域名）。
@@ -397,6 +402,16 @@ def dispatch(
             f"{datetime.now():%m-%d %H:%M} 线索 {group.group_id} 无收件人",
         )
     if sender and to:
+        # 筛查完成度是**这一刻算出来的**，不入库：它是对话的当前状态，
+        # 存一份就要负责让它跟着每条新消息刷新，而那正是最容易忘的一类同步。
+        lead = dict(lead)
+        lead["screening"] = screening.summary_line(
+            screening.scan(
+                current_session(history, settings.lead_session_gap_seconds),
+                min_slots=settings.screening_min_slots,
+                max_rounds=settings.screening_max_rounds,
+            )
+        )
         text = format_notification(lead, group, settings)
         if reason:
             # 第二条提醒必须一眼看出跟第一条不一样，否则客服会当成重复推送划走

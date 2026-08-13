@@ -8,7 +8,7 @@ from datetime import datetime
 
 from responder.compliance.guard import GuardResult, guard
 from responder.config import Settings, get_settings
-from responder.engine import llm
+from responder.engine import llm, screening
 from responder.models import (
     Action,
     Category,
@@ -64,15 +64,24 @@ def _llm_intake_body(
     settings: Settings,
     now: datetime,
 ) -> str | None:
-    """进线承接正文：模型接住客户的话并追问。不可用/失败/示弱/判废 → None。"""
+    """进线承接正文：模型接住客户的话并追问。不可用/失败/示弱/判废 → None。
+
+    「还缺哪几件」由规则算（`engine/screening.py`）后喂给模型：问什么由模型
+    即兴，**算没算够由规则说了算**——那是转人工的开关，必须可测、可复现。
+    """
     if not settings.llm_answer_enabled:
         return None
+    progress = screening.scan(
+        history, min_slots=settings.screening_min_slots,
+        max_rounds=settings.screening_max_rounds,
+    )
     body = llm.generate_intake_body(
         msg.content,
         case_type=group.case_type,
         history_text=prompts.format_history(history),
         handed_off=bool(group.handoff_userid),
         is_night=now.hour >= 22 or now.hour < 6,
+        missing=progress.missing_zh,
         max_tokens=settings.llm_max_tokens_answer,
         timeout=settings.llm_timeout_seconds,
         settings=settings,

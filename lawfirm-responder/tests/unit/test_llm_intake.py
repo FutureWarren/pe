@@ -112,6 +112,17 @@ def test_the_model_knows_the_session_was_handed_off(model):
     assert model[0][1]["handed_off"] is False
 
 
+def test_the_model_is_told_which_pieces_are_still_missing(model):
+    """问什么由模型即兴，**算没算够由规则说了算**（转人工的开关必须可测）。
+    缺口显式喂进去，模型才不会绕着已经答过的东西打转。"""
+    history = [{"sender_is_staff": 0, "content": "上个月公司把我辞了"}]
+    generate(msg("现在该怎么办"), handoff_decision(), kf_group(),
+             history=history, settings=Settings(**SETTINGS))
+    missing = model[0][1]["missing"]
+    assert "手上有哪些材料" in missing
+    assert "什么时候开始的、现在走到哪一步" not in missing, "答过的不该再问"
+
+
 def test_case_status_complaints_go_to_the_model_too(model):
     """真机那一幕的病根：催单/不满被 CASE 类模板接走，答非所问。也要放开。"""
     d = handoff_decision(category=Category.CASE_STATUS)
