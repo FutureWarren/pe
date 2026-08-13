@@ -230,7 +230,10 @@ class Pipeline:
         # 走了模型降级就记一笔。这条路是静默的：超时、限流、密钥过期都落到这里，
         # 而健康页只报「密钥配没配」，可能连着几天没人发现——
         # 那几天里 AI 退回成一个复读的转达员，「免费法律咨询」这个卖点当场归零。
-        if result and "answer:fallback-no-llm" in decision.reasons:
+        if result and (
+            "answer:fallback-no-llm" in decision.reasons
+            or "intake:fallback-no-llm" in decision.reasons
+        ):
             self.store.bump("llm_degraded")
         elif decision.action == Action.ANSWER:
             self.store.bump("llm_answered")
@@ -351,7 +354,19 @@ class Pipeline:
         # 「好的」这类点头字面上一个信号词都不命中，可它恰恰是最值钱的那一个：
         # 客户已经答应来所面谈了。判断层认出来了，这里负责把它带进线索——
         # 不带的后果是律师收到一张既没电话、也没写「他答应来了」的冷单。
-        extra_hits = ["meeting"] if "affirm:office" in decision.reasons else None
+        extra: list[str] = []
+        if "affirm:office" in decision.reasons:
+            extra.append("meeting")
+        # 应转尽转（2026-08-12 律所方）：客户把自己的情况说出来了就叫人，
+        # 不再等他喊出「我要委托」「很紧急」。判据跨**整段对话**看——
+        # 案情在第一句、意愿藏在第三句是常态，只看当前这条会来回丢信号。
+        # 只在一对一进线窗口注入：群聊里承办律师本人在场，不存在「叫人」。
+        if group.is_kf and any(
+            rules.has_substance(m.get("content") or "")
+            for m in convo if not m.get("sender_is_staff")
+        ):
+            extra.append("substance")
+        extra_hits = extra or None
         urgent_kf = group.is_kf and decision.urgent
         # 冷消息不在这里出单，但**不是被丢掉**：等这通对话安静下来，
         # `worker._sweep_idle_leads` 会补一张完整的单并推给客服
@@ -482,7 +497,7 @@ class Pipeline:
         is_urgent = urgent or lead_row.get("urgency") == "high"
         trigger = priority.wants_human(hits, urgent=is_urgent)
         if not trigger:
-            return _skip("客户还没做出「想找真人」的动作（只是问问题 / 问收费 / 打招呼）")
+            return _skip("客户还没说出任何情况、也没表现出意愿（多半只打了个招呼）")
         target = lead_row.get("assigned_userid") or ""
         if not target:
             return _skip("这条线索还没派给具体律师（名册为空或都不在班？）")
@@ -738,9 +753,9 @@ class Pipeline:
         「让律师给我打电话」，系统都会以「已经转过了」为由**永远拒绝再转真人**，
         只能靠人工去控制台补救，而没有任何地方会说明原因。
 
-        清的时机就是 `decision` 已经判定的那一刻：宽限期内不动（律师可能正要打开），
-        `handoff:no-show` 也不动（AI 只是先陪着，他随时能接手），
-        只有过了 `handoff_reclaim_seconds`——语义上「彻底放弃等人」——才清。
+        清的时机就是 `decision` 已经判定的那一刻：`handoff:accompanying` 不动
+        （AI 只是先陪着，律师随时能开口接手），只有过了
+        `handoff_reclaim_seconds`——语义上「彻底放弃等人」——才清。
         """
         if "handoff:reclaimed" not in decision.reasons or not group.handoff_userid:
             return

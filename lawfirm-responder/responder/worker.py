@@ -923,15 +923,13 @@ class Worker:
         group = self.store.get_group(group_id)
         if group is None or not group.ai_enabled:
             return
-        if group.handoff_userid and self.pipeline._being_handled(group):
-            return  # 人正在跟，别把他踢开
-        # **刚转过去的头一会儿也别动。** 律师可能正要点开企微，而这段时间
-        # AI 本来就是沉默的（`gate:handed-off`），把归属抢回来只有坏处：
-        # 他打开工作台时那通对话已经不在他名下了。
-        if group.handoff_userid and group.handoff_at is not None:
-            waited = (datetime.now() - group.handoff_at).total_seconds()
-            if waited < self.pipeline.settings.handoff_grace_seconds:
-                return
+        if group.handoff_userid:
+            # **已经交给人工的会话，归属绝不抢回来。** 应转尽转之下，
+            # 转接的全部意义就是让它出现在律师的工作台里；这里一抢，
+            # 律师点开工作台时那通对话已经不在他名下了。
+            # 要不要收回由 service._release_stale_handoff 决定（彻底放弃等人时
+            # 清掉转接记录），清掉之后这里才重新接手。
+            return
         now = time.time()
         # 节流状态落库：只放内存的话，每次自动升级重启都清零，
         # 而这条路径每条客户消息都会走——重启频繁时等于没有节流。

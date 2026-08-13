@@ -148,8 +148,9 @@ def test_a_customer_can_be_transferred_again_after_nobody_showed_up(tmp_path):
     assert kf.transfers == ["wei"]
 
 
-def test_the_grace_window_still_keeps_the_handoff(tmp_path):
-    """宽限期内不清——律师可能正要点开，清了他就白接手了。"""
+def test_a_fresh_handoff_is_kept_while_the_ai_accompanies(tmp_path):
+    """转完 AI 接着陪，但**转接记录不清**——客户已经在律师的工作台里，
+    他随时能开口接手；AI 只是在他开口之前不让客户对着空屋子说话。"""
     store, _, p = make(tmp_path)
     store.upsert_group(kf_group())
     p._maybe_handoff(store.get_group(GID), lead_row(), urgent=False)
@@ -157,13 +158,13 @@ def test_the_grace_window_still_keeps_the_handoff(tmp_path):
     d = p.handle(msg("在吗", mid="m2"))
 
     assert store.get_group(GID).handoff_userid == "wei"
-    assert any("handed-off" in r for r in d.reasons)
+    assert "handoff:accompanying" in d.reasons
+    assert d.should_speak is True, "转接后客户来话，AI 得接着回，不能晾着"
 
 
-def test_no_show_does_not_clear_it_either(tmp_path):
-    """过了宽限期 AI 接着陪，但**不清状态**——律师随时还能接手。"""
-    store, _, p = make(tmp_path, handoff_grace_seconds=90,
-                       handoff_reclaim_seconds=1800)
+def test_minutes_of_accompanying_do_not_clear_it_either(tmp_path):
+    """陪了几分钟也不清状态——离「彻底放弃等这个人」还远。"""
+    store, _, p = make(tmp_path, handoff_reclaim_seconds=1800)
     store.upsert_group(kf_group())
     p._maybe_handoff(store.get_group(GID), lead_row(), urgent=False)
     with store._conn() as conn:
@@ -172,7 +173,7 @@ def test_no_show_does_not_clear_it_either(tmp_path):
 
     d = p.handle(msg("那我需要准备什么材料", mid="m2"))
 
-    assert "handoff:no-show" in d.reasons
+    assert "handoff:accompanying" in d.reasons
     assert store.get_group(GID).handoff_userid == "wei", "还没到放弃的时候"
 
 
@@ -248,10 +249,11 @@ def test_sessions_nobody_is_handling_are_claimed_back(tmp_path, state):
 
 
 def test_a_freshly_transferred_session_is_not_yanked_back(tmp_path):
-    """刚转过去的头一会儿别动归属——律师打开工作台时那通对话得还在他名下。"""
+    """已转接的会话不碰归属——律师打开工作台时那通对话得还在他名下。
+    要收回只有一条路：`_release_stale_handoff` 先清状态，之后才轮得到这里。"""
     from responder.worker import Worker
 
-    store, kf, p = make(tmp_path, handoff_grace_seconds=90)
+    store, kf, p = make(tmp_path)
     store.upsert_group(kf_group())
     p._maybe_handoff(store.get_group(GID), lead_row(), urgent=False)
     w = Worker(p, store, sender=Snd(), kf_client=kf)

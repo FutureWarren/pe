@@ -138,12 +138,15 @@ def test_handoff_reply_is_logged(tmp_path):
 
 
 # ---------------------------------------------------------------- 不该转的不转
-def test_just_asking_questions_is_not_transferred(tmp_path):
-    """一周 416 人进私信。只是来问问题的不转——AI 接着摸情况，那正是它的活。
+def test_a_customer_who_has_said_nothing_yet_is_not_transferred(tmp_path):
+    """应转尽转（2026-08-12）的边界：客户**说出任何情况**（substance，由
+    service 在一对一窗口注入）或**表现出任何意愿**（engage/contact/fee……）
+    都转；这条守的是唯一剩下的不转——他还什么都没说。
 
-    「客户自己说很急」加分（排队时他该靠前），但**不是找人的动作**：
-    他在讲自己的处境，不是在要一个人。转过去他会愣一下，
-    而 AI 本可以接着把案由、时间、金额都问清楚再交出去。
+    单独一声「急」不带任何案情时，工作台里还没有律师能跟进的东西；
+    AI 先问一句，客户只要答上半句案情，substance 立刻触发转接。
+    （urgent-plea 不能直接进清单：detect() 没有渠道上下文，群聊里
+    每句带「急/马上」的话都会被推成热线索。）
     """
     _, kf, p = make(tmp_path)
     row = lead_row(priority="P1", hits=("urgent-plea",))
@@ -235,8 +238,9 @@ def test_servicer_lookup_failure_does_not_crash(tmp_path):
 
 
 # ------------------------------------------------------------------ 转接之后
-def test_decision_stays_silent_after_handoff(tmp_path):
-    """转接后 AI 必须闭嘴：律师正在跟客户聊，AI 插话就成了两个人抢答。"""
+def test_decision_keeps_accompanying_after_handoff(tmp_path):
+    """转接 ≠ AI 闭嘴（2026-08-12 应转尽转的另一半）：真人开口之前 AI 接着陪、
+    接着把案情问全；律师一开口（接管窗口内说过话）AI 立刻让位。"""
     from responder.engine.decision import decide
     from responder.models import IncomingMessage
 
@@ -247,8 +251,14 @@ def test_decision_stays_silent_after_handoff(tmp_path):
     msg = IncomingMessage(msg_id="m1", group_id=GID, sender_id=EXT_USER,
                           content="那我该准备什么材料")
     d = decide(msg, store.get_group(GID), settings=p.settings)
-    assert d.should_speak is False
-    assert any("handed-off" in r for r in d.reasons)
+    assert d.should_speak is True, d.reasons
+    assert "handoff:accompanying" in d.reasons
+
+    # 律师刚说过话 → 正在跟，AI 让开
+    d2 = decide(msg, store.get_group(GID), settings=p.settings,
+                seconds_since_last_staff_reply=10)
+    assert d2.should_speak is False
+    assert any("handed-off" in r for r in d2.reasons)
 
 
 @pytest.mark.parametrize("hits,expect", [
@@ -259,7 +269,8 @@ def test_decision_stays_silent_after_handoff(tmp_path):
     (["meeting"], True),         # 想来所里
     (["wechat"], True),          # 要加微信
     (["fee"], True),             # 问收费＝在做决策，律所方 2026-08-10 拍板要叫人
-    (["urgent-plea"], False),    # 只是说「急」——在讲处境，不是在要人
+    (["substance"], True),       # 应转尽转：说出自己的情况就叫人（2026-08-12）
+    (["urgent-plea"], False),    # 单独一声「急」还没有可跟进的东西（见上）
     (["depth"], False),          # 聊得久说明案子复杂，不说明他想找人
     ([], False),
 ])
@@ -541,7 +552,7 @@ def test_every_skip_writes_down_why(tmp_path):
                                     kf_external_userid="", douyin_open_id="abc"),
          lead_row()),
         ("转给过", {}, kf_group(handoff_userid="wei"), lead_row()),
-        ("还没做出「想找真人」的动作", {}, kf_group(), lead_row(hits=("urgent-plea",))),
+        ("还没说出任何情况、也没表现出意愿", {}, kf_group(), lead_row(hits=("urgent-plea",))),
         ("还没派给具体律师", {}, kf_group(), lead_row(assigned="")),
     ]
     for expect, over, group, row in cases:
@@ -617,6 +628,43 @@ def test_score_crossing_p0_on_a_quiet_follow_up_still_transfers(tmp_path):
     assert kf.transfers == [(OPEN_KFID, EXT_USER, "wei")], (
         f"没转成：{store.get_note(f'handoff_skip:{GID}')}"
     )
+
+
+# ------------------------------------------------ 应转尽转：说出情况就叫人
+def test_a_customer_who_only_described_their_case_is_transferred(tmp_path):
+    """2026-08-12 律所方拍板：「但凡客户提供了他们的任何信息，或者客户体现出了
+    任何的意愿，我们都把他们转接到人工客服。」
+
+    这句话没带任何强信号——没说委托、没留电话、没喊急——只是把事情说了出来。
+    这就够了。旧规则下他会一直留在 AI 手里，直到自己喊出「我很紧急」；
+    喊不出口的那些人就流失了，律所方算过这笔账：那是最大的一笔损失。
+    """
+    store, kf, p = make(tmp_path)
+    store.upsert_group(kf_group())
+
+    d = p.handle(IncomingMessage(
+        msg_id="s-1", group_id=GID, sender_id=EXT_USER,
+        content="公司拖欠我三个月工资，还把我辞退了",
+    ))
+
+    assert kf.transfers == [(OPEN_KFID, EXT_USER, "wei")], (
+        f"没转成：{store.get_note(f'handoff_skip:{GID}')}｜{d.reasons}"
+    )
+    assert store.get_group(GID).handoff_userid == "wei"
+    assert kf.sent, "转接不打断承接：这一轮客户照样要收到回复"
+
+
+def test_a_bare_hello_is_still_not_transferred(tmp_path):
+    """应转尽转不等于逢人就转：一声「你好」既没有情况也没有意愿，
+    工作台里没有律师能跟进的东西。AI 先把情况问出来——下一句就够了。"""
+    store, kf, p = make(tmp_path)
+    store.upsert_group(kf_group())
+
+    p.handle(IncomingMessage(msg_id="s-2", group_id=GID, sender_id=EXT_USER,
+                             content="你好"))
+
+    assert not kf.transfers
+    assert store.get_group(GID).handoff_userid == ""
 
 
 def test_handoff_checklist_matches_hot_signals():

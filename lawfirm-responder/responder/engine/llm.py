@@ -254,6 +254,50 @@ def extract_lead(
         return None
 
 
+# ================================================================ 进线承接
+def generate_intake_body(
+    latest: str,
+    *,
+    case_type: str = "",
+    history_text: str = "",
+    handed_off: bool = False,
+    is_night: bool = False,
+    max_tokens: int = 500,
+    timeout: float = 15.0,
+    settings: Settings | None = None,
+) -> str | None:
+    """生成一对一进线的承接正文：回应客户刚说的话 + 追问还缺的关键信息。
+
+    与 generate_answer_body 的分工：那边回答「一般法律怎么规定」，这边负责
+    「接住并往下问」——不答题、不下结论，只把案情问全（话术松绑，律所方
+    2026-08-13：「不要设置那么多固定话语，我们要的是灵活性」）。
+    返回 None 表示：不可用 / 失败 / 模型示弱（NEED_LAWYER）——调用方回落模板。
+    """
+    provider = resolve(settings)
+    if provider is None:
+        return None
+    user = prompts.intake_user_prompt(
+        latest, case_type, history_text, handed_off=handed_off, is_night=is_night,
+    )
+    try:
+        if provider.name == "deepseek":
+            text = _chat_deepseek(
+                prompts.INTAKE_SYSTEM, user, provider.model,
+                max_tokens=max_tokens, timeout=timeout, json_mode=False, temperature=0.7,
+            )
+        else:
+            text = _chat_anthropic(
+                prompts.INTAKE_SYSTEM, user, provider.model,
+                max_tokens=max_tokens, timeout=timeout, json_schema=None,
+            )
+        if not text or prompts.NEED_LAWYER in text:
+            return None
+        return text
+    except Exception:
+        logger.exception("llm intake generation failed (%s)", provider.name)
+        return None
+
+
 # ================================================================ 回答生成
 def generate_answer_body(
     question: str,

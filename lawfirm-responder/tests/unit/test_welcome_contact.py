@@ -506,11 +506,12 @@ def test_group_chat_still_names_the_lawyer():
 
 
 # ---------------------------------------------------------------- 会话转接
-def test_ai_silent_after_handoff(tmp_path):
-    """转接给律师后 AI 必须闭嘴。
+def test_ai_keeps_accompanying_after_handoff(tmp_path):
+    """转接 ≠ AI 闭嘴（2026-08-12 应转尽转的另一半）。
 
-    现有的 gate:human-takeover 靠律师**发言**触发，而转接发生在律师说第一句话
-    之前——少了这道门，客户会看到两个「人」同时在回他。
+    转接的含义是「让客户出现在律师的工作台里」；真人开口之前，
+    AI 接着陪、接着把案情问全。旧版转完静默 90 秒，真机里客户
+    连发「你好」「人呢」全程无声——应转尽转下那会是每个客户的必经之路。
     """
     store, kf, worker = make_env(tmp_path, [
         {"msg_list": [kf_msg("m1", "公司拖欠我三个月工资")],
@@ -523,9 +524,32 @@ def test_ai_silent_after_handoff(tmp_path):
     store.set_handoff(GID, "wei")
     run(worker, token="tk2")
 
-    assert len(kf.sent) == n, "已转人工后 AI 不应再发言"
+    assert len(kf.sent) > n, "转接后真人还没开口，AI 不能把客户晾着"
     reasons = [d["reasons"] for d in store.list_decisions(GID)]
-    assert any("gate:handed-off" in r for r in reasons)
+    assert any("handoff:accompanying" in r for r in reasons)
+
+
+def test_ai_yields_once_the_lawyer_replies(tmp_path):
+    """律师在窗口里回了一句 = 接手了。从这一刻起 AI 让位，
+    否则客户会看到两个「人」同时在回他。"""
+    from responder.gateway.wecom_kf import ORIGIN_SERVICER
+
+    staff = dict(kf_msg("s1", "您好，我是律师，您的情况我看了",
+                        origin=ORIGIN_SERVICER), servicer_userid="wei")
+    store, kf, worker = make_env(tmp_path, [
+        {"msg_list": [kf_msg("m1", "公司拖欠我三个月工资")],
+         "next_cursor": "c1", "has_more": 0},
+        {"msg_list": [staff, kf_msg("m2", "那我该准备什么材料")],
+         "next_cursor": "c2", "has_more": 0},
+    ])
+    run(worker)
+    n = len(kf.sent)
+    run(worker, token="tk2")
+
+    assert len(kf.sent) == n, "律师正在跟，AI 不该插话"
+    reasons = [d["reasons"] for d in store.list_decisions(GID)]
+    assert any("gate:handed-off" in r or "gate:human-takeover" in r
+               for r in reasons)
 
 
 def test_ai_reclaims_when_lawyer_never_picks_up(tmp_path):

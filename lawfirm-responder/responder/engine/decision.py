@@ -117,20 +117,17 @@ def decide(
     if msg.sender_is_staff:
         decision.reasons.append("gate:staff-message")
         return decision
-    # 会话已转人工接待 → AI 一律沉默（见 docs/kf-handoff.md）。
-    # 与下面的 gate:human-takeover 的区别：那条靠律师**发言**触发，
-    # 而转接发生在律师说第一句话之前——少了这一条，转接后 AI 还会抢在
-    # 律师前面回话，客户会看到两个"人"同时在说话。
+    # 会话已转人工接待：**转接不再让 AI 闭嘴**（2026-08-12 律所方拍板「应转尽转」，
+    # 这是它的另一半）。转接的含义是「让这个客户出现在人工的工作台里」——
+    # 客户一说出实质情况就转，人工那边随时看得到、随时能插进来；
+    # 而真人开口**之前**，AI 接着陪、接着把案情问全，两头都不耽误。
+    # 旧版转完静默 90 秒，真机里客户连发「你好」「人呢」全程无声——
+    # 在「应转尽转」下几乎每个客户都会经历那 90 秒，代价不可接受。
     if group.handoff_userid and group.handoff_at is not None:
         waited = (now - group.handoff_at).total_seconds()
-        # 接手的人**正在**说话，就别插嘴。
-        #
-        # 这里原来写的是「律师在转接之后说过话」（staff_ago <= waited），
-        # 而那个条件一旦成立就**永远成立**——转接越久 waited 越大，
-        # 差值只会越拉越开。真机后果：律师接手时说了一句，第二天客户再来，
-        # AI 依然一个字不回。客户看到的是一个死掉的窗口。
-        # 正确的语义是「最近」：用接管窗口（默认 30 分钟）判，
-        # 律师一开口 AI 让开，他走了 AI 接着兜。
+        # 接手的人**正在**说话（接管窗口内说过话），AI 才让位。
+        # 判据必须是「最近」而不是「说过」：后者一旦成立就永远成立，
+        # 律师接手说了一句、第二天客户再来，AI 依然一个字不回。
         being_handled = (
             seconds_since_last_staff_reply is not None
             and seconds_since_last_staff_reply < settings.takeover_seconds
@@ -138,18 +135,11 @@ def decide(
         if being_handled:
             decision.reasons.append(f"gate:handed-off({group.handoff_userid})")
             return decision
-        # **没人露面就别让客户对着空气说话。** 真机实测：转人工后客户连发
-        # 「你好」「人呢」「你好？」，AI 全程沉默，直到企微把会话判成
-        # 「已结束聊天」——转接本来是为了让他更快见到人，结果是被晾在
-        # 一间空屋子里，比不转还糟。
-        # 过了宽限期就让 AI 接着陪，但**不清转接状态**：律师随时可以接手，
-        # 他一开口上面那条 being_handled 立刻又把 AI 按住。
-        if waited < settings.handoff_grace_seconds:
-            decision.reasons.append(f"gate:handed-off({group.handoff_userid})")
-            return decision
+        # 没人在跟 → AI 继续。reclaimed 到点后由 service._release_stale_handoff
+        # 清掉转接记录，客户之后再表达强意愿还能重新转。
         decision.reasons.append(
             "handoff:reclaimed" if waited >= settings.handoff_reclaim_seconds
-            else "handoff:no-show"
+            else "handoff:accompanying"
         )
 
     if (

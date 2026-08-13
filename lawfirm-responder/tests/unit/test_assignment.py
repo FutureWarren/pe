@@ -155,8 +155,10 @@ def test_inactive_assignee_triggers_reroute(tmp_path):
     assert store.get_lead("g7")["assigned_userid"] == "next"
 
 
-def test_notification_carries_priority_and_factors(tmp_path):
-    """交接单首行是层级+时限，随后是评分依据——可解释的排序才会被执行。"""
+def test_notification_is_just_the_case_details(tmp_path):
+    """交接单只给案件详情（律所方 2026-08-13：「不用给对话信息和建议动作了，
+    直接给案件详情就好」）。首行是层级+时限，正文是诉求、关键信息、联系方式；
+    「优先依据 / 建议动作 / 开场参考」三段整个拿掉——评分明细留在控制台线索页。"""
     store, settings = make(tmp_path)
     add_lawyer(store, "wei", "魏")
     group = GroupProfile(client_status=ClientStatus.PROSPECT, group_id="g8", case_type="劳动仲裁")
@@ -166,4 +168,7 @@ def test_notification_carries_priority_and_factors(tmp_path):
     text = snd.direct[0][1]
     # 客服手上只认强/弱两档（业务决策 2026-08）——P 码留在内部给评分与督办用
     assert text.startswith("【强意愿】")
-    assert "1 小时内联系" in text and "优先依据" in text and "已留电话 +40" in text
+    assert "1 小时内联系" in text
+    assert "17721275495" in text, "号码是这张单上最实的一样东西"
+    for gone in ("优先依据", "建议动作", "开场参考"):
+        assert gone not in text, f"精简掉的段落又回来了：{gone}"

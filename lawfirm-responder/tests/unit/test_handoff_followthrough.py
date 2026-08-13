@@ -114,10 +114,9 @@ def test_a_conversation_still_with_the_ai_is_not_force_moved(tmp_path):
     assert kf.transfers == []
 
 
-# ------------------------------------------------------ 二、转过去没人接
-def _decide_after_handoff(handoff_ago_seconds, staff_spoke_ago=None, grace=90):
-    s = Settings(handoff_grace_seconds=grace, handoff_reclaim_seconds=1800,
-                 kf_wait_seconds=0)
+# ------------------------------------------------------ 二、转过去之后 AI 接着陪
+def _decide_after_handoff(handoff_ago_seconds, staff_spoke_ago=None):
+    s = Settings(handoff_reclaim_seconds=1800, kf_wait_seconds=0)
     g = GroupProfile(group_id="kf:a:b", kf_open_kfid="a", kf_external_userid="b",
                      client_status=ClientStatus.PROSPECT, handoff_userid="wei",
                      handoff_at=datetime.now() - timedelta(seconds=handoff_ago_seconds))
@@ -127,31 +126,33 @@ def _decide_after_handoff(handoff_ago_seconds, staff_spoke_ago=None, grace=90):
                   classification=(Action.HANDOFF, "contact", False, ["contact:在吗"]))
 
 
-def test_ai_stays_quiet_right_after_the_handoff():
-    """刚转过去那一会儿必须闭嘴，否则会抢在律师前面说话。"""
+def test_ai_keeps_talking_right_after_the_handoff():
+    """转接 ≠ AI 闭嘴（2026-08-12 应转尽转的另一半）。旧版转完先静默 90 秒；
+    应转尽转之下几乎每个客户都会被转，那 90 秒就成了**每个客户的必经之路**。
+    真人开口之前，AI 接着陪、接着把案情问全。"""
     d = _decide_after_handoff(10)
-    assert d.should_speak is False
-    assert any("gate:handed-off" in r for r in d.reasons)
+    assert d.should_speak is True, d.reasons
+    assert "handoff:accompanying" in d.reasons
+    assert not any("gate:handed-off" in r for r in d.reasons)
 
 
-def test_ai_takes_over_again_when_nobody_shows_up():
-    """真机实测：转人工后客户连发「你好」「人呢」「你好？」，AI 全程沉默，
-    直到企微把会话判成「已结束聊天」。转接本来是为了让他更快见到人，
-    结果是被晾在一间空屋子里——比不转还糟。"""
+def test_ai_is_still_there_five_minutes_in():
+    """真机实测（旧版）：转人工后客户连发「你好」「人呢」「你好？」，AI 全程沉默，
+    直到企微把会话判成「已结束聊天」。现在不存在任何一个客户会被晾着的时点。"""
     d = _decide_after_handoff(300)
-    assert d.should_speak is True
-    assert "handoff:no-show" in d.reasons
+    assert d.should_speak is True, d.reasons
+    assert "handoff:accompanying" in d.reasons
 
 
 def test_ai_shuts_up_again_once_the_lawyer_speaks():
-    """律师一开口，AI 立刻让开——不管过了多久。"""
+    """律师一开口，AI 立刻让开——不管转了多久。"""
     d = _decide_after_handoff(600, staff_spoke_ago=20)
     assert d.should_speak is False
     assert any("gate:handed-off" in r for r in d.reasons)
 
 
-def test_the_no_show_grace_does_not_clear_the_handoff():
-    """AI 接着陪 ≠ 转接被撤销。律师随时还能接手。"""
+def test_accompanying_does_not_clear_the_handoff():
+    """AI 接着陪 ≠ 转接被撤销。客户仍在律师的工作台里，他随时能开口接手。"""
     d = _decide_after_handoff(300)
     assert "handoff:reclaimed" not in d.reasons
 

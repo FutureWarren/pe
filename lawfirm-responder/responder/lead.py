@@ -151,8 +151,11 @@ def format_notification(
 ) -> str:
     """推给律师的交接单文本（企微单聊）。
 
-    首行即优先级与时限预期——律师扫一眼就知道这单该排在手头哪个位置；
-    「优先依据」把评分摊开，可解释的排序才会被照着执行。
+    只给案件详情（律所方 2026-08-13：「不用给对话信息和建议动作了，
+    直接给案件详情就好」）。此前这张单还带「优先依据 / 建议动作 / 开场参考」
+    三段——真机用下来的结论是：接单的人要的是案子本身，怎么开口、先做什么
+    他自己有数，多出来的每一段都在稀释他扫一眼就要拿到的东西。
+    首行仍是优先级与时限预期：这单现在打还是排队打。
     """
     facts = []
     try:
@@ -178,23 +181,6 @@ def format_notification(
         lines.append("关键信息：")
         lines += [f"  · {f}" for f in facts]
     lines.append(f"联系方式：{lead.get('contact') or '客户未留，需在会话中继续沟通'}")
-    try:
-        factors = json.loads(lead.get("factors") or "[]")
-    except (ValueError, TypeError):
-        factors = []
-    if factors:
-        lines.append(f"优先依据：{priority.factors_line(factors)}")
-    if lead.get("suggested_action"):
-        lines += ["", f"建议动作：{lead['suggested_action']}"]
-    if lead.get("opening_line"):
-        # 模型爱写「我是XX律师」这种占位符。收件人就是被派的那位律师，
-        # 名字我们是知道的——留着 XX 让人以为系统没做完，顺手换掉。
-        opening = lead["opening_line"]
-        # 派单时会把被派律师同步写回会话档案（assignment.ensure），所以这里是准的
-        who = (group.lawyer_name or "").strip()
-        opening = opening.replace("XX律师", f"{who}律师" if who else "律师")
-        opening = opening.replace("XX", who or "")
-        lines.append(f"开场参考：「{opening}」")
     # 末尾这一行原来是句死路：「完整对话见控制台」——律师得开浏览器、找地址、
     # 登录、翻列表、找到人，五步，所以他不会做。改成可点的深链，一步直达。
     # public_base_url 没配时退回原文案（本机开发/未定域名）。

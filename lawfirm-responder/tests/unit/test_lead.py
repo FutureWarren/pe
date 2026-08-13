@@ -81,27 +81,26 @@ def _msg(content, mid):
     )
 
 
-def test_contact_message_creates_and_notifies_lead(tmp_path):
-    """客户留电话 → 生成线索、标记高意向、把交接单推给接待人。"""
+def test_a_substantive_question_creates_and_notifies_the_lead(tmp_path):
+    """应转尽转（2026-08-12 律所方）：「试用期被辞退有补偿吗？」已经是案情——
+    试用期、被辞退，两个可跟进的事实。不再等他喊出「我要委托」或留下电话，
+    线索当场建、交接单当场推；留号码只是后续的升级。"""
     store, sender, p = make(tmp_path)
     p.handle(_msg("试用期被辞退有补偿吗？", "m1"))
-    assert store.get_lead("kf:acct:cust") is None  # 普通咨询不建线索
+    lead = store.get_lead("kf:acct:cust")
+    assert lead and lead["intent"] == "hot", "说出情况的客户就该被人工看见"
+    assert sender.leads
+    to, text = sender.leads[-1]
+    assert to == "weilai"
+    # 降级路径下摘要取客户原话，绝不编造
+    assert "试用期被辞退有补偿吗？" in text
 
     p.handle(_msg("可以的呀我的电话是17721275495", "m2"))
     lead = store.get_lead("kf:acct:cust")
-    assert lead and lead["intent"] == "hot"
     assert lead["contact"] == "17721275495"
     assert lead["status"] == "new"
-
-    assert sender.leads, "高意向线索应推送接待人"
-    to, text = sender.leads[-1]
-    assert to == "weilai"
-    # 只留了电话 = 40 分，还够不到 P0 的 60 分线，所以标「弱意愿」。
-    # 这条阈值是否合适见 docs/lead-routing.md——留电话对律所是不是强信号，
-    # 属判断阈值，须律所方确认后再动。
-    assert text.startswith("【弱意愿】") and "17721275495" in text
-    # 降级路径下摘要取客户原话，绝不编造
-    assert "试用期被辞退有补偿吗？" in text or "电话是17721275495" in text
+    # 刚拿到号码是「客服会做出不同动作」的变化，要再响一次，且号码可见
+    assert "17721275495" in sender.leads[-1][1]
 
 
 def test_no_duplicate_notification(tmp_path):
@@ -115,12 +114,18 @@ def test_no_duplicate_notification(tmp_path):
 
     p.handle(_msg("我电话17721275495你们打给我", "h1"))  # 升级为 hot → 再通知
     assert len(sender.leads) == n1 + 1
-    assert "已留电话" in sender.leads[-1][1]  # 升级依据可见
+    # 第二条要一眼看出跟第一条不一样（否则会被当成重复推送划走），
+    # 升级的凭据——那个号码——就写在单子上
+    text = sender.leads[-1][1]
+    assert text.startswith("【升级】")
+    assert "17721275495" in text
 
 
-def test_cold_message_never_notifies(tmp_path):
+def test_a_contentless_greeting_never_notifies(tmp_path):
+    """应转尽转的下限：一声「你好」既没有情况也没有意愿，不建线索不推单。
+    （「拖欠工资多久可以仲裁」这类问句不在此列——那已经是案情了。）"""
     store, sender, p = make(tmp_path)
-    p.handle(_msg("拖欠工资多久可以申请劳动仲裁？", "c1"))
+    p.handle(_msg("你好，在吗", "c1"))
     assert sender.leads == []
 
 

@@ -86,7 +86,12 @@ HOT_SIGNALS = {"contact", "meeting", "engage", "want-contact", "wechat", "injury
                # 律所方 2026-08-10：问所址、问收费一律叫真人。
                # 这两件事都发生在客户从「了解」转向「决定」的那一刻——
                # 他要听的是一个具体的人，而不是一段听起来很周到的话。
-               "office", "fee"}
+               "office", "fee",
+               # 应转尽转（2026-08-12）：客户说出实质情况即叫人。
+               # **detect() 刻意不发这个信号**——它没有渠道上下文，群聊里
+               # 每条实质消息都判 hot 会把群线索的推送搅乱。只由 service
+               # 在一对一进线窗口经 `scan(extra_hits=)` 注入。
+               "substance"}
 
 
 def extract_contact(text: str) -> str:
@@ -161,4 +166,10 @@ def scan(
         # 我们却把最早那个抄在交接单上——律师打的是一个作废的号码，
         # 而系统看起来一切正常。以他最后给的为准。
         contact = extract_contact(m.get("content", "")) or contact
-    return rank(*levels), contact, sorted(hits)
+    # 意向要连 extra_hits 一起算，口径与 detect() 相同：注入的信号
+    # （答应面谈的「好的」、说出案情的 substance）恰恰是最热的那种，
+    # 只进清单不进意向的话，这条线索会顶着 hot 信号被标成 cold。
+    level = rank(*levels)
+    if HOT_SIGNALS & hits:
+        level = HOT
+    return level, contact, sorted(hits)

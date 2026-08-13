@@ -57,6 +57,32 @@ def _llm_answer_body(
     return cleaned or None
 
 
+def _llm_intake_body(
+    msg: IncomingMessage,
+    group: GroupProfile,
+    history: list[dict],
+    settings: Settings,
+    now: datetime,
+) -> str | None:
+    """进线承接正文：模型接住客户的话并追问。不可用/失败/示弱/判废 → None。"""
+    if not settings.llm_answer_enabled:
+        return None
+    body = llm.generate_intake_body(
+        msg.content,
+        case_type=group.case_type,
+        history_text=prompts.format_history(history),
+        handed_off=bool(group.handoff_userid),
+        is_night=now.hour >= 22 or now.hour < 6,
+        max_tokens=settings.llm_max_tokens_answer,
+        timeout=settings.llm_timeout_seconds,
+        settings=settings,
+    )
+    if body is None or sanitize.is_unusable(body):
+        return None
+    cleaned = sanitize.sanitize(body, max_chars=settings.answer_max_chars)
+    return cleaned or None
+
+
 def generate(
     msg: IncomingMessage,
     decision: Decision,
@@ -178,6 +204,37 @@ def generate(
                 templates.who_we_are(group, seed=msg.msg_id), Action.HANDOFF,
                 fallback, settings=settings,
             )
+        if "want-lawyer-contact" in decision.reasons:
+            return guard(
+                templates.exchange_contact(group, seed=msg.msg_id, settings=settings),
+                Action.HANDOFF, fallback, settings=settings,
+            )
+        # 话术松绑（律所方 2026-08-13）：一对一进线的承接先让模型看着上下文接——
+        # 客户说什么就回应什么，追问只问他没说过的。真机里最刺眼的两幕
+        # （客户说「你的回答跟我的案子无关」，收到「帮您催一下律师」；
+        # 刚说完案情，被要求「把情况讲一下」）都是从模板里挑话挑出来的。
+        # 模板降为兜底。三类不放给模型：紧急（「已加急」的承诺必须一字不差）、
+        # 费用（授权原话之外一个字不能多）、带邀约/要电话收口的（话术成对出现，
+        # 由 _close 统一拼装）。上面那些专属答法（点头、收号、报家门）也照旧——
+        # 它们是对话里最值钱的几拍，错一个字都亏。
+        if (
+            group.is_kf
+            and group.client_status == ClientStatus.PROSPECT
+            and msg.msg_type == "text"
+            and not decision.urgent
+            and decision.category not in (Category.URGENT, Category.FEE)
+            and not (ask_contact or office_invite)
+        ):
+            body = _llm_intake_body(msg, group, history, settings, now)
+            if body:
+                result = guard(body, Action.HANDOFF, fallback, settings=settings)
+                if result.passed:
+                    decision.reasons.append("intake:llm")
+                    return result
+                # 闸门拦下的不用兜底话术顶包，落回模板路径——那里每句都过过审
+                decision.reasons.append("intake:llm-blocked")
+            elif settings.llm_answer_enabled:
+                decision.reasons.append("intake:fallback-no-llm")
         if "kf:intake" in decision.reasons or "kf:intake-quiet" in decision.reasons:
             # 追问本身就是下一步，不再套 _close（问完三句再问电话就成了查户口）
             return guard(
@@ -185,11 +242,6 @@ def generate(
                     group, seed=msg.msg_id, settings=settings,
                     ask_phone="kf:intake-quiet" not in decision.reasons,
                 ),
-                Action.HANDOFF, fallback, settings=settings,
-            )
-        if "want-lawyer-contact" in decision.reasons:
-            return guard(
-                templates.exchange_contact(group, seed=msg.msg_id, settings=settings),
                 Action.HANDOFF, fallback, settings=settings,
             )
         text = _close(templates.build_handoff(decision.category, group, seed=msg.msg_id))
