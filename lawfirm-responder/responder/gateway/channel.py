@@ -146,7 +146,7 @@ def inbound(
             # 提醒接收人必须在建档时就落下。外部渠道没有「接待人」可查，
             # 只能用全局兜底——这一行留空的后果是**线索照样入库评分，
             # 但那张交接单一个人也收不到**，而控制台里看什么都正常。
-            lawyer_userid=settings.default_notify_userid,
+            notify_userid=settings.default_notify_userid,
         ))
     elif body.name and not group.name:
         group.name = body.name

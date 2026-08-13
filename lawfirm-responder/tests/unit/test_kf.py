@@ -246,7 +246,11 @@ def test_urgent_kf_pushes_one_brief_to_servicer(tmp_path):
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
 
     g = store.get_group(GID)
-    assert g.lawyer_userid == "weilai" and g.backup_userid == "libackup"
+    assert g.notify_userid == "weilai" and g.backup_userid == "libackup"
+    assert g.lawyer_userid == "", (
+        "接待人只是「该通知谁」。写进 lawyer_userid 就成了「这是谁的数据」，"
+        "名册里排第一的那位普通律师会拿到全所会话的可见权"
+    )
     lead = store.get_lead(GID)
     assert lead and lead["notified_at"] and lead["urgency"] == "high"
     assert kf.sent, "群里仍应立即安抚客户"
@@ -273,10 +277,10 @@ def test_backfills_missing_notify_target(tmp_path):
         group_id=GID, name="旧档案", client_status=ClientStatus.PROSPECT,
         kf_open_kfid=OPEN_KFID, kf_external_userid=EXT_USER,
     ))
-    assert store.get_group(GID).lawyer_userid == ""
+    assert store.get_group(GID).reminder_userid == ""
 
     worker.process_kf(KfSyncJob(token="tk", open_kfid=OPEN_KFID))
-    assert store.get_group(GID).lawyer_userid == "weilai"
+    assert store.get_group(GID).notify_userid == "weilai"
 
 
 def test_servicer_lookup_cached(tmp_path):

@@ -123,7 +123,9 @@ def test_profile_always_gets_a_notify_target(env):
     也收不到，而控制台里看什么都正常。静默失败是最贵的 bug。"""
     c, store, _ = env
     send(c, content="被辞退了想咨询")
-    assert store.get_group("ch:meituan:u-1").lawyer_userid == "wei"
+    g = store.get_group("ch:meituan:u-1")
+    assert g.notify_userid == "wei"
+    assert g.lawyer_userid == "", "提醒接收人 ≠ 数据归属，建档只落前者"
 
 
 def test_external_sessions_are_one_on_one_like_wechat_kf(env):

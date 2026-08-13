@@ -41,7 +41,20 @@ class GroupProfile(BaseModel):
     case_type: str = ""  # 如「刑事辩护」「离婚纠纷」
     case_stage: str = ""  # 如「侦查阶段」「已立案」
     lawyer_name: str = ""  # 承办律师姓名（话术中点名用）
-    lawyer_userid: str = ""  # 企微 userid，提醒推送用
+    # **数据归属**：这通对话是谁的。律师个人令牌能看到哪些会话，判据就是它
+    # （`Store.own_group_ids`）。只有分案引擎真的把单派给某人、或人工指定承办律师时
+    # 才写；**建档时一律留空**。
+    lawyer_userid: str = ""
+    # **提醒接收人**：还没派给具体律师时，那张交接单先推给谁。
+    #
+    # 2026-08-12 体检发现的最严重一条：这两件事本来共用 `lawyer_userid` 一个字段。
+    # 微信客服会话建档时把企微返回的**第一位接待人**填了进去，于是名册里排第一的
+    # 那位普通律师，个人链接一点开就能看到全所每一通咨询原文、每一条 AI 回复，
+    # 还能把任意客户的会话「转给我」。护栏文档上写着「律师只看自己名下数据」，
+    # 所以没有人会去查。
+    #
+    # 「该通知谁」和「这是谁的数据」是两个问题，必须两个字段。
+    notify_userid: str = ""
     backup_userid: str = ""  # 第二责任人，升级提醒用
     ai_enabled: bool = True  # 控制台可按群开关 AI
     robot_webhook: str = ""  # 群机器人 webhook（key 或完整 URL），人工配置，长期有效
@@ -93,6 +106,15 @@ class GroupProfile(BaseModel):
             or self.is_douyin
             or self.is_external
         )
+
+    @property
+    def reminder_userid(self) -> str:
+        """这通对话的提醒该推给谁（不含全局兜底——那要读配置，模型层不碰配置）。
+
+        承办律师优先：真派出去之后，交接单和督办都该走他，而不是建档时那个
+        临时接收人。两个都空时由调用方回落 `settings.default_notify_userid`。
+        """
+        return self.lawyer_userid or self.notify_userid
 
 
 class IncomingMessage(BaseModel):

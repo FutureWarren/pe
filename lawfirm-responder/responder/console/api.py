@@ -145,9 +145,45 @@ def _check_lock(request: Request) -> None:
         raise HTTPException(429, "登录尝试过于频繁，请稍后再试")
 
 
+# 已经就这一轮告过警了。窗口过去自动清零——重复轰炸的告警等于没有告警。
+_alerted_at = 0.0
+
+
 def _note_fail(request: Request) -> None:
     _fails.setdefault(_client_ip(request), []).append(time.time())
     _global_fails.append(time.time())
+    _maybe_alert_bruteforce(request)
+
+
+def _maybe_alert_bruteforce(request: Request) -> None:
+    """有人在撞令牌 → 推一条企微给管理员。
+
+    闸门拦住了不等于有人知道。控制台后面是全所客户的咨询原文和手机号，
+    还有一个能让服务器执行新代码的「升级」按钮——**这种事必须有人当场收到消息**，
+    而不是等哪天有人想起来翻日志（而律所侧根本没有 SSH）。
+    """
+    global _alerted_at
+    now = time.time()
+    recent = [t for t in _global_fails if now - t < _LOCK_SECONDS]
+    if len(recent) < _GLOBAL_MAX_FAILS // 2:
+        return
+    if now - _alerted_at < _LOCK_SECONDS:
+        return
+    _alerted_at = now
+    try:
+        pipeline = request.app.state.pipeline
+        to = pipeline.settings.default_notify_userid
+        sender = pipeline.sender
+        if not to or sender is None:
+            return
+        sender.send_direct_text(
+            to,
+            f"【安全提醒】{int(_LOCK_SECONDS / 60)} 分钟内控制台令牌被连续输错"
+            f" {len(recent)} 次，来源可能不止一个 IP。\n"
+            f"已自动锁定登录。如果不是所里的人在试，请立刻在「状态」页改令牌。",
+        )
+    except Exception:
+        logger.exception("bruteforce alert failed")
 
 
 def get_principal(
@@ -514,7 +550,8 @@ def sync_kf_servicers(
     cache: dict[str, list[str]] = {}
     changed, errors = [], []
     for row in store.list_groups():
-        if not row.get("kf_open_kfid") or row.get("lawyer_userid"):
+        if not row.get("kf_open_kfid") or row.get("notify_userid") \
+                or row.get("lawyer_userid"):
             continue
         kfid = row["kf_open_kfid"]
         if kfid not in cache:
@@ -529,7 +566,7 @@ def sync_kf_servicers(
         if not target:
             continue
         g = store.get_group(row["group_id"])
-        g.lawyer_userid = target
+        g.notify_userid = target  # 提醒接收人，不是数据归属
         if len(cache[kfid]) > 1 and not g.backup_userid:
             g.backup_userid = cache[kfid][1]
         store.upsert_group(g)
@@ -555,7 +592,7 @@ def notify_lead(
     pipeline = request.app.state.pipeline
     to = (
         row.get("assigned_userid")
-        or group.lawyer_userid
+        or group.reminder_userid
         or pipeline.settings.default_notify_userid
     )
     if not to:
@@ -645,7 +682,7 @@ def upsert_group(
         # 白名单而不是黑名单：以后再加渠道字段，不会又漏一次。
         editable = {
             "name", "client_status", "case_type", "case_stage",
-            "lawyer_name", "lawyer_userid", "backup_userid",
+            "lawyer_name", "lawyer_userid", "notify_userid", "backup_userid",
             "ai_enabled", "robot_webhook",
         }
         profile = existing.model_copy(
@@ -703,8 +740,20 @@ class TokenChange(BaseModel):
     token: str
 
 
-# 律所名相关的词：这些是攻击者会试的第一批，长度再够也不能用
-_WEAK_WORDS = ("songhu", "松沪", "songhulaw", "lawfirm", "12345678", "password", "admin")
+# 律所名相关的词：这些是攻击者会试的第一批，长度再够也不能用。
+# **示例口令本身也在这张表里**——文档和控制台上写出来的那句话，
+# 一定会有人原样照抄；写出来的那一刻它就不再是秘密了。
+#
+# `EXAMPLE_TOKEN` 是控制台与部署文档里展示的那句示例。**它必须在这张表里**：
+# 写出来的那一刻它就不再是秘密，而照抄示例的人从来不少。
+# `test_the_example_shown_to_users_is_itself_rejected` 守着这条一致性——
+# 换示例时忘了同步，测试会红。
+EXAMPLE_TOKEN = "qingchen-6-lubiao"
+_WEAK_WORDS = (
+    "songhu", "松沪", "songhulaw", "lawfirm", "12345678", "password", "admin",
+    "jiufeng", "九峰", "shanghai", "law88", "lvsuo", "律所",
+    EXAMPLE_TOKEN, "qingchen", "lubiao",
+)
 
 
 @router.post("/admin-token")
@@ -722,10 +771,14 @@ def set_admin_token(
     """
     t = (body.token or "").strip()
     if len(t) < 12:
-        raise HTTPException(400, "至少 12 位。可以用一句话，比如 songhu-jiufeng-88")
+        raise HTTPException(400, "至少 12 位。可以用一句话，比如 qingchen-6-lubiao")
     low = t.lower()
-    if any(w in low for w in _WEAK_WORDS) and len(t) < 16:
-        raise HTTPException(400, "含律所名/常见词的令牌请至少 16 位，或换个词")
+    # **不再给「够长就放行」的口子。** 原判据是 `len(t) < 16`，
+    # 而文档与控制台上那句示例 `songhu-jiufeng-88` 恰好 17 位——
+    # 它同时是最多人会照抄的一句，等于给了一条现成的路。
+    # 这些词是攻击者会试的第一批，长度补不回可猜性。
+    if any(w in low for w in _WEAK_WORDS):
+        raise HTTPException(400, "别用律所名、地址或示例里那句——换几个跟本所无关的词")
     if t.isdigit() or t.isalpha():
         raise HTTPException(400, "别用纯数字或纯字母，掺个「-」或数字就行")
 
@@ -1026,7 +1079,9 @@ def diagnostics(request: Request, _: Principal = Depends(require_admin)):
     # 没有提醒接收人的会话＝线索生成了也没人知道，属静默失败，必须显式暴露
     orphan = [
         g["group_id"] for g in store.list_groups()
-        if g.get("ai_enabled") and not (g.get("lawyer_userid") or s.default_notify_userid)
+        if g.get("ai_enabled")
+        and not (g.get("lawyer_userid") or g.get("notify_userid")
+                 or s.default_notify_userid)
     ]
     return {
         "mode": s.mode,

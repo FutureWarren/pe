@@ -139,7 +139,10 @@ def test_first_mention_creates_profile_and_replies_via_callback_webhook(tmp_path
     assert g is not None, "首次 @ 应自动建档，人工才有地方补承办律师"
     assert g.bot_webhook == HOOK and g.bot_webhook_at is not None
     assert g.client_status == ClientStatus.PROSPECT
-    assert g.lawyer_userid == "future", "没有接待人可查的群要用兜底接收人，否则简报无人可推"
+    assert g.notify_userid == "future", "没有接待人可查的群要用兜底接收人，否则简报无人可推"
+    assert g.lawyer_userid == "", (
+        "建档时不写数据归属——写了等于把全所会话的可见权发给那个人"
+    )
     assert snd.calls and snd.calls[0][0] == HOOK
 
 

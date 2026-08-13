@@ -565,7 +565,8 @@ class Worker:
             group = self.store.get_group(row["group_id"])
             if group is None:
                 continue
-            to = row.get("assigned_userid") or group.lawyer_userid or s.default_notify_userid
+            to = (row.get("assigned_userid") or group.reminder_userid
+                  or s.default_notify_userid)
             if not to:
                 continue
             # 超过一小时就用小时说话：「已超 1440 分钟」没人算得过来
@@ -619,8 +620,8 @@ class Worker:
                 existing.bot_webhook = env.webhook_url
                 existing.bot_webhook_at = datetime.now()
             # 建档时后台还没配兜底接收人的旧档案：补齐，否则简报无人可推
-            if not existing.lawyer_userid:
-                existing.lawyer_userid = self._bot_notify_userid()
+            if not existing.notify_userid:
+                existing.notify_userid = self._bot_notify_userid()
             self.store.upsert_group(existing)
             return
         self.store.upsert_group(
@@ -635,7 +636,7 @@ class Worker:
                 client_status=ClientStatus.PROSPECT,
                 case_type=s.kf_default_case_type,
                 lawyer_name=s.kf_default_lawyer_name,
-                lawyer_userid=self._bot_notify_userid(),
+                notify_userid=self._bot_notify_userid(),
                 ai_enabled=s.bot_enabled,
                 bot_webhook=env.webhook_url,
                 bot_webhook_at=datetime.now() if env.webhook_url else None,
@@ -924,7 +925,7 @@ class Worker:
                 client_status=ClientStatus.PROSPECT,  # 私信进线一律按新咨询
                 case_type=s.kf_default_case_type,
                 lawyer_name=s.kf_default_lawyer_name,
-                lawyer_userid=s.douyin_default_notify_userid or s.default_notify_userid,
+                notify_userid=s.douyin_default_notify_userid or s.default_notify_userid,
                 ai_enabled=s.douyin_enabled,
                 douyin_open_id=env.open_id,
             )
@@ -981,11 +982,11 @@ class Worker:
         if existing is not None:
             # 旧档案（建档时还没有接待人查询能力，或当时后台尚未配置接待人）
             # 会导致简报无人可推——在这里补齐，否则线索只会静静躺在库里。
-            if not existing.lawyer_userid:
+            if not existing.reminder_userid:
                 servicers = self._kf_servicers(open_kfid)
                 target = servicers[0] if servicers else s.default_notify_userid
                 if target:
-                    existing.lawyer_userid = target
+                    existing.notify_userid = target
                     if len(servicers) > 1 and not existing.backup_userid:
                         existing.backup_userid = servicers[1]
                     self.store.upsert_group(existing)
@@ -999,7 +1000,9 @@ class Worker:
                 client_status=ClientStatus.PROSPECT,  # 客服进线默认为新咨询
                 case_type=s.kf_default_case_type,
                 lawyer_name=s.kf_default_lawyer_name,
-                lawyer_userid=servicers[0] if servicers else s.default_notify_userid,
+                # **不写 lawyer_userid。** 那是数据归属，写进去等于把全所会话
+                # 的可见权发给了名册里排第一的那位（2026-08-12 体检最严重一条）。
+                notify_userid=servicers[0] if servicers else s.default_notify_userid,
                 backup_userid=servicers[1] if len(servicers) > 1 else "",
                 ai_enabled=s.kf_enabled,
                 kf_open_kfid=open_kfid,

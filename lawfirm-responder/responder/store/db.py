@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS groups (
     case_type TEXT DEFAULT '',
     case_stage TEXT DEFAULT '',
     lawyer_name TEXT DEFAULT '',
-    lawyer_userid TEXT DEFAULT '',
+    lawyer_userid TEXT DEFAULT '',      -- 数据归属：律师个人令牌按它放行
+    notify_userid TEXT DEFAULT '',      -- 提醒接收人：还没派人时交接单先推给谁
     backup_userid TEXT DEFAULT '',
     ai_enabled INTEGER DEFAULT 1,
     robot_webhook TEXT DEFAULT '',
@@ -217,6 +218,10 @@ _ADDED_COLUMNS = {
         # 老客户隔三周回来，AI 该记得他——没有这一列，每次回访都是从零开始。
         "memory": "TEXT DEFAULT ''",
         "memory_at": "TEXT",
+        # **提醒接收人**，与「数据归属」（lawyer_userid）分开的第二个字段。
+        # 2026-08-12 之前两者共用一列，于是微信客服建档时填进去的那位接待人
+        # 拿到了全所会话的可见权。见 `models.GroupProfile.notify_userid`。
+        "notify_userid": "TEXT DEFAULT ''",
     },
     # parts：这条回复实际拆成了几条平台消息。抖音按**条**限额（同一窗口最多 6 条），
     # 一行 replies 可能对应 3 条真实消息，不记下来就算不准配额。
@@ -323,14 +328,16 @@ class Store:
         with self._conn() as conn:
             conn.execute(
                 """INSERT INTO groups (group_id,name,client_status,case_type,case_stage,
-                   lawyer_name,lawyer_userid,backup_userid,ai_enabled,robot_webhook,
+                   lawyer_name,lawyer_userid,notify_userid,backup_userid,
+                   ai_enabled,robot_webhook,
                    bot_webhook,bot_webhook_at,kf_open_kfid,kf_external_userid,
                    douyin_open_id,ext_channel,ext_user_id,handoff_userid,handoff_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(group_id) DO UPDATE SET
                    name=excluded.name, client_status=excluded.client_status,
                    case_type=excluded.case_type, case_stage=excluded.case_stage,
                    lawyer_name=excluded.lawyer_name, lawyer_userid=excluded.lawyer_userid,
+                   notify_userid=excluded.notify_userid,
                    backup_userid=excluded.backup_userid, ai_enabled=excluded.ai_enabled,
                    robot_webhook=excluded.robot_webhook,
                    bot_webhook=excluded.bot_webhook,
@@ -344,7 +351,8 @@ class Store:
                    handoff_at=excluded.handoff_at""",
                 (
                     g.group_id, g.name, g.client_status.value, g.case_type, g.case_stage,
-                    g.lawyer_name, g.lawyer_userid, g.backup_userid, int(g.ai_enabled),
+                    g.lawyer_name, g.lawyer_userid, g.notify_userid,
+                    g.backup_userid, int(g.ai_enabled),
                     g.robot_webhook, g.bot_webhook,
                     g.bot_webhook_at.isoformat() if g.bot_webhook_at else None,
                     g.kf_open_kfid, g.kf_external_userid, g.douyin_open_id,

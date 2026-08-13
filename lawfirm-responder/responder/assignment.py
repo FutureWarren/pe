@@ -58,11 +58,16 @@ def ensure(
     settings = settings or get_settings()
 
     def _legacy() -> str:
-        """回落目标必须校验在职：把单子推给一个已停用的人等于没推。"""
-        if group.lawyer_userid:
-            law = store.get_lawyer(group.lawyer_userid)
+        """回落目标必须校验在职：把单子推给一个已停用的人等于没推。
+
+        取 `reminder_userid`（承办律师优先，其次建档时落的提醒接收人）——
+        这两件事 2026-08-12 起是两个字段，见 `models.GroupProfile`。
+        """
+        target = group.reminder_userid
+        if target:
+            law = store.get_lawyer(target)
             if law is None or law["active"]:  # 不在名册里＝人工配的固定接待人，照用
-                return group.lawyer_userid
+                return target
         return settings.default_notify_userid
 
     # 已成交客户的服务群有固定承办律师，自动派单一律不碰——

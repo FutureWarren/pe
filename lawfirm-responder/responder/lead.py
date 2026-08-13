@@ -330,7 +330,7 @@ def should_notify(
 
 def _any_recipient(store: Store, group: GroupProfile, settings: Settings) -> bool:
     """这条线索最终有没有人能收到。只做判断，不改任何状态。"""
-    if group.lawyer_userid or settings.default_notify_userid:
+    if group.reminder_userid or settings.default_notify_userid:
         return True
     return any(x.get("userid") for x in store.list_lawyers(active_only=True))
 

@@ -125,12 +125,15 @@ def test_token_can_be_changed_to_a_memorable_phrase(tmp_path):
 
     app, settings = _auth_app(tmp_path)
     c = TestClient(app)
-    r = c.post("/console/admin-token", json={"token": "jiufeng-88-pinggao"},
+    # 刻意不用跟律所沾边的词：所址「九峰路」印在每一条邀约话术里，
+    # 客户和爬虫都读得到，拿它当口令等于把答案写在门上（2026-08-12 收紧）。
+    phrase = "mabuteng-7-hetong"
+    r = c.post("/console/admin-token", json={"token": phrase},
                headers={"X-Admin-Token": "tok-original-123"})
     assert r.status_code == 200
-    assert settings.admin_token == "jiufeng-88-pinggao"
+    assert settings.admin_token == phrase
     # 新令牌立即生效，旧的立即失效
-    assert c.get("/console/me", headers={"X-Admin-Token": "jiufeng-88-pinggao"}).status_code == 200
+    assert c.get("/console/me", headers={"X-Admin-Token": phrase}).status_code == 200
 
 
 def test_weak_tokens_are_rejected(tmp_path):
@@ -140,7 +143,11 @@ def test_weak_tokens_are_rejected(tmp_path):
     app, _ = _auth_app(tmp_path)
     c = TestClient(app)
     h = {"X-Admin-Token": "tok-original-123"}
-    for bad in ("songhu123", "12345678", "songhulaw2026", "abcdefghijkl"):
+    # 「够长就放行」的口子已经堵掉：律所名/所址/示例口令一律拒，不看长度。
+    # 旧判据 `含弱词 and len < 16` 恰好放行了文档里那句 songhu-jiufeng-88（17 位），
+    # 而那是最多人会照抄的一句。
+    for bad in ("songhu123", "12345678", "songhulaw2026", "abcdefghijkl",
+                "songhu-jiufeng-88", "jiufeng-88-pinggao"):
         r = c.post("/console/admin-token", json={"token": bad}, headers=h)
         assert r.status_code == 400, bad
 
