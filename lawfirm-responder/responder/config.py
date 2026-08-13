@@ -162,8 +162,14 @@ class Settings(BaseSettings):
     winback_idle_seconds: int = 1800
 
     # LLM 供应商：deepseek | anthropic | auto（auto = 谁的 key 在就用谁，deepseek 优先）
-    # 业务决策 2026-07：默认 DeepSeek（成本考虑）；Anthropic 路径保留可随时切回
-    llm_provider: str = "auto"
+    # 业务决策 2026-07：默认 DeepSeek（成本考虑）；Anthropic 路径保留可随时切回。
+    #
+    # **默认从 auto 改成 deepseek（2026-08-12）。** `auto` 意味着「哪个 key 在
+    # 就发给谁」——环境里多一个 ANTHROPIC_API_KEY，客户的咨询原文就会**静默地**
+    # 改走境外服务商。那不是换个模型的事：《个人信息保护法》上它从「向第三方提供」
+    # 变成「个人信息出境」，要求完全不同，而律所对此毫不知情。
+    # 处理者是谁必须是一个明确的选择，不能是环境变量的副作用。
+    llm_provider: str = "deepseek"
     deepseek_model: str = "deepseek-chat"
     claude_model: str = "claude-opus-4-8"
 
@@ -173,6 +179,20 @@ class Settings(BaseSettings):
 
     # 免责句式开关：业务决策暂不落地，机制保留，合伙人审定句式后置 True
     disclaimer_required: bool = False
+
+    # ---- 数据留存（《个人信息保护法》第 19 条：保存期限应为实现目的所必要的最短时间）
+    #
+    # 库里躺的是真实公民的咨询原文和手机号：欠薪、离婚、伤情、家人有没有被拘留。
+    # 四张表从上线起只进不出，一年几千人无限期堆在一台机器上。
+    #
+    # **0 = 不清理**，这是**当前的默认值，而且是刻意的**：保留多久是律所的
+    # 业务决策（要兼顾利益冲突检查、回访、以及可能的诉讼时效），
+    # 不该由写代码的人替他们定。律所拍板后把天数填进来即可，机制已经就位。
+    # 填之前请确认：删掉的会话在控制台里也就查不到了，这是不可逆的。
+    retention_days: int = 0
+    # 消息原文可以比线索档案先删：档案里只有摘要和联系方式，是跟进要用的；
+    # 原文才是最敏感的那部分。留空则跟随 retention_days。
+    retention_days_messages: int = 0
 
     # 回调异步处理：立即回 success（企微 5 秒超时红线），实际处理交后台工作线程。
     # 仅测试/本机联调可关。

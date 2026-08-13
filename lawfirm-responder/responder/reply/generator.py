@@ -110,7 +110,15 @@ def generate(
             )
         if next_step:
             decision.reasons.append("cta:next-step")
-            return text + "\n" + templates.next_step(group, seed=msg.msg_id)
+            # 紧急情形要用与「加急」自洽的下一步。通用那句是
+            # 「留个手机号也行，律师**一有空**就给您回电话」——
+            # 对着一个刚说完家人被刑拘的人，这句当场否掉了前半句的「已加急」。
+            step = (
+                templates.urgent_next_step(group, seed=msg.msg_id)
+                if decision.urgent
+                else templates.next_step(group, seed=msg.msg_id)
+            )
+            return text + "\n" + step
         return text
 
     # 所务事实（地址/怎么走/几点上班）：答案在配置里，直接给，不进模型。
@@ -201,6 +209,8 @@ def generate(
         decision.reasons.append("answer:fallback-no-llm")
         text = templates.answer_without_llm(
             group,
+            question=msg.content,
+            seed=msg.msg_id,
             include_disclaimer=require_disclaimer,
             include_cta=include_cta and not (ask_contact or next_step or office_invite),
         )

@@ -43,16 +43,38 @@ def resolve(settings: Settings | None = None) -> Provider | None:
         return Provider("deepseek", settings.deepseek_model) if ds else None
     if pref == "anthropic":
         return Provider("anthropic", settings.claude_model) if an else None
-    # auto：deepseek 优先（成本），退而 anthropic
+    # auto：deepseek 优先（成本）。
     if ds:
         return Provider("deepseek", settings.deepseek_model)
+    # **`auto` 不会自己滑到境外那家。**
+    #
+    # 客户在这里讲的是欠薪、离婚、伤情、家人有没有被拘留，而每条咨询原文都会
+    # 随上下文发给模型。DeepSeek 的 key 掉了、环境里恰好还有个
+    # ANTHROPIC_API_KEY，旧写法就**静默地**改走境外服务商——
+    # 《个人信息保护法》上那不是换个模型，是从「向第三方提供」变成
+    # 「个人信息出境」，要求完全不同，而律所对此毫不知情。
+    #
+    # 所以 `auto` 只在国内那家可用时成立；不可用就退回确定性话术
+    # （规则 + 模板照常工作，客户仍然有人应），而不是换个处理者。
+    # 真要用境外那家，把 `RESPONDER_LLM_PROVIDER=anthropic` 明确写出来——
+    # 换处理者是律所的合规决定，不能是环境变量的副作用。
     if an:
-        return Provider("anthropic", settings.claude_model)
+        logger.warning(
+            "llm_provider=auto 且只有 ANTHROPIC_API_KEY 可用：不自动启用。"
+            "换处理者涉及个人信息出境，须显式配置 RESPONDER_LLM_PROVIDER=anthropic"
+        )
     return None
 
 
-def llm_available() -> bool:
-    return resolve() is not None
+def llm_available(settings: Settings | None = None) -> bool:
+    """模型这条路现在能不能走。
+
+    **必须能收 settings。** 「用哪家」现在是一个显式配置（见 `resolve`），
+    而管道持有的是注入的那份配置；这里若一律读全局，两边就能错开——
+    表现是判断层以为模型可用、真去调时却解析不出供应商，
+    或者反过来白白退回确定性话术。
+    """
+    return resolve(settings) is not None
 
 
 # ================================================================ 后端

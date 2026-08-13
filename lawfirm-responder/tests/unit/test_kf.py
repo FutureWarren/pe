@@ -94,7 +94,11 @@ def test_customer_message_creates_profile_and_replies(tmp_path):
 
     assert kf.sent, "应经客服通道回复"
     assert kf.sent[0][0] == OPEN_KFID and kf.sent[0][1] == EXT_USER
-    assert "别急" in kf.sent[0][2] or "别慌" in kf.sent[0][2]  # 紧急安抚话术
+    # 判「安抚 + 已加急」这两层意思，不锁死字面：紧急话术有四个变体
+    # （客户第三条又说「我快撑不住了」时收到一字不差的同一句，本身就是问题）
+    body = kf.sent[0][2]
+    assert any(w in body for w in ("别急", "别慌", "别着急"))
+    assert "加急" in body
     assert store.list_decisions(GID)
 
 

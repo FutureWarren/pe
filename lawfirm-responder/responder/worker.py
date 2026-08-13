@@ -72,6 +72,8 @@ class Worker:
         # 上一轮刚试过的新版本（判「它是不是自己回滚了」用，见 _maybe_auto_update）
         self._pending_update_sha = ""
         self._pending_update_before = ""
+        # 留存清理一天一次就够（见 _sweep_retention）
+        self._last_purge = datetime.fromtimestamp(0)
 
     # ------------------------------------------------------------ 生命周期
     def start(self) -> None:
@@ -200,13 +202,65 @@ class Worker:
             self._sweep_idle_leads, self._sweep_customer_memory,
             self._sweep_lead_sla, self._sweep_winback,
             self._sweep_channel_health, self._sweep_servicers,
+            self._sweep_retention,
             self._maybe_auto_update,
             self._maybe_daily_digest,
         ):
+            # **等着的客户消息优先。** 定时事务和客户消息跑在同一条线程上，
+            # 一轮 sweep 里有企微接口调用、有模型归纳，慢起来是秒级的。
+            # 首响时长是北极星指标，不能让一个客户排在「给知识库沉淀记忆」后面。
+            self._drain_hot()
             try:
                 sweep(now)
             except Exception:
                 logger.exception("定时事务失败: %s", sweep.__name__)
+        self._drain_hot()
+
+    def _drain_hot(self) -> None:
+        """把队列里等着的客户消息先处理掉（定时事务之间的让路点）。
+
+        有上限：一轮最多让 20 条，否则消息一直来就永远轮不到定时事务，
+        而自动升级正跑在里面——那是我们唯一能远程推修复的通道。
+        """
+        for _ in range(20):
+            try:
+                item = self.q.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                self._dispatch(item)
+            except Exception:
+                logger.exception("worker dispatch failed (drain): %r", item)
+
+    def _sweep_retention(self, now: datetime) -> None:
+        """按留存期限清理旧数据。**默认关闭**（`retention_days=0`）。
+
+        保留多久是律所的业务决策——要兼顾利益冲突检查、回访、诉讼时效，
+        不该由写代码的人替他们定。这里只把机制备好：律所拍板后填个天数即可。
+
+        一天跑一次就够，而且要留痕：删数据这件事没有撤销键，
+        至少得让人事后看得出「哪天删了多少」。
+        """
+        s = self.pipeline.settings
+        if not s.retention_days:
+            return
+        if (now - self._last_purge).total_seconds() < 86400:
+            return
+        self._last_purge = now
+        msg_days = s.retention_days_messages or s.retention_days
+        counts = self.store.purge_older_than(
+            now - timedelta(days=s.retention_days),
+            messages_cutoff=now - timedelta(days=msg_days),
+        )
+        total = sum(counts.values())
+        if total:
+            self.store.set_note(
+                "retention_purge",
+                f"{now.strftime('%m-%d %H:%M')} 按留存期限清理："
+                f"{'、'.join(f'{k} {v} 条' for k, v in counts.items() if v)}"
+                f"（保留 {s.retention_days} 天；已成交客户的记录不动）",
+            )
+            logger.info("retention purge: %s", counts)
 
     def _sweep_servicers(self, now: datetime) -> None:
         """让企微的「接待人」名单自动跟上律师名册。
@@ -782,8 +836,27 @@ class Worker:
             event = (raw.get("event") or {}).get("event_type", "")
             if event in wecom_kf.ENTER_EVENTS:
                 self._ensure_kf_profile(group_id, open_kfid, external_userid)
-                self._kf_welcome(group_id, open_kfid, external_userid,
-                                 raw.get("msgid") or "")
+                self._kf_welcome(
+                    group_id, open_kfid, external_userid,
+                    raw.get("msgid") or "",
+                    code=(raw.get("event") or {}).get("welcome_code", ""),
+                )
+            elif event in wecom_kf.SEND_FAIL_EVENTS:
+                # **企微在告诉我们「这条没送到」，别当成一个认不出的事件丢掉。**
+                # 丢掉的后果全是假象：库里那条回复标着「已发送」、控制台显示
+                # 「AI 已回复」、追问逻辑认定「已经答过了」不再补发、
+                # 交接单上写着客户已被安抚——而客户那头一个字都没收到。
+                failed_for = (raw.get("event") or {}).get("fail_msgid", "")
+                n = self.store.mark_reply_undelivered(group_id, failed_for)
+                self.store.bump("kf_send_failed")
+                self.store.set_note(
+                    f"undelivered:{group_id}",
+                    f"{datetime.now().strftime('%m-%d %H:%M')} 企微回报有回复没送到"
+                    f"（多半是客户把客服号删了，或超出了 48 小时回复窗口）。"
+                    f"已标为未送达，后续追问/挽留会重新生效。",
+                )
+                logger.warning("kf send failed event for %s (updated %s rows)",
+                               group_id, n)
             else:
                 # 事件名不在白名单里 = 进线问候整条不触发，而客户看到的是空窗口。
                 # 白名单是照着文档写的，企微换个名字我们就哑了——留个证据。
@@ -887,7 +960,8 @@ class Worker:
                         group_id, state)
 
     def _kf_welcome(
-        self, group_id: str, open_kfid: str, external_userid: str, msg_id: str
+        self, group_id: str, open_kfid: str, external_userid: str, msg_id: str,
+        code: str = "",
     ) -> None:
         """客户进入客服会话时的主动问候。
 
@@ -927,7 +1001,14 @@ class Worker:
         )
         result = guard(text, Action.ANSWER, templates.safe_fallback(group),
                        settings=self.pipeline.settings)
-        if not client.send_text(open_kfid, external_userid, result.text):
+        # 新客户刚扫码进来、一个字还没发：普通发送接口在这一刻是发不出去的
+        # （企微要求客户先说过话）。企微为此单独给了带 code 的事件回应接口。
+        sent = False
+        if code and hasattr(client, "send_text_on_event"):
+            sent = client.send_text_on_event(code, result.text)
+        if not sent:
+            sent = client.send_text(open_kfid, external_userid, result.text)
+        if not sent:
             # **没发出去就绝不能记账。** 记了 `has_greeting` 就为真，
             # `_avoid_repeat_greeting` 从此认定「打过招呼了」，于是客户扫码进来
             # 看到一片空白，而系统这边显示一切正常——空窗口是最大的流失点，

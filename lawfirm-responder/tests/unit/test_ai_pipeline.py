@@ -10,8 +10,11 @@ from responder.service import Pipeline
 from responder.store.db import Store
 
 
-def make_pipeline(tmp_path, monkeypatch=None, mode="live") -> Pipeline:
-    settings = Settings(mode=mode, db_path=str(tmp_path / "t.db"))
+def make_pipeline(tmp_path, monkeypatch=None, mode="live", provider="anthropic") -> Pipeline:
+    # 显式写死供应商。`auto` 现在不会自己滑到境外那家——换处理者涉及
+    # 个人信息出境，必须是一次明确的配置，不能是环境变量的副作用
+    # （见 responder/engine/llm.py::resolve）。
+    settings = Settings(mode=mode, db_path=str(tmp_path / "t.db"), llm_provider=provider)
     store = Store(settings.db_path)
     store.upsert_group(
         GroupProfile(
@@ -119,7 +122,10 @@ def test_llm_answer_failure_falls_back(tmp_path, monkeypatch):
     assert d.action == Action.ANSWER
     assert "answer:fallback-no-llm" in d.reasons
     reply = p.store.list_replies("g1")[0]
-    assert "已转达王律师" in reply["text"]
+    # 降级话术现在有三个变体、且会复述客户问的是什么——
+    # 连问两句收到一字不差的同一段套话，是「显得非常的笨」最直接的来源。
+    assert "王律师" in reply["text"]
+    assert "仲裁" in reply["text"], "答不了也得让他知道这句话被听见了"
 
 
 def test_llm_answer_ai_selfref_discarded(tmp_path, monkeypatch):

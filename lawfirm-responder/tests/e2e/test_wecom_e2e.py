@@ -120,7 +120,8 @@ def test_urgent_message_immediate_robot_reply_and_escalating_reminder(env):
     assert len(sender.robot) == 1
     webhook, text = sender.robot[0]
     assert webhook == "robot-key-001"
-    assert "别急" in text or "别慌" in text
+    assert any(w in text for w in ("别急", "别慌", "别着急"))
+    assert "加急" in text
     # 加急单聊提醒承办律师，附原文与 AI 已回复内容
     assert sender.direct and "加急" in sender.direct[0][1]
     assert "投诉" in sender.direct[0][1]

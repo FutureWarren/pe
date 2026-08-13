@@ -31,6 +31,11 @@ ORIGIN_SERVICER = 5  # 接待人员（真人客服/律师）发的 → 触发人
 # 客户扫码/点链接进入会话的事件类型。企微在不同版本里用过这几个名字，
 # 全都认——认漏一个的后果是客户进来后对着空窗口，没人打招呼。
 ENTER_EVENTS = ("enter_session", "user_enter_session", "enter_chat")
+# 企微事后告诉我们「这条没送到」（客户把客服号删了、内容被安全策略拦下、
+# 超出 48 小时窗口）。**不处理的后果全是假象**：库里那条回复标着「已发送」、
+# 控制台显示「AI 已回复」、追问逻辑认定「已经答过了」不再补发、
+# 交接单上写着客户已被安抚——而客户那头一个字都没收到。
+SEND_FAIL_EVENTS = ("msg_send_fail", "send_fail", "message_send_fail")
 
 # 会话状态机（见 docs/kf-handoff.md）。AI 工作时会话停在 1，
 # 转成 3 并指定 servicer_userid，这通会话就出现在那位律师的客服工作台里。
@@ -383,6 +388,28 @@ class KfClient:
             return False
 
     # ------------------------------------------------------------ 发
+    def send_text_on_event(self, code: str, text: str) -> bool:
+        """回应「进入会话」事件专用的发送接口。
+
+        **普通的 `kf/send_msg` 在这一刻是发不出去的**：企微要求客户先说过话
+        （48 小时会话窗口），而客户刚扫码进来一个字都没发。
+        企微为此单独给了 `kf/send_msg_on_event`，凭事件里那个一次性的 `code` 发。
+
+        用错接口的表现是「第一次扫码进来的新客户永远收不到欢迎语」——
+        而空窗口正是整条漏斗上最大的流失点（进私 416 人只有 90 人开口）。
+        `code` 有效期很短且只能用一次，取不到就退回普通接口（老客户仍然发得出去）。
+        """
+        if not code:
+            return False
+        try:
+            self._post("kf/send_msg_on_event", {
+                "code": code, "msgtype": "text", "text": {"content": text},
+            })
+            return True
+        except Exception:
+            logger.exception("kf send_msg_on_event error")
+            return False
+
     def send_text(self, open_kfid: str, external_userid: str, text: str) -> bool:
         try:
             self._post(

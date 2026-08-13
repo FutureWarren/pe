@@ -148,11 +148,38 @@ def consult_is_free(
 
 
 def handoff_urgent(group: GroupProfile, seed: str = "") -> str:
+    """紧急情形的第一句：安抚 + 说明已经加急。
+
+    四个变体不是为了好看。真机里客户第三条又说「我快撑不住了」，
+    收到的是**一字不差的同一句**——那一刻他要的是有人在听，
+    而复读恰恰证明没有。
+    """
     L = _lawyer(group)
     variants = [
-        f"看到您的消息了，您先别急。这个情况比较要紧，我已经第一时间加急联系{L}了，"
-        f"会尽快跟您联系。",
-        f"收到，您先别慌，这个情况我们很重视。已经加急通知{L}了，尽快给您答复。",
+        f"看到您的消息了，您先别急。这个情况比较要紧，我已经第一时间加急联系{L}了。",
+        f"收到，您先别慌，这个情况我们很重视，已经加急通知{L}了。",
+        f"我看到了，这事确实急。已经把您的情况标为加急报给{L}那边了。",
+        f"别着急，我在的。这个情况我已经加急转给{L}，他会优先处理。",
+    ]
+    return _pick(variants, seed)
+
+
+def urgent_next_step(group: GroupProfile, seed: str = "") -> str:
+    """紧急情形的下一步。**必须与「加急」自洽。**
+
+    体检发现的原样：「我弟弟昨天被刑事拘留了」换回的是
+    「已经加急通知律师了……留个手机号也行，律师**一有空**就给您回电话」——
+    刑拘只有 37 天，家属此刻正在比谁反应最快，一句「一有空」当场否掉前半句。
+
+    所以这里做两件事：给一个**明确的时间口径**，再请他把律师立刻要用的信息发过来。
+    让一个正慌着的人有具体的事可做，本身就是最有效的安抚。
+    """
+    variants = [
+        "您现在把这几样发我：当事人姓名、在哪个看守所（或哪个派出所办的）、"
+        "涉嫌什么。我直接转给律师，他好判断怎么最快介入。",
+        "麻烦您先说三件事：人是谁、关在哪儿、什么罪名。我这就一并发给律师，"
+        "省得他还要来回问。",
+        "您把手上知道的先发我——时间、地点、涉及哪些人。律师看到就能直接接着办。",
     ]
     return _pick(variants, seed)
 
@@ -236,6 +263,31 @@ def handoff_generic(group: GroupProfile, seed: str = "") -> str:
         f"看到您消息了，这个我帮您转给{L}确认下，有回复马上告诉您。",
     ]
     return _pick(variants, seed)
+
+
+def privacy_notice(settings: Settings | None = None) -> str:
+    """给律所粘进**企微后台欢迎语**的那段告知。代码里不发这一句。
+
+    《个人信息保护法》第 17 条要求处理前以显著方式、清晰易懂地告知处理者、
+    目的、方式、种类、保存期限；第 23 条要求向第三方提供时另行告知并取得单独同意——
+    而每条咨询原文都会随上下文发给技术服务商的大模型。
+    客户在这里讲的是欠薪、离婚、伤情、家人有没有被拘留，我们还主动向他要手机号，
+    全流程此前没有一句告知。
+
+    **为什么不由代码发**：一个窗口只该有一个人在说话（同 `kf_welcome_on_enter`
+    的理由）。企微后台的欢迎语律所自己就能改，那是律所署名的告知，
+    比 AI 逐句生成的更合适，也更经得起看。抖音私信同理。
+
+    这段文字是**草稿**，措辞须律所定稿——它是律所对客户作出的法律承诺，
+    不是一段话术。
+    """
+    settings = settings or get_settings()
+    return (
+        f"您好，这里是{settings.office_name}。\n"
+        f"为了给您提供法律咨询与后续服务，本所会接待并留存本次对话内容，"
+        f"其中会借助技术服务商处理您描述的情况。除此之外不作他用，也不会提供给无关第三方。\n"
+        f"如需查询、更正或删除您的信息，直接在本对话中告诉我们即可。"
+    )
 
 
 def intro_line(settings: Settings | None = None) -> str:
@@ -703,14 +755,33 @@ def answer_scaffold(
     return "\n".join(p for p in parts if p)
 
 
+# 复述客户问的是什么。截断到一行，够让他确认「我说的话被听见了」即可。
+_ECHO_MAX = 22
+
+
 def answer_without_llm(
-    group: GroupProfile, include_disclaimer: bool = False, include_cta: bool = True
+    group: GroupProfile, include_disclaimer: bool = False, include_cta: bool = True,
+    question: str = "", seed: str = "",
 ) -> str:
-    """未接入模型时直接回答路径的确定性降级：不编造法律内容，转为承接。"""
-    text = (
-        f"收到您的咨询。这个为了给您说准确，我已转达{_lawyer(group)}，"
-        f"他看到会{_in_group(group)}给您解答。"
-    )
+    """模型不可用时的确定性降级：不编造法律内容，转为承接。
+
+    **这条路是静默的，而且比想象中常走**——超时、限流、密钥过期都会落到这里，
+    健康页只报「密钥配没配」，可能连着几天没人发现。而客户那边看到的是：
+    连问「仲裁一般要多久」「那我该准备什么材料」，两条回复开头一字不差。
+    「免费法律咨询」这个卖点当场归零，AI 退回成一个复读的转达员。
+
+    所以两件事：**给变体**，以及**复述他问的是什么**——
+    哪怕答不了，也得让他知道这句话被听见了。
+    """
+    L, G = _lawyer(group), _in_group(group)
+    q = re.sub(r"\s+", " ", (question or "").strip())
+    echo = f"关于「{q[:_ECHO_MAX]}{'…' if len(q) > _ECHO_MAX else ''}」，" if q else ""
+    variants = [
+        f"{echo}这个我得让{L}给您说才准确，已经转过去了，他看到会{G}回您。",
+        f"{echo}我先记下了。要说得准还得{L}来，我这就转给他。",
+        f"{echo}收到。这块我不敢给您说个大概，让{L}看过再答复您。",
+    ]
+    text = _pick(variants, seed or q)
     if include_cta and group.client_status == ClientStatus.PROSPECT:
         text += "方便的话也可以约个时间，跟律师细聊下您的情况。"
     if include_disclaimer:

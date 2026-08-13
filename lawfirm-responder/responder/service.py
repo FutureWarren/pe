@@ -78,7 +78,7 @@ class Pipeline:
             # 已留联系方式/要约见的消息意图已经明确，不必再问模型「这是不是法律问题」
             and signals.detect(msg.content)[0] != signals.HOT
             and self.settings.llm_refine_enabled
-            and llm.llm_available()
+            and llm.llm_available(self.settings)
         ):
             refined = llm.refine(
                 msg.content,
@@ -180,11 +180,11 @@ class Pipeline:
         self._release_stale_handoff(decision, group)
 
         if decision.action == Action.SILENCE:
-            self.store.save_decision(decision)
             # 沉默不等于不值钱：群里客户单发一句「我电话138…你们联系我」按规则
             # 判沉默（AI 不必接话），但那是最强的转化信号，必须进线索通道。
             # 早退前不做这一步，这类线索就永远只躺在聊天记录里。
             self._maybe_dispatch_lead(msg, decision, group, convo)
+            self.store.save_decision(decision)  # 落库在后：理由收齐了再写
             return decision
 
         # 补位等待未到点：登记到点复评任务，由后台工作线程届时重跑本判断。
@@ -227,6 +227,14 @@ class Pipeline:
             knowledge_text=self._recall(msg, decision),
             memory_text=self._customer_memory(group, convo),
         )
+        # 走了模型降级就记一笔。这条路是静默的：超时、限流、密钥过期都落到这里，
+        # 而健康页只报「密钥配没配」，可能连着几天没人发现——
+        # 那几天里 AI 退回成一个复读的转达员，「免费法律咨询」这个卖点当场归零。
+        if result and "answer:fallback-no-llm" in decision.reasons:
+            self.store.bump("llm_degraded")
+        elif decision.action == Action.ANSWER:
+            self.store.bump("llm_answered")
+
         reply_text = None
         if result:
             result.text = self._with_intro(result.text, decision, group)
@@ -253,12 +261,14 @@ class Pipeline:
             # 误以为客户已被安抚，实际上那边一片安静
             reply_text = final_text if sent else None
 
-        # 判断日志在去重/门控修饰后入库，控制台看到的即最终裁决
-        self.store.save_decision(decision)
-
         # 转化信号：客户留了联系方式/表达面谈意愿 → 立刻整理交接单推给接待人。
         # 首响只是止损，真正的业务价值在这一步。
         lead_pushed = self._maybe_dispatch_lead(msg, decision, group, convo)
+
+        # **判断日志必须落在这之后。** 「为什么没自动转给律师」那几条理由是
+        # `_maybe_dispatch_lead` 里往 `decision.reasons` 追加的，先落库就永远
+        # 记不到它们——排障时前因后果是断的，而这正是这些理由存在的全部意义。
+        self.store.save_decision(decision)
 
         # 承接类一律触发人工提醒；直接回答类也提醒律师补充。
         # 同一条消息只提醒一次（到点复评会二次经过这里，不重复打扰律师）。
@@ -271,11 +281,15 @@ class Pipeline:
         # 600 秒未处理自动升级第二责任人这条链，扫的是 reminders 表。
         # 不落库，客服通道（主进线通道）就整体没有紧急升级兜底。
         silent_urgent = decision.urgent and (lead_pushed or group.is_kf)
+        # 交接单这一轮炸了：那条「文字消息由交接单统一承载」的豁免就不成立了，
+        # 必须让逐条提醒顶上——否则这个客户在律师那边彻底没有任何痕迹。
+        lead_broken = "lead:failed" in decision.reasons
         if (
             decision.category != Category.GREETING
             and not self.store.has_reminder(msg.msg_id)
             and (
                 silent_urgent
+                or lead_broken
                 or (
                     not lead_pushed
                     and not (
@@ -374,6 +388,7 @@ class Pipeline:
                     return bool(row and row.get("_notified_now"))
                 except Exception:
                     logger.exception("lead rescore failed: %s", msg.group_id)
+                    self._note_lead_failure(msg, decision)
             return False
         try:
             # 用门控后的 sender：影子模式只入库不外发（与律师提醒口径一致）
@@ -389,7 +404,29 @@ class Pipeline:
             return bool(row and row.get("_notified_now"))
         except Exception:
             logger.exception("lead dispatch failed: %s", msg.group_id)
+            self._note_lead_failure(msg, decision)
             return False
+
+    def _note_lead_failure(self, msg: IncomingMessage, decision: Decision) -> None:
+        """线索链路炸了 → 留一条控制台看得见的痕迹，并让逐条提醒顶上。
+
+        原来这里只有一句 `logger.exception`。后果是：客户完整咨询了一轮、
+        AI 也答得好好的，但交接单和逐条提醒**会同时消失**——
+        逐条提醒的判据是「客服会话的文字消息已由交接单统一承载」，
+        而交接单根本没生成。控制台线索页少一条、待办页少一条，没有任何红字，
+        唯一的证据是服务器上一行日志，**而律所侧没有 SSH。**
+        """
+        decision.reasons.append("lead:failed")
+        try:
+            self.store.bump("lead_failed")
+            self.store.set_note(
+                f"lead_failed:{msg.group_id}",
+                f"{datetime.now().strftime('%m-%d %H:%M')} 这通对话的交接单没能生成"
+                f"（系统内部出错）。已改用逐条提醒兜底，但线索页里会缺这一条，"
+                f"请人工看一眼这个客户。",
+            )
+        except Exception:
+            logger.exception("note lead failure")
 
     def _maybe_handoff(self, group: GroupProfile, lead_row: dict, *, urgent: bool) -> bool:
         """强意愿线索 → 把会话直接转给分到的律师（见 docs/kf-handoff.md）。
@@ -402,8 +439,10 @@ class Pipeline:
           1. 开关打开；
           2. 微信客服会话——抖音侧接待走 AI即用，没有对等能力；
           3. 本会话尚未转接过（转两次没有意义，且会把 SLA 计时打乱）；
-          4. 够格：P0 或紧急。别放宽到 P1/P2——一周 416 人进私信，
-             全转过去律师什么也别干了；
+          4. **客户做出了「想找真人」的动作**（`priority.WANTS_HUMAN` 那张清单）。
+             这里**不看分数**（2026-08-09 律所方拍板）：分数回答「先给谁打电话」，
+             转接回答「现在要不要叫真人」，绑在一起就会出现真机那一幕——
+             客户说了「让律师给我打电话」，系统还在算他够不够 60 分；
           5. 已经派给了具体律师（分案引擎的结论，转接只是兑现它）；
           6. 那位律师确实是这个客服账号的接待人——不是的话企微直接拒，
              白白让客户等一场空。

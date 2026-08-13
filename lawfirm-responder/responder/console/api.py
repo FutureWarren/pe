@@ -756,6 +756,18 @@ _WEAK_WORDS = (
 )
 
 
+@router.get("/privacy-notice")
+def privacy_notice(request: Request, _: Principal = Depends(require_admin)):
+    """给律所抄进企微后台欢迎语的那段告知（草稿，措辞须律所定稿）。
+
+    刻意做成「复制给人去粘」而不是由代码对客发送：一个窗口只该有一个人在说话，
+    而且这是律所对客户作出的法律承诺，应当由律所自己署名。
+    """
+    from responder.reply import templates
+
+    return {"text": templates.privacy_notice(request.app.state.pipeline.settings)}
+
+
 @router.post("/admin-token")
 def set_admin_token(
     body: TokenChange, request: Request, _: Principal = Depends(require_admin)
@@ -1076,11 +1088,17 @@ def diagnostics(request: Request, _: Principal = Depends(require_admin)):
     # 和「代码没生效」长得一模一样。有这个数就能一眼分清是哪一种。
     kf["enter_events"] = store.count_event_messages()
     kf["welcome_on_enter"] = s.kf_welcome_on_enter
-    if kf["ok"] and not kf["enter_events"]:
+    if kf["ok"] and not kf["enter_events"] and s.kf_welcome_on_enter:
+        # **只在功能开着时才提。** 开关关掉时（当前默认，因为企微后台自己配了
+        # 欢迎语）「进线事件 0 条」是完全正常的现象，把它报成「企微没推送」
+        # 属于假报警——而假报警的真正代价是：将来真出问题时，
+        # 这一行已经被人当成常态忽略掉了。
         kf["hint"] = (
             "从没收到过进线事件：企微只在会话被接入智能助手后才推送，"
             "客户扫码那一刻可能不推。开场白改由「客户第一条消息」兜底触发。"
         )
+    elif kf["ok"] and not s.kf_welcome_on_enter:
+        kf["hint"] = "进线问候由企微后台的「欢迎语」发（我们这边关着，这是正常的）"
     # 没有提醒接收人的会话＝线索生成了也没人知道，属静默失败，必须显式暴露
     orphan = [
         g["group_id"] for g in store.list_groups()

@@ -58,9 +58,11 @@ def _msg(content, msg_id="m1", age_seconds=0.0, staff=False):
 def test_duplicate_callback_processed_once(tmp_path):
     """企微超时重发同一 msg_id：只处理一次，不重复入库/发言。"""
     store, sender, worker = make_env(tmp_path)
-    worker._process_new(_msg("公司把我辞退了我要投诉", "dup-1"))
+    # 用一条真紧急的：「我要去投诉公司」不算紧急（那是客户在讲自己的诉求，
+    # 不是在投诉律所），2026-08-12 已把那条规则收窄，见 test_urgent_scope
+    worker._process_new(_msg("我弟弟昨天被刑事拘留了", "dup-1"))
     replies, robots = len(store.list_replies("g1")), len(sender.robot)
-    worker._process_new(_msg("公司把我辞退了我要投诉", "dup-1"))
+    worker._process_new(_msg("我弟弟昨天被刑事拘留了", "dup-1"))
     assert len(store.list_replies("g1")) == replies
     assert len(sender.robot) == robots == 1  # 紧急免等待，只发了一次
 

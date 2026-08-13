@@ -27,6 +27,21 @@ def test_resolve_explicit_anthropic(monkeypatch):
     assert p.name == "anthropic" and p.model == "claude-opus-4-8"
 
 
+def test_auto_does_not_silently_fall_back_to_the_overseas_provider(monkeypatch):
+    """DeepSeek 的 key 掉了、环境里恰好还有个 ANTHROPIC_API_KEY，
+    旧写法会**静默地**把客户的咨询原文改发给境外服务商——
+    《个人信息保护法》上那是从「向第三方提供」变成「个人信息出境」，
+    要求完全不同，而律所对此毫不知情。
+
+    退回确定性话术（规则 + 模板照常工作，客户仍然有人应）比换个处理者安全得多。
+    """
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ak")
+    assert llm.resolve(Settings(llm_provider="auto")) is None
+    # 显式配了就照办——钉死不等于锁死
+    assert llm.resolve(Settings(llm_provider="anthropic")).name == "anthropic"
+
+
 def test_resolve_none_without_keys(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

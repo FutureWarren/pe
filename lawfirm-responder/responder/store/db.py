@@ -309,6 +309,20 @@ class Store:
             "CREATE INDEX IF NOT EXISTS idx_leads_assigned"
             " ON leads(assigned_userid, status)",
             "CREATE INDEX IF NOT EXISTS idx_reminders_status ON reminders(status)",
+            # 下面这几条是 2026-08-12 体检「首响会随并发线性变慢」那一条的一半。
+            # 现在每天十几通看不出来；等抖音那条通道跑起来（一周 416 人进私信），
+            # 晚高峰的客户要多等一两分钟才收到第一句——而他此刻同时开着
+            # 另外两家律所的窗口。**这个退化不报任何错**，等发现时已经丢了几个月的单。
+            # 每条都对应一个每 10 秒就要跑一次、或每条客户消息都要走的查询：
+            "CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_replies_group_mode"
+            " ON replies(group_id, mode)",
+            "CREATE INDEX IF NOT EXISTS idx_replies_group_cat"
+            " ON replies(group_id, category, mode)",
+            "CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)",
+            "CREATE INDEX IF NOT EXISTS idx_groups_kfid ON groups(kf_open_kfid)",
+            "CREATE INDEX IF NOT EXISTS idx_reminders_urgent"
+            " ON reminders(urgent, status, created_at)",
         ):
             conn.execute(stmt)
 
@@ -1127,6 +1141,31 @@ class Store:
             ).fetchone()
         return row is not None
 
+    def mark_reply_undelivered(self, group_id: str, msg_id: str = "") -> int:
+        """企微事后回报「这条没送到」→ 把对应回复从 live 改成 failed。
+
+        改了 mode 之后，所有「已经答过了吗」的判据（`has_greeting`、
+        `has_reply_category`、追问计数）会自动跟着变回「还没答过」，
+        于是补发、挽留、追问全部重新可用——**这正是这一步的意义**：
+        不改的话，系统所有环节都认为客户已经被安抚了。
+        """
+        with self._conn() as conn:
+            if msg_id:
+                cur = conn.execute(
+                    "UPDATE replies SET mode='failed'"
+                    " WHERE group_id=? AND msg_id=? AND mode='live'",
+                    (group_id, msg_id),
+                )
+            else:
+                # 事件里没带 msg_id 时退而求其次：认这通对话最后一条实发回复
+                cur = conn.execute(
+                    "UPDATE replies SET mode='failed' WHERE id=("
+                    "  SELECT id FROM replies WHERE group_id=? AND mode='live'"
+                    "  ORDER BY id DESC LIMIT 1)",
+                    (group_id,),
+                )
+            return cur.rowcount
+
     def set_reply_feedback(self, reply_id: int, feedback: str) -> None:
         with self._conn() as conn:
             conn.execute("UPDATE replies SET feedback=? WHERE id=?", (feedback, reply_id))
@@ -1508,9 +1547,63 @@ class Store:
                 " handoff_userid='', handoff_at=NULL WHERE group_id=?",
                 (group_id,),
             )
-            # 排障小记也擦掉，否则「为什么没转」会一直显示上一轮的结论
+            # 排障小记也擦掉，否则「为什么没转」会一直显示上一轮的结论。
+            # **按后缀全清，不再逐个列举**：这类小记这半年新增了好几种
+            # （undelivered / lead_failed / robot_check / handoff_released…），
+            # 漏掉哪一个，「忘记这个客户」就成了一句不实的承诺——
+            # 而它现在也是收到删除请求时唯一的执行入口。
             conn.execute(
-                "DELETE FROM ops_commands WHERE id=?", (f"_handoff_skip:{group_id}",)
+                "DELETE FROM ops_commands WHERE id LIKE ?", (f"%:{group_id}",)
+            )
+            # 重试计数同理（retry:winback:{gid} 之类）
+            conn.execute("DELETE FROM counters WHERE key LIKE ?", (f"%:{group_id}",))
+        return counts
+
+    def purge_older_than(
+        self, cutoff: datetime, *, messages_cutoff: datetime | None = None
+    ) -> dict[str, int]:
+        """按留存期限清理旧数据（《个人信息保护法》第 19 条）。
+
+        库里躺的是真实公民的咨询原文和手机号：欠薪、离婚、伤情、家人有没有被拘留。
+        四张表原本从上线起只进不出——一年几千人无限期堆在一台机器上，
+        既没有期限也没有出口，而这台机器在公网上。
+
+        两档：**消息原文先删**（最敏感、且过期后对业务没有用），
+        线索与判断日志按更长的那一档（前者是跟进要用的台账，后者是合规留痕）。
+        已成交客户的会话一律不动——那是在办案件的记录，另有保存义务。
+        """
+        msg_cut = messages_cutoff or cutoff
+        counts: dict[str, int] = {}
+        with self._conn() as conn:
+            signed = {
+                r["group_id"] for r in conn.execute(
+                    "SELECT group_id FROM groups WHERE client_status='signed'"
+                )
+            }
+            marks = ",".join("?" * len(signed)) or "''"
+            keep = f" AND group_id NOT IN ({marks})" if signed else ""
+            args = tuple(signed)
+            for table, cut in (
+                ("messages", msg_cut), ("replies", msg_cut),
+                ("decisions", cutoff), ("reminders", cutoff),
+            ):
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE created_at < ?{keep}",
+                    (cut.isoformat(), *args),
+                )
+                counts[table] = cur.rowcount
+            # 线索：只清没成交、也没在跟的。已联系/已成交的是台账，不能动。
+            cur = conn.execute(
+                f"DELETE FROM leads WHERE created_at < ?"
+                f" AND status IN ('new','invalid'){keep}",
+                (cutoff.isoformat(), *args),
+            )
+            counts["leads"] = cur.rowcount
+            # 跨会话记忆跟着原文走：原文都删了，摘要留着没有意义，也一样敏感
+            conn.execute(
+                "UPDATE groups SET memory='', memory_at=NULL"
+                " WHERE memory_at IS NOT NULL AND memory_at < ?",
+                (msg_cut.isoformat(),),
             )
         return counts
 

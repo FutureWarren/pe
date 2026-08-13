@@ -1049,6 +1049,16 @@ function openStatusPanel() {
         </button>
         <div id="hoResult" class="meta" style="margin-top:8px"></div>
       </div>` : ""}
+      <div class="srow admin-only"><div class="k">客户告知</div>
+        <div class="v">客户在这里讲的是欠薪、离婚、伤情、家人有没有被拘留，
+          我们还会向他要手机号。按《个人信息保护法》，处理前要告诉他：谁在处理、
+          用来干什么、想删找谁。<br>
+          <b>这句话由您粘进企微后台的「欢迎语」</b>——一个窗口只该有一个人在说话，
+          而且那是律所署名的告知，比 AI 逐句生成的更经得起看。</div>
+        <button class="btn-outline" style="margin-top:8px" onclick="copyNotice()">
+          ${ico("clipboard")}复制告知文案
+        </button>
+      </div>
       <div class="srow admin-only"><div class="k">访问令牌</div>
         <div class="v">换成一句记得住的话，或复制免输入链接存成书签</div>
         <button class="btn-outline" style="margin-top:8px" onclick="copyLoginLink()">
@@ -1233,6 +1243,26 @@ async function addServicers() {
   }
   el.innerHTML = lines.join("<br>");
   if (document.getElementById("teamList")) loadTeam();  // 就地刷新那几个徽标
+}
+
+/* 客户告知文案：复制给律所粘进企微后台欢迎语。
+   刻意不由代码对客发送——一个窗口只该有一个人在说话，而且这是律所对客户
+   作出的法律承诺，应当由律所自己署名，措辞也该由律所定稿。 */
+async function copyNotice() {
+  let text = "";
+  try { text = (await api("/privacy-notice")).text; }
+  catch (e) { toast("取不到文案，请重试", false); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("已复制。粘到企微后台「微信客服 → 欢迎语」里，措辞可以自己改");
+  } catch (e) {
+    openSheet(`<h2>客户告知文案</h2>
+      <p style="font-size:14px;color:var(--muted);margin:10px 0">
+        长按全选复制，粘到企微后台「微信客服 → 欢迎语」。
+        <b>措辞请律所定稿</b>——这是对客户作出的承诺，不是一段话术。</p>
+      <textarea readonly rows="7" style="width:100%;font-size:13px"
+        onclick="this.select()">${esc(text)}</textarea>`);
+  }
 }
 
 /* 免输入登录链接：把令牌放进 # 片段存成书签，点一下直接进。
@@ -1994,6 +2024,10 @@ function askForget(gid) {
       客户档案本身（案由、承办律师、AI 开关）保留。<br><br>
       清完之后他再扫码进来，AI 会当成第一次见到他——<b>这正是用同一个微信号
       反复跑测试的办法</b>。</p>
+    <div class="meta" style="margin-bottom:16px;line-height:1.7">
+      收到客户的删除要求时也用这个按钮。有一件事要跟他说清楚：
+      <b>每天一份的整库备份保留 30 天</b>，那里面的副本会在 30 天内自然滚掉，
+      不会再被系统使用。</div>
     <button class="btn-primary xl" data-act="doforget" data-gid="${esc(gid)}">确认清空</button>
     <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
             onclick="closeSheet()">取消</button>`);

@@ -182,7 +182,8 @@ def test_message_creates_profile_and_replies(tmp_path):
     assert g.douyin_open_id == OPEN_ID and g.is_douyin and g.is_kf
     assert "抖音私信" in g.name and "小王" in g.name
     assert dy.sent and dy.sent[0][0] == OPEN_ID
-    assert "别急" in dy.texts() or "别慌" in dy.texts()
+    assert any(w in dy.texts() for w in ("别急", "别慌", "别着急"))
+    assert "加急" in dy.texts()
 
 
 def test_enter_event_sends_welcome_once(tmp_path):
