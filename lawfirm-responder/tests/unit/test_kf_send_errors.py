@@ -53,3 +53,36 @@ def test_an_unknown_code_stays_silent_rather_than_guessing():
 def test_the_hint_survives_a_stringified_payload():
     """有些路径拿到的是 str(dict)，不是 dict 本身。"""
     assert "人工" in wecom_kf.err_hint("{'errcode': 95018, 'errmsg': 'x'}")
+
+
+# ---------------------------------------------------------- msg_send_fail 回调
+@pytest.mark.parametrize("ft,must_contain", [
+    (4, "48 小时"),
+    (6, "5 条"),
+    (10, "拒收"),
+    (11, "登录"),
+])
+def test_async_send_failures_are_explained(ft, must_contain):
+    """**接口返回成功不代表送达。**
+
+    企微是异步告知发送失败的。只看 send_msg 的返回值，会让库里标着
+    「已发送」而客户一个字没收到——日志正常、控制台正常、客户那头是空的。
+    """
+    hint = wecom_kf.send_fail_hint(ft)
+    assert hint and must_contain in hint
+
+
+def test_fail_type_11_is_called_out_as_the_deceptive_one():
+    """实战最常见的一条，而且症状具有欺骗性：
+
+    企业没有任何成员登录过企业微信 App 时，接口一路返回成功，
+    客户却什么都收不到。提示语必须把这个反差写出来，
+    否则排查的人会一直盯着代码看。
+    """
+    hint = wecom_kf.send_fail_hint(11)
+    assert "登录" in hint and ("成功" in hint or "欺骗" in hint)
+
+
+def test_an_unknown_fail_type_stays_silent():
+    assert wecom_kf.send_fail_hint(999) == ""
+    assert wecom_kf.send_fail_hint(None) == ""
