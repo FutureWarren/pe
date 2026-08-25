@@ -130,3 +130,37 @@ def test_the_salesperson_is_told_what_the_ai_already_said():
 def test_no_staff_notice_when_the_ai_stayed_quiet():
     d = standin.decide("能退吗", after_sale=True)
     assert standin.notice_for_staff(d, "") == ""
+
+
+# ------------------------------------------------------ ⑤ 临门一脚
+def test_a_customer_on_their_way_rings_a_bell_not_a_queue():
+    """**整条漏斗上最烫的一刻。**
+
+    人已经在路上了，这时候没人应＝他到店没人接，或者干脆掉头走。
+    必须响铃，不能混在普通待办里排队——所以 urgent 单独标出来。
+    """
+    d = standin.decide("我现在出发，二十分钟到，找谁")
+    assert d.kind == "arriving"
+    assert d.escalate is True
+    assert d.urgent is True, "在路上的客户不能跟「问保修」排同一个队"
+    line = standin.receipt_line(d)
+    assert "有人接您" in line, "他最怕的就是白跑一趟，这句必须先安住他"
+
+
+def test_ordinary_handovers_do_not_ring_the_bell():
+    """响铃要稀缺，否则跟不响一样。"""
+    d = standin.decide("这个能退吗", after_sale=True)
+    assert d.escalate is True
+    assert d.urgent is False
+
+
+@pytest.mark.parametrize("text,key", [
+    ("是不是原封国行", "authenticity"),
+    ("能刷信用卡吗", "payment"),
+    ("新款什么时候上市", "new_launch"),
+    ("我不在本地能寄吗", "delivery"),
+    ("有没有二手的便宜点", "secondhand"),
+])
+def test_the_intents_found_by_field_research_are_covered(text, key):
+    """这几类是调研真实门店话术时补进来的，一开始都漏了。"""
+    assert detect(text).key == key

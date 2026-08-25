@@ -51,6 +51,7 @@ class Decision:
     escalate: bool = False      # 要不要立刻叫真人
     reason: str = ""            # 写进判断日志，控制台可查
     intent: Intent | None = None
+    urgent: bool = False        # 要响铃，不能混在普通待办里排队
 
     @property
     def kind(self) -> str:
@@ -61,11 +62,15 @@ class Decision:
 # 这张表**宁可长不可短**——多放一类进来最多是多转一次人工，
 # 漏放一类出去就是一次赔付或客诉。
 NEVER_STANDIN = {
+    "arriving",          # 人已经在路上了——这一条要响铃，见下
     "refund_return",     # 退货退款
     "tradein_balance",   # 旧机尾款、抵扣款
     "tradein_quote",     # 旧机估价（要验机）
     "buy_now",           # 谈价、下单
     "complaint",         # 投诉
+    "delivery",          # 异地邮寄：付款与运损责任要人定
+    "secondhand",        # 二手/官换/样机：一机一况
+    "carrier_plan",      # 运营商合约：条款与违约金
 }
 
 # 说错也只是再查一次的信息类：零等待，AI 立刻答。
@@ -73,6 +78,7 @@ INSTANT = {
     "order_status", "pickup", "invoice", "warranty",
     "activate", "data_migration", "store_info", "promo",
     "installment", "compare", "accessory", "repair_status",
+    "authenticity", "payment", "new_launch",
 }
 
 
@@ -115,9 +121,11 @@ def decide(
 
     # ③ 涉及钱与承诺 → 只回执，不代答
     if intent.key in NEVER_STANDIN or intent.handling is Handling.HUMAN:
+        why = ("——人已经在路上，立刻响铃" if intent.urgent
+               else "涉及金额或承诺，只叫人不代答")
         return Decision(
-            False, escalate=True, intent=intent,
-            reason=f"standin:{intent.zh} 涉及金额或承诺，只叫人不代答",
+            False, escalate=True, intent=intent, urgent=intent.urgent,
+            reason=f"standin:{intent.zh} {why}",
         )
 
     # ④ 信息类 → 零等待，立刻答
@@ -170,6 +178,9 @@ def receipt_line(decision: Decision) -> str:
         return "您先别急，我把情况记下来了，这就叫店长过来跟您说。"
     if key in ("refund_return", "tradein_balance", "tradein_quote"):
         return "这个涉及具体金额，我叫负责的同事来跟您说，免得我说岔了。"
+    if key == "arriving":
+        # 人在路上，这句话必须让他知道「到了有人接」——他最怕的就是白跑一趟
+        return "好嘞，我这就通知店里的同事，您到了直接说找我们就行，有人接您。"
     if key == "buy_now":
         return "好的，我这就叫同事过来跟您对接。"
     return "收到，我叫同事来看一下，稍等一会儿。"
