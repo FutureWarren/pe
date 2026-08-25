@@ -164,3 +164,26 @@ def test_ordinary_handovers_do_not_ring_the_bell():
 def test_the_intents_found_by_field_research_are_covered(text, key):
     """这几类是调研真实门店话术时补进来的，一开始都漏了。"""
     assert detect(text).key == key
+
+
+# ------------------------------------------------------ ⑥ 口语说法（演示时抓到的）
+@pytest.mark.parametrize("text", [
+    "我那台什么时候能到啊",      # ← 售后第一高频。原来认不出来
+    "什么时候才发货",
+    "啥时候到",
+    "多久能送到",
+    "几天能到",
+    "到了没",
+    "东西到哪儿了",
+])
+def test_colloquial_delivery_questions_are_all_recognised(text):
+    """**这一组是跑演示时抓到的，不是想出来的。**
+
+    原模式写的是书面语「什么时候到」，要求两个词紧邻；而客户实际打的是
+    「什么时候**能**到」——中间那个「能/才/可以」是口语常态。
+    于是售后第一高频的那句话直接落进「认不出」，按规矩转人工——
+    功能看着正常，实际上最该自动化的那一类一条都没自动化。
+
+    教训与律所侧那条同源：**封闭枚举必然漏，而漏掉的永远是静默地漏。**
+    """
+    assert detect(text, after_sale=True).key == "order_status", text
