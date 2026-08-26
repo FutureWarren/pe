@@ -309,9 +309,19 @@ def quote_line(sku: Sku) -> str:
         bits.append(f"现价 {sku.price} 元")
     if sku.promo:
         bits.append(sku.promo)
-    stores = sku.stores_with_stock()
+    stores = [s for s in sku.stores_with_stock() if s not in _PLACEHOLDER_STORE]
     if stores:
         bits.append("、".join(stores) + " 有现货")
+    elif sku.stores_with_stock():
+        # 库存表里只写了个数字、没写是哪家店（`_parse_stock` 记成「默认」）。
+        # **那个占位符绝不能出现在客户眼前**——「默认 有现货」既像故障
+        # 又没回答「哪家店有」。说「有现货」就够了，门店由销售确认。
+        bits.append("有现货")
     elif sku.stock:
         bits.append("这两天没货，可以帮您预订")
     return "，".join(bits)
+
+
+# `_parse_stock` 在库存列只有一个裸数字时用的占位门店名。
+# 它是内部记账用的，不是一家真实门店，不许流到客户那儿。
+_PLACEHOLDER_STORE = frozenset({"默认"})

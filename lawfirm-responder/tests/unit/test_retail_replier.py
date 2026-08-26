@@ -158,3 +158,31 @@ def test_warranty_explains_the_policy_but_refuses_to_judge_this_device():
 def test_a_phone_number_is_masked_before_it_ever_goes_out():
     """客户自己知道自己的号，回显只会在截图流传时变成泄露。"""
     assert odr.mask_phone("您留的是 17721275495") == "您留的是 177****5495"
+
+
+# ------------------------------------------------------------ ⑦ 试问抓到的两处
+def test_a_model_with_no_price_does_not_answer_with_stock_instead():
+    """**客户问的是多少钱，不能拿「有现货」去应付他。**
+
+    库存表里写「面议」的行，价格是空的。答非所问比说「我帮您问一下」
+    更像敷衍，而且他还得再问一遍。这一处是跑 check_catalog 试问时抓到的。
+    """
+    c = cat.Catalog([cat.Sku("Mate 70 RS", "16+1T", "玄黑", None,
+                             {"城关店": 1}, "", NOW.isoformat())])
+    out = replier.handle("Mate 70 RS 什么价", catalog=c, now=NOW)
+    assert out.escalate is True
+    assert "有现货" not in out.reply
+
+
+def test_a_bare_stock_number_never_leaks_the_placeholder_store_name():
+    """库存列只写了个数字时，内部记成「默认」门店。
+
+    **那个占位符绝不能出现在客户眼前**——「默认 有现货」既像故障，
+    又没回答「哪家店有」。
+    """
+    c = cat.Catalog([cat.Sku("Mate 70 Pro", "12+512", "雅川青", 6499,
+                             {"默认": 2}, "", NOW.isoformat())])
+    out = replier.handle("Mate 70 Pro 12+512 多少钱", catalog=c, now=NOW)
+    assert "默认" not in out.reply
+    assert "有现货" in out.reply
+    assert "6499" in out.reply

@@ -143,6 +143,11 @@ def _lookup_body(
             # 数据过期 → 不许报价。昨天的价今天报出去，
             # 门店要么认（亏钱）要么不认（客诉），两个都比多问一句贵。
             return "", q, set(), True
+        # **客户问价，而这一行没有价（表里写的是「面议」之类）→ 转人工。**
+        # 不能拿「有现货」去应付一个问价的人：他问的是多少钱，
+        # 答非所问比说「我帮您问一下」更像敷衍，而且他还得再问一遍。
+        if key == "price" and q.sku.price is None:
+            return "", q, set(), True
         return cat.quote_line(q.sku), q, set(), False
 
     if key in ("order_status", "pickup", "invoice"):
