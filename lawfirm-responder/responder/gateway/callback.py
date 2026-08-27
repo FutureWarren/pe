@@ -10,12 +10,13 @@ import json
 import logging
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from responder.config import get_settings
-from responder.gateway import bot, douyin
+from responder.gateway import bot, douyin, mp
 from responder.gateway.wecom_crypto import WeComCrypto
 from responder.models import IncomingMessage
 from responder.service import Pipeline
@@ -272,6 +273,83 @@ async def receive_douyin(request: Request, pipeline: Pipeline = Depends(get_pipe
             worker.process_douyin(env)
     # 抖音同样按超时重推，任何情况下都要立刻回 200
     return JSONResponse({"err_no": 0, "err_msg": "success"})
+
+
+@router.get("/mp/callback")
+async def verify_mp(
+    signature: str = Query(default=""),
+    timestamp: str = Query(default=""),
+    nonce: str = Query(default=""),
+    echostr: str = Query(default=""),
+    pipeline: Pipeline = Depends(get_pipeline),
+):
+    """公众号「服务器配置」的一次性验证。
+
+    在微信开发者平台填完回调地址点提交时，微信会发这个 GET 过来，
+    **原样回显 echostr 才算配置成功**——这一步不通，后面一条消息都收不到。
+
+    验签算法与企微完全不同：公众号是 token/timestamp/nonce 三个值排序拼接
+    取 SHA1，没有 `msg_signature` 那一套。照抄上面企微的写法必然失败，
+    而失败的现象只是后台一句「配置失败」，不告诉你为什么。
+    """
+    s = pipeline.settings
+    if not s.mp_callback_token:
+        logger.warning("mp callback rejected: RESPONDER_MP_CALLBACK_TOKEN 未配置")
+        return Response(status_code=403)
+    if not mp.verify(s.mp_callback_token, signature, timestamp, nonce):
+        logger.warning("mp callback: 验证签名对不上")
+        return Response(status_code=403)
+    return PlainTextResponse(echostr)
+
+
+@router.post("/mp/callback")
+async def receive_mp(
+    request: Request,
+    signature: str = Query(default=""),
+    timestamp: str = Query(default=""),
+    nonce: str = Query(default=""),
+    pipeline: Pipeline = Depends(get_pipeline),
+):
+    """公众号消息与事件回调（酷机时代售后主通道，见 gateway/mp.py）。
+
+    三条与别的通道不同、且都踩过的地方：
+
+    1. **报文是 XML**，字段首字母大写；验签的三个值在查询串里；
+    2. **必须尽快回 200**，且**回复内容走客服消息异步发**，不在这里返回 XML。
+       微信要求 5 秒内响应，而模型润色可能更久；超时用户会看到
+       「该公众号提供的服务出现故障」——那五个字比慢两秒难看得多；
+    3. **微信会重推**（最多三次），所以入队前按 `dedupe_key` 去重。
+       不去重的话客户一句话被回三遍，而那三遍还各吃掉一条 5 条额度里的份额。
+
+    没配校验 Token 一律拒收（默认拒绝），与抖音、外部渠道口径一致。
+    """
+    s = pipeline.settings
+    if not s.mp_callback_token:
+        logger.warning("mp callback rejected: RESPONDER_MP_CALLBACK_TOKEN 未配置")
+        return Response(status_code=403)
+    if not mp.verify(s.mp_callback_token, signature, timestamp, nonce):
+        pipeline.store.bump("mp_cb_bad_signature")
+        return Response(status_code=403)
+
+    body = await request.body()
+    msg = mp.parse(body)
+    pipeline.store.bump("mp_cb_event")
+    if msg is not None:
+        worker = getattr(request.app.state, "worker", None)
+        if worker is not None and hasattr(worker, "submit_mp"):
+            worker.submit_mp(msg)
+        else:
+            # 还没接上 worker（分期上线中）：先落痕，别让消息无声消失。
+            # 这条运维小记是「回调通了但还没处理」与「回调根本没通」的分界，
+            # 排查时这一句能省掉半小时。
+            pipeline.store.set_note(
+                "mp_unwired",
+                f"{datetime.now().isoformat()}｜收到 {msg.openid} 的"
+                f"{msg.event or msg.msg_type}，但公众号处理链路尚未接通",
+            )
+    # **任何情况下都立刻回 success。** 微信收不到 200 会重推三次，
+    # 三次之后它认为我们的服务挂了。一条读不懂的消息不值得把整条通道拖下水。
+    return PlainTextResponse("success")
 
 
 @router.post("/ingest")
