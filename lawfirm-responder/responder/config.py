@@ -73,6 +73,20 @@ class Settings(BaseSettings):
     douyin_split_max_parts: int = 2
     # 客户进入私信会话页即打招呼（平台要求 30 秒内响应，故走确定性模板不进模型）
     douyin_welcome_on_enter: bool = True
+
+    # ---- 微信公众号（服务号）：酷机时代售后的主通道，见 gateway/mp.py
+    # 选它而不是微信客服，是因为品牌方管控下企微开不了客服号，而他们有一个
+    # 已认证服务号 + 两万多关注用户——**这条路少了整个「引流」环节**。
+    mp_app_id: str = ""
+    mp_app_secret: str = ""
+    # 回调验签 Token。**留空 = 接入口关闭**（默认拒绝，与抖音口径一致）：
+    # 不验签等于把公网地址敞开，任何人都能伪造客户消息灌进来、
+    # 骗走客服消息额度、让 AI 对着伪造的「客户」说话。
+    mp_callback_token: str = ""
+    mp_encoding_aes_key: str = ""     # 安全模式才需要；留空 = 明文模式
+    # 分条上限。平台规定同一窗口最多 5 条，这里定 3 是留余量——
+    # 一轮回复占满额度的话，客户追问时我们一个字都发不出去。
+    mp_split_max_parts: int = 3
     # 抖音会话建档后线索简报的默认接收人（抖音侧没有「接待人」可查）
     douyin_default_notify_userid: str = ""
 
