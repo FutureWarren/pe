@@ -114,15 +114,32 @@ def test_a_forged_post_is_refused_and_counted(client):
 def test_receiving_leaves_a_trace_while_the_pipeline_is_not_wired_yet(client):
     """**分期上线中的那一段最容易「静默消失」。**
 
-    通道通了但处理链路还没接上时，消息不能无声地被丢掉。
-    这条运维小记是「回调通了但还没处理」与「回调根本没通」的分界，
-    排查时这一句能省掉半小时。
+    通道通了但零售链路还没启用（`RESPONDER_RETAIL_MODE=off`，也就是本仓库的
+    默认值）时，消息不能无声地被丢掉。这条运维小记是「回调通了但还没处理」
+    与「回调根本没通」的分界，排查时这一句能省掉半小时。
     """
     client.post("/mp/callback", params=qs(), content=TEXT_XML)
     store = client.app.state.store
-    note = store.get_note("mp_unwired")
-    assert note and "oCUST001" in note
     assert int((store.counters().get("mp_cb_event") or {}).get("n", 0)) >= 1
+    client.app.state.worker.drain()
+    assert "未启用" in store.get_note("retail_unwired")
+
+
+def test_a_message_reaches_the_retail_pipeline_when_it_is_on(tmp_path):
+    """回调 → 队列 → 零售链路，整条接通。
+
+    这一条是本轮之前缺的那一段：`responder/retail/` 每一块都测得过，
+    合起来一条真实消息也处理不了——因为没有人调用它。
+    """
+    from responder.retail.pipeline import RetailPipeline
+
+    c = app_for(tmp_path)
+    c.app.state.worker.retail = RetailPipeline(c.app.state.store, mode="shadow")
+    c.post("/mp/callback", params=qs(), content=TEXT_XML)
+    c.app.state.worker.drain()
+    replies = c.app.state.store.list_replies(limit=5)
+    assert replies, "消息进来了却一条回复记录都没有"
+    assert replies[0]["group_id"] == "mp:oCUST001"
 
 
 # ------------------------------------------------------------ ③ 默认拒绝

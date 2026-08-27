@@ -22,10 +22,11 @@ from datetime import datetime, timedelta
 from responder import kfroster, lead, memory, retry
 from responder.compliance.guard import guard
 from responder.engine import signals
-from responder.gateway import bot, douyin, wecom_kf
+from responder.gateway import bot, douyin, mp, wecom_kf
 from responder.models import Action, ClientStatus, GroupProfile, IncomingMessage
 from responder.notify import escalation
 from responder.reply import templates
+from responder.retail import pipeline as retail_pipeline
 
 
 def _fmt_when(iso: str) -> str:
@@ -48,12 +49,14 @@ class KfSyncJob:
 
 class Worker:
     def __init__(self, pipeline, store, sender=None, poll_seconds: float = 10.0,
-                 kf_client=None, douyin_client=None):
+                 kf_client=None, douyin_client=None, retail=None):
         self.pipeline = pipeline
         self.store = store
         self.sender = sender
         self.kf_client = kf_client
         self.douyin_client = douyin_client
+        # 零售链路（酷机时代）。None = 未启用，公众号回调只落痕不处理。
+        self.retail = retail
         self.poll_seconds = poll_seconds
         self.q: queue.Queue = queue.Queue()
         self._stop = threading.Event()
@@ -156,6 +159,14 @@ class Worker:
         """入队：IncomingMessage（应用回调）或 KfSyncJob（微信客服回调）。"""
         self.q.put(item)
 
+    def submit_mp(self, msg) -> None:
+        """入队一条公众号消息（`gateway.mp.MpMessage`）。
+
+        回调那一侧必须**立刻**返回 200——微信收不到就重推，三次之后认为服务挂了。
+        所以那里只做验签和解析，处理一律扔到这条队列上来。
+        """
+        self.q.put(msg)
+
     def drain(self) -> None:
         """同步清空队列并跑一轮定时事务（测试/停机前用）。"""
         while True:
@@ -172,6 +183,8 @@ class Worker:
             self.process_bot(item)
         elif isinstance(item, douyin.DouyinEnvelope):
             self.process_douyin(item)
+        elif isinstance(item, mp.MpMessage):
+            self.process_mp(item)
         else:
             self._process_new(item)
 
@@ -1027,6 +1040,37 @@ class Worker:
         logger.info("kf welcome sent: %s", group_id)
 
     # ------------------------------------------------------------ 抖音私信
+    def process_mp(self, msg: mp.MpMessage) -> None:
+        """处理一条公众号消息（酷机时代的零售链路）。
+
+        零售链路**没接通时什么也不做，但一定留痕**：`retail_unwired` 那条小记
+        是「回调通了但还没接处理」与「回调根本没通」的分界，排查时它能省掉半小时。
+        分期上线的那段时间里，消息最容易在这里安静地消失。
+        """
+        if self.retail is None:
+            self.store.bump("retail_unwired")
+            self.store.set_note(
+                "retail_unwired",
+                f"{datetime.now():%m-%d %H:%M} 收到公众号消息（{msg.openid}）"
+                f"但零售链路未启用（RESPONDER_RETAIL_MODE=off）。",
+            )
+            return
+        try:
+            self.retail.handle(retail_pipeline.Inbound(
+                channel="mp",
+                user_key=msg.openid,
+                text=msg.content or "",
+                msg_id=msg.dedupe_key,
+                from_event=msg.is_event,
+                # 客户**发出**的时刻（微信的 CreateTime），不是现在。
+                # 两者分开，48 小时那道闸才拦得住补推与积压。
+                at=msg.created_at,
+                media="" if (msg.is_text or msg.is_event) else msg.msg_type,
+            ))
+        except Exception:
+            logger.exception("零售链路处理失败: %s", msg.openid)
+            self.store.bump("retail_error")
+
     def process_douyin(self, env: douyin.DouyinEnvelope) -> None:
         """抖音私信回调：建档 → 进线问候 / 进判断管道。
 

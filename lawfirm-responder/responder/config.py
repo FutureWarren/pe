@@ -87,6 +87,22 @@ class Settings(BaseSettings):
     # 分条上限。平台规定同一窗口最多 5 条，这里定 3 是留余量——
     # 一轮回复占满额度的话，客户追问时我们一个字都发不出去。
     mp_split_max_parts: int = 3
+
+    # ---- 零售模式（酷机时代，见 responder/retail/ 与 docs/retail-kuji.md）
+    # **默认 off**：本仓库同时是律所的生产代码，零售链路必须显式打开才生效。
+    # off = 完全不启用；shadow = 全流程照跑、回复入库但不外发（上线第一周就该用它）；
+    # live = 真发。
+    retail_mode: str = "off"
+    # 门店每天导出的库存表（.csv / .xlsx）。留空 = 价格库存类一律转人工——
+    # 这是对的：**没有数据就不要装作有**。
+    retail_catalog_path: str = ""
+    # 超过这个时长的表不许用来报价。昨天的价今天报出去，门店要么认（亏钱）
+    # 要么不认（客诉），两个都比多问一句贵。
+    retail_catalog_max_age_hours: float = 24.0
+    # 真人在这个窗口内说过话，AI 一律让位（与律所侧 takeover 同一套规则）。
+    retail_takeover_seconds: int = 1800
+    # 「我这就跟 X 的同事说一声」里的 X。留空则说「离您最近的门店」。
+    retail_store_hint: str = ""
     # 抖音会话建档后线索简报的默认接收人（抖音侧没有「接待人」可查）
     douyin_default_notify_userid: str = ""
 

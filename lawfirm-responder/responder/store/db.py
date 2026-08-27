@@ -1032,14 +1032,20 @@ class Store:
     # ------------------------------------------------------------ replies
     def save_reply(
         self, msg_id: str, group_id: str, text: str, mode: str, passed: bool,
-        category: str = "", parts: int = 1,
+        category: str = "", parts: int = 1, created_at: datetime | None = None,
     ) -> int:
+        """`created_at` 留空＝挂钟。
+
+        允许传入，是因为**额度记账要跟消息用同一把尺子**：平台的发送窗口是从
+        客户那条消息算起的，而回复若一律按挂钟盖时间戳，补处理/回放场景下
+        两边就对不上——表现是配额永远算不满，然后某天接口开始报错。
+        """
         with self._conn() as conn:
             cur = conn.execute(
                 "INSERT INTO replies (msg_id,group_id,text,mode,category,parts,"
                 "compliance_passed,created_at) VALUES (?,?,?,?,?,?,?,?)",
                 (msg_id, group_id, text, mode, category, max(1, parts), int(passed),
-                 datetime.now().isoformat()),
+                 (created_at or datetime.now()).isoformat()),
             )
             return cur.lastrowid
 
@@ -1106,6 +1112,29 @@ class Store:
                 (group_id, category, cutoff),
             ).fetchone()
             return row["n"]
+
+    def last_reply_at(
+        self, group_id: str, category: str,
+        modes: tuple[str, ...] = ("live", "shadow"),
+    ) -> datetime | None:
+        """该会话最近一条某类回复的时间（默认把影子模式也算进来）。
+
+        为什么默认算上 shadow：影子周的全部意义是**先看它会说什么**。
+        若「一次转人工只回一次执」这类去重只认 live，影子模式下就会连回三句
+        回执，而上线后又不会——那份预览就没法用来判断该不该上线了。
+        `failed` / `blocked` 刻意不算：那两种客户根本没收到，压住下一次
+        等于让他彻底收不到回音。
+        """
+        if not modes:
+            return None
+        marks = ",".join("?" * len(modes))
+        with self._conn() as conn:
+            row = conn.execute(
+                f"SELECT MAX(created_at) AS t FROM replies"
+                f" WHERE group_id=? AND category=? AND mode IN ({marks})",
+                (group_id, category, *modes),
+            ).fetchone()
+        return datetime.fromisoformat(row["t"]) if row and row["t"] else None
 
     def has_reply_category(self, group_id: str, category: str) -> bool:
         """这通对话是否已经实发过某一类回复。用于「一通对话只做一次」的动作。"""

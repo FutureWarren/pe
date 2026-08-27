@@ -13,8 +13,11 @@ from responder.engine import llm
 from responder.gateway.callback import router as callback_router
 from responder.gateway.channel import router as channel_router
 from responder.gateway.douyin import DouyinClient
+from responder.gateway.mp import MpClient
 from responder.gateway.sender import WeComSender
 from responder.gateway.wecom_kf import KfClient
+from responder.retail.pipeline import RetailPipeline
+from responder.retail.sources import Sources
 from responder.service import Pipeline
 from responder.store.db import Store
 from responder.worker import Worker
@@ -34,9 +37,22 @@ def create_app() -> FastAPI:
     dy_client = DouyinClient(settings) if settings.douyin_client_key else None
     pipeline = Pipeline(store, sender, settings, kf_client=kf_client,
                         douyin_client=dy_client)
+    # 零售链路（酷机时代）：**默认 off**，本仓库同时是律所的生产代码。
+    # 打开之后公众号回调进来的消息才会被处理，否则只落一条 retail_unwired 小记。
+    retail = None
+    if settings.retail_mode != "off":
+        retail = RetailPipeline(
+            store,
+            sources=Sources(settings.retail_catalog_path,
+                            max_age_hours=settings.retail_catalog_max_age_hours),
+            sender=MpClient(settings),
+            mode=settings.retail_mode,
+            takeover_seconds=settings.retail_takeover_seconds,
+            store_hint=settings.retail_store_hint,
+        )
     worker = Worker(pipeline, store, sender,
                     poll_seconds=settings.worker_poll_seconds, kf_client=kf_client,
-                    douyin_client=dy_client)
+                    douyin_client=dy_client, retail=retail)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -65,6 +81,12 @@ def create_app() -> FastAPI:
             "llm": f"{provider.name}:{provider.model}" if provider else "rules-only",
             "kf": bool(kf_client and kf_client.available()),
             "douyin": bool(dy_client and dy_client.available()),
+            # 零售链路：模式 + 库存表能不能用。第二项最容易安静地坏——
+            # 表还在、只是没人导了，于是 AI 从某天起一个价都不报，
+            # 而别的每一个指标看着都正常。
+            "retail": settings.retail_mode,
+            "retail_catalog": (retail.sources.health().to_text()
+                               if retail is not None else ""),
             "queued": worker.qsize(),
             # 后台线程死活。这是全系统最致命也最安静的一种坏：队列照常收，
             # 只是再也没人取——所有客户从此一句回复都收不到，而这里以外
