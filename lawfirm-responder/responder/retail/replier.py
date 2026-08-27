@@ -23,6 +23,7 @@ from responder.retail import catalog as cat
 from responder.retail import orders as odr
 from responder.retail import standin
 from responder.retail.intents import Handling
+from responder.retail.phrases import DEFAULTS, Phrases
 
 
 @dataclass
@@ -48,9 +49,11 @@ def handle(
     now: datetime | None = None,
     takeover_seconds: int = 1800,
     store_hint: str = "",
+    phrases: Phrases | None = None,
 ) -> Outcome:
     """处理一条客户消息。"""
     now = now or datetime.now()
+    say = phrases.get if phrases is not None else _auto_body
 
     d = standin.decide(
         text, after_sale=after_sale, staff_replied_at=staff_replied_at,
@@ -77,7 +80,7 @@ def handle(
 
     if intent.handling is Handling.LOOKUP:
         body, quote, allowed, failed = _lookup_body(
-            intent.key, text, customer_key, catalog, book, now, store_hint,
+            intent.key, text, customer_key, catalog, book, now, store_hint, say,
         )
         if failed:
             # 查不到 → 不猜，转人工。这是铁律的第一道。
@@ -90,7 +93,7 @@ def handle(
                 reason=f"{d.reason} → 但取数失败，转人工",
             )
     else:
-        body = _auto_body(intent.key)
+        body = say(intent.key)
 
     if not body:
         return Outcome(
@@ -124,7 +127,7 @@ def _why_staff(d: standin.Decision) -> str:
 def _lookup_body(
     key: str, text: str, customer_key: str,
     catalog: cat.Catalog | None, book: odr.OrderBook | None,
-    now: datetime, store_hint: str,
+    now: datetime, store_hint: str, say=None,
 ) -> tuple[str, cat.Quote | None, set[str], bool]:
     """需要查数据才能答的几类。返回 (正文, quote, 额外白名单, 是否失败)。"""
 
@@ -176,35 +179,18 @@ def _lookup_body(
                 f"让他给您留着，您到店报手机号就行。"), None, set(), False
 
     if key == "store_info":
-        return _auto_body("store_info"), None, set(), bool(not _auto_body("store_info"))
+        say = say or _auto_body
+        return say("store_info"), None, set(), not say("store_info")
 
     return "", None, set(), True
 
 
-# 固定话术：写一次长期有效的那一类。
-# 真实部署时这些应当放进知识库由门店自己维护（改一条立刻生效，不用找技术），
-# 这里的默认值只是让链路在零配置下也能跑起来、也能被测试。
-_AUTO: dict[str, str] = {
-    "warranty": "主机是一年保修，电池和充电器半年，屏幕、进水、摔碰这些属于人为，"
-                "不在保修范围里，但可以走付费维修。您那台具体算不算，"
-                "得工程师上手看一眼才能定，我不敢替他下结论。",
-    "activate": "开机之后按提示选语言、插卡、连 WiFi，然后登录或新建华为账号就行。"
-                "实名是运营商那边做的，营业厅或者官方 App 都能办。"
-                "要是卡在哪一步，您截个图发我。",
-    "data_migration": "用「手机克隆」最省事：新旧机都装这个 App，"
-                      "旧机选「发送」、新机选「接收」，扫个码就开始传，"
-                      "通讯录、照片、微信记录都能带过去。半小时左右。"
-                      "您要是不方便弄，拿到店里我们帮您导，不收费。",
-    "installment": "我们支持花呗、信用卡分期和银行分期，常见的是 12 期和 24 期，"
-                   "活动期内有免息名额。具体您这台能做几期免息、每期多少，"
-                   "得按下单时的活动算，我叫同事给您报准数。",
-    "promo": "当期活动我这边随时在更新，您说一下想要哪款，我把对应的优惠给您列清楚。",
-    "compare": "这两款主要差在影像和屏幕上，日常用差别不大，"
-               "拍照多、经常拍夜景的建议上高配那款。您平时主要用来做什么？"
-               "我按您的用法给您说得具体点。",
-    "store_info": "",  # 由 Settings.stores 注入，见 docs/retail-kuji.md
-}
+# 出厂默认话术的唯一真相来源是 `phrases.DEFAULTS`。
+# 这里只留一个取值函数，供没有传 `phrases` 的调用方（测试、老代码）兜底。
+# **不要在这个文件里再放一份话术**：两份话术早晚会说不一样的话，
+# 而客户只会看到其中一份，没有人知道另一份也在。
+_AUTO = DEFAULTS
 
 
 def _auto_body(key: str) -> str:
-    return _AUTO.get(key, "")
+    return DEFAULTS.get(key, "")

@@ -274,18 +274,54 @@ class MpClient:
         return bool(self.settings.mp_app_id and self.settings.mp_app_secret)
 
     def _access_token(self) -> str:
+        """取调用凭据。**走「稳定版」接口，不走 `/cgi-bin/token`。**
+
+        这不是风格偏好，是这个号的现状决定的：酷机时代那个服务号**同时授权给了
+        云盛 ERP**（模板消息在那边发）。`/cgi-bin/token` 是「谁最后取，谁的算数」
+        ——两套系统轮流刷新，会互相把对方的 token 顶掉。表现极其难查：
+        两边都间歇性地报 40001（access_token 无效），重试有时又好了，
+        看起来像网络抖动，实际上是两个系统在抢同一把钥匙。
+
+        `/cgi-bin/stable_token` 就是为这种多系统共用一个号的场景做的：
+        `force_refresh=false` 时返回当前有效的那一个，**不会让别人的失效**。
+
+        老账号万一没有这个接口，回落到 `/cgi-bin/token`——回落要留痕，
+        因为那一刻起「跟云盛抢 token」这个坑就重新打开了。
+        """
         if self._token and time.time() < self._expiry:
             return self._token
-        r = requests.get(
-            f"{API}/cgi-bin/token",
-            params={
-                "grant_type": "client_credential",
-                "appid": self.settings.mp_app_id,
-                "secret": self.settings.mp_app_secret,
-            },
-            timeout=10,
-        )
-        data = r.json()
+
+        data: dict = {}
+        try:
+            r = requests.post(
+                f"{API}/cgi-bin/stable_token",
+                json={
+                    "grant_type": "client_credential",
+                    "appid": self.settings.mp_app_id,
+                    "secret": self.settings.mp_app_secret,
+                    "force_refresh": False,
+                },
+                timeout=10,
+            )
+            data = r.json()
+        except Exception:                              # noqa: BLE001
+            logger.warning("stable_token 请求异常，回落 cgi-bin/token")
+
+        if not data.get("access_token"):
+            if data:
+                logger.warning("stable_token 不可用（%s），回落 cgi-bin/token——"
+                               "此后与同号的其他系统会互相顶掉凭据", data)
+            r = requests.get(
+                f"{API}/cgi-bin/token",
+                params={
+                    "grant_type": "client_credential",
+                    "appid": self.settings.mp_app_id,
+                    "secret": self.settings.mp_app_secret,
+                },
+                timeout=10,
+            )
+            data = r.json()
+
         if not data.get("access_token"):
             hint = err_hint(data)
             raise RuntimeError(f"取 access_token 失败：{data}" + (f"｜{hint}" if hint else ""))

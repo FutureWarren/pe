@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 
 from responder.models import IncomingMessage
 from responder.retail import replier
+from responder.retail.phrases import Phrases
 from responder.retail.sources import Sources
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ class RetailPipeline:
         store,
         *,
         sources: Sources | None = None,
+        phrases: Phrases | None = None,
         sender=None,
         mode: str = "shadow",
         takeover_seconds: int = 1800,
@@ -104,6 +106,7 @@ class RetailPipeline:
     ) -> None:
         self.store = store
         self.sources = sources or Sources()
+        self.phrases = phrases or Phrases()
         self.sender = sender
         self.mode = mode
         self.takeover_seconds = takeover_seconds
@@ -165,6 +168,7 @@ class RetailPipeline:
             now=now,
             takeover_seconds=self.takeover_seconds,
             store_hint=self.store_hint,
+            phrases=self.phrases,
         )
 
         result = Result(

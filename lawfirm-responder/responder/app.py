@@ -16,6 +16,7 @@ from responder.gateway.douyin import DouyinClient
 from responder.gateway.mp import MpClient
 from responder.gateway.sender import WeComSender
 from responder.gateway.wecom_kf import KfClient
+from responder.retail.phrases import Phrases
 from responder.retail.pipeline import RetailPipeline
 from responder.retail.sources import Sources
 from responder.service import Pipeline
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
             store,
             sources=Sources(settings.retail_catalog_path,
                             max_age_hours=settings.retail_catalog_max_age_hours),
+            phrases=Phrases(settings.retail_phrases_path),
             sender=MpClient(settings),
             mode=settings.retail_mode,
             takeover_seconds=settings.retail_takeover_seconds,
@@ -87,6 +89,10 @@ def create_app() -> FastAPI:
             "retail": settings.retail_mode,
             "retail_catalog": (retail.sources.health().to_text()
                                if retail is not None else ""),
+            # 缺话术的意图会安静地退化成转人工，客户那头的表现是
+            # 「问什么都说帮您问一下同事」，然后他就不问了。
+            "retail_script_gaps": ([zh for _, zh in retail.phrases.gaps()]
+                                   if retail is not None else []),
             "queued": worker.qsize(),
             # 后台线程死活。这是全系统最致命也最安静的一种坏：队列照常收，
             # 只是再也没人取——所有客户从此一句回复都收不到，而这里以外

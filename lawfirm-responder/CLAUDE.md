@@ -724,8 +724,22 @@ screening，了解案件详情」。
   本来就要看上一句才知道——这条规则不在词表上，在时序上。
 - 销售待办**追加不覆盖**（`retail_todo:{gid}`）：覆盖会让四件事只剩最后一件，
   而待办看起来是有的。
-- `python scripts/retail_demo.py` 走线上同一条链路把一通对话打出来
+- **话术是外挂的**（`retail/phrases.py` + `retail_phrases_path`）：保修/激活/门店
+  这类固定答案**全是对外承诺**，该由门店自己定，且改一条要立刻生效不能等发版。
+  `store_info` / `authenticity` / `payment` **刻意留空**——空不是遗漏，
+  是「这句只有门店说了才算数」。缺话术会安静地退化成转人工，
+  所以 `gaps()` 把它摆到明面上（`/health`、`mp_preflight`、`retail_demo --gaps`）。
+  **话术只许有一份**：`replier._AUTO` 就是 `phrases.DEFAULTS`，
+  两份早晚会说不一样的话，而客户只看得到其中一份。
+- **公众号凭据走 `/cgi-bin/stable_token`**，不走 `/cgi-bin/token`：
+  酷机时代那个号同时授权给了云盛 ERP，普通 token 接口是「谁最后取谁算数」，
+  两边会互相顶掉，症状是间歇性 40001、重试有时又好——像网络抖动，
+  其实是两个系统在抢同一把钥匙。回落到普通接口要留痕。
+- `python scripts/mp_preflight.py` 就绪自检（只读）；
+  `python scripts/retail_demo.py` 走线上同一条链路把一通对话打出来
   （客户看到的 / 销售看到的两列）。**演示工具骗了自己人，比没有演示工具更糟。**
+- 上线手册见 `docs/retail-golive.md`。**「无论以什么方式」只有一个例外：
+  不引入任何个人微信协议桥接/逆向/挂机方案**（封号 + PIPL，既有护栏）。
 
 ## 长期记忆（2026-08，落地中）
 

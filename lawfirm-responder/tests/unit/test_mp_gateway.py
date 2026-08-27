@@ -190,3 +190,58 @@ def test_passive_reply_builds_valid_xml():
     assert "顺丰" in xml
     import xml.etree.ElementTree as ET
     assert ET.fromstring(xml).findtext("MsgType") == "text"
+
+
+# ------------------------------------------------------------ ⑥ 调用凭据
+# 酷机时代那个服务号**同时授权给了云盛 ERP**（模板消息在那边发）。
+# 谁去刷 access_token 都会把对方的顶掉，而症状是两边间歇性报 40001、
+# 重试有时又好了——看起来像网络抖动，实际上是两个系统在抢同一把钥匙。
+class _Resp:
+    def __init__(self, payload):
+        self._p = payload
+
+    def json(self):
+        return self._p
+
+
+def _client(monkeypatch, *, stable=None, plain=None):
+    from responder.config import Settings
+
+    calls: list[str] = []
+
+    def fake_post(url, **_kw):
+        calls.append(url)
+        return _Resp(stable if stable is not None else {"errcode": 48001})
+
+    def fake_get(url, **_kw):
+        calls.append(url)
+        return _Resp(plain or {"access_token": "PLAIN", "expires_in": 7200})
+
+    monkeypatch.setattr(mp.requests, "post", fake_post)
+    monkeypatch.setattr(mp.requests, "get", fake_get)
+    c = mp.MpClient(Settings(mp_app_id="wx", mp_app_secret="s"))
+    return c, calls
+
+
+def test_the_token_comes_from_the_stable_endpoint(monkeypatch):
+    """`force_refresh=false` 时它返回当前有效的那一个，**不会让别人的失效**。"""
+    c, calls = _client(monkeypatch, stable={"access_token": "STABLE", "expires_in": 7200})
+    assert c._access_token() == "STABLE"
+    assert any("stable_token" in u for u in calls)
+    assert not any(u.endswith("/cgi-bin/token") for u in calls)
+
+
+def test_an_account_without_the_stable_endpoint_still_works(monkeypatch):
+    """老账号万一没有这个接口，要回落——回落之后那个坑重新打开，所以要留痕。"""
+    c, calls = _client(monkeypatch)
+    assert c._access_token() == "PLAIN"
+    assert any(u.endswith("/cgi-bin/token") for u in calls)
+
+
+def test_the_token_is_cached_until_shortly_before_it_expires(monkeypatch):
+    """每发一条消息都去换一次凭据，等于每发一条就跟同号的另一套系统抢一次。"""
+    c, calls = _client(monkeypatch, stable={"access_token": "STABLE", "expires_in": 7200})
+    c._access_token()
+    n = len(calls)
+    c._access_token()
+    assert len(calls) == n

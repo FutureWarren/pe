@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from responder.retail.phrases import Phrases, template  # noqa: E402
 from responder.retail.pipeline import Inbound, RetailPipeline  # noqa: E402
 from responder.retail.sources import Sources  # noqa: E402
 from responder.store.db import Store  # noqa: E402
@@ -112,7 +113,23 @@ def main() -> int:
     ap.add_argument("--say", action="append", default=[], help="自己写一句，可重复")
     ap.add_argument("--live", action="store_true",
                     help="按正式模式记账（仍然不外发，只是让额度/去重按线上算）")
+    ap.add_argument("--phrases", default="", help="门店自己的话术表（意图,话术）")
+    ap.add_argument("--gaps", action="store_true", help="只看还缺哪几条话术")
+    ap.add_argument("--template", default="",
+                    help="写一份空话术表出来，给门店照着填")
     args = ap.parse_args()
+
+    if args.template:
+        out = template(args.template)
+        print(f"已写出：{out}")
+        print("两列：意图、话术。「意图」那列照抄别动，「话术」那列换成你们的说法。")
+        print("填完把路径配到 RESPONDER_RETAIL_PHRASES_PATH，改一条立刻生效，不用重启。")
+        return 0
+
+    phrases = Phrases(args.phrases)
+    if args.gaps:
+        print(phrases.health())
+        return 0
 
     tmp = Path(tempfile.mkdtemp(prefix="retail-demo-"))
     catalog_path = args.catalog or str(sample_catalog(tmp))
@@ -123,6 +140,8 @@ def main() -> int:
     print("零售链路演示 —— 与线上同一条链路（retail/pipeline.py），只是不外发")
     print("=" * 78)
     print(health.to_text())
+    for line in phrases.health().split("\n"):
+        print(line)
     if not health.ok:
         print("\n⚠️ 库存表不可用，价格/库存类问题会全部转人工——这是对的，不是故障。")
     print()
@@ -136,7 +155,7 @@ def main() -> int:
 
     store = Store(str(tmp / "demo.db"))
     p = RetailPipeline(
-        store, sources=sources, sender=Printer(),
+        store, sources=sources, phrases=phrases, sender=Printer(),
         mode="live" if args.live else "shadow", store_hint="城关店",
     )
 
