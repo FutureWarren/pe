@@ -43,7 +43,8 @@ def test_the_health_line_says_what_to_do():
 
 
 def test_filling_one_in_closes_the_gap(tmp_path):
-    p = Phrases(write(tmp_path, "意图,话术\n门店位置与营业时间,城关店在张掖路 88 号，10:00-21:00\n"))
+    p = Phrases(write(
+        tmp_path, "意图,话术\n门店位置与营业时间,城关店在张掖路 88 号，10:00-21:00\n"))
     assert "张掖路" in p.get("store_info")
     assert "store_info" not in {k for k, _ in p.gaps()}
 
