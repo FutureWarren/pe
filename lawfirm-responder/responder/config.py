@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     retail_takeover_seconds: int = 1800
     # 「我这就跟 X 的同事说一声」里的 X。留空则说「离您最近的门店」。
     retail_store_hint: str = ""
+    # 销售待办推到哪个企微群（群机器人 webhook，可填完整 URL 或只填 key）。
+    # **留空 = 待办只落运维小记**——查得到，但没有人会去查，那等于没有待办。
+    # 选群机器人是因为它不需要任何审批、不需要 access_token（不跟别的系统抢凭据），
+    # 而销售本来就在企微里。见 responder/retail/notify.py。
+    retail_todo_webhook: str = ""
     # 门店自己维护的话术表（意图,话术）。留空则用代码里的出厂默认。
     # 它管的是「保修/激活/门店/活动」这类写一次长期有效的答案——**全是对外承诺**，
     # 该由门店自己定；改一条要立刻生效，不能等发版。见 responder/retail/phrases.py。

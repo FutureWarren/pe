@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 
 from responder.models import IncomingMessage
 from responder.retail import replier
+from responder.retail.notify import TodoNotifier
 from responder.retail.phrases import Phrases
 from responder.retail.sources import Sources
 
@@ -99,6 +100,7 @@ class RetailPipeline:
         sources: Sources | None = None,
         phrases: Phrases | None = None,
         sender=None,
+        notifier: TodoNotifier | None = None,
         mode: str = "shadow",
         takeover_seconds: int = 1800,
         store_hint: str = "",
@@ -108,6 +110,8 @@ class RetailPipeline:
         self.sources = sources or Sources()
         self.phrases = phrases or Phrases()
         self.sender = sender
+        # 待办送达。None ＝ 只落运维小记（查得到，但没有人会去查）。
+        self.notifier = notifier
         self.mode = mode
         self.takeover_seconds = takeover_seconds
         self.store_hint = store_hint
@@ -202,7 +206,7 @@ class RetailPipeline:
             return self._defer(msg, result, now)
 
         if out.escalate:
-            self._notify_staff(gid, out.staff_note, now)
+            self._notify_staff(gid, out.staff_note, now, said=msg.text)
 
         if not result.reply:
             self._log(gid, msg.msg_id, result, now)
@@ -214,7 +218,9 @@ class RetailPipeline:
         """把这一句让给刚接手的真人：不回客户，但**原话一定送到销售那边**。"""
         said = " ".join(msg.text.split())[:60] or f"一条{_MEDIA_ZH.get(msg.media, '消息')}"
         result.staff_note = f"（接上条）客户又说：{said}"
-        self._notify_staff(msg.group_id, result.staff_note, now)
+        # **一次「叫人」只响一次铃。** 补充的话照样落库（记录要全），
+        # 但不再推——响到第三次他就把这个群折叠了，而那正是最要紧的时候。
+        self._notify_staff(msg.group_id, result.staff_note, now, push=False)
         result.reply = ""
         result.mode = "silent"
         result.reason += " → 刚转过人工，这几分钟让给真人"
@@ -243,7 +249,8 @@ class RetailPipeline:
         self.store.bump("retail_unreadable")
         if self._receipt_too_soon(msg.group_id, now):
             return self._defer(msg, result, now)
-        self._notify_staff(msg.group_id, result.staff_note, now)
+        self._notify_staff(msg.group_id, result.staff_note, now,
+                           said=f"（发来一条{what}）")
         return self._deliver(msg, result, now)
 
     # ------------------------------------------------------------------ 发送
@@ -271,6 +278,7 @@ class RetailPipeline:
             self._notify_staff(
                 gid, f"⚠️ 客户问了「{result.intent or '未分类'}」，"
                      f"但{b.reason}，AI 没能回复他。需要你直接联系。", now,
+                said=msg.text,
             )
             return result
 
@@ -312,7 +320,8 @@ class RetailPipeline:
         )
         self.store.bump(f"retail_{result.mode}")
 
-    def _notify_staff(self, gid: str, note: str, now: datetime) -> None:
+    def _notify_staff(self, gid: str, note: str, now: datetime,
+                      *, push: bool = True, said: str = "") -> None:
         """给销售留一条待办。**追加，不是覆盖。**
 
         覆盖写过一版，演示时当场露馅：客户连问了四件事，计数器记着 4 次转人工，
@@ -331,6 +340,26 @@ class RetailPipeline:
         line = f"{now:%m-%d %H:%M} " + " ".join(note.split())
         self.store.set_note(key, "\n".join([line, *old[:TODO_KEEP - 1]]))
         self.store.bump("retail_escalated")
+        if push:
+            self._ring(gid, said=said, why=" ".join(note.split()), now=now)
+
+    def _ring(self, gid: str, *, said: str, why: str, now: datetime) -> None:
+        """把待办推到销售那儿。**推不出去不能把主链路带走**——
+
+        这一步是锦上添花，它失败时客户其实已经收到回执了。但失败要留痕：
+        「推送一直失败」和「根本没配」在客户那头长得一样，在后台也一样安静。
+        """
+        if self.notifier is None or not self.notifier.available():
+            self.store.bump("retail_todo_unrouted")
+            return
+        if self.notifier.push(group_id=gid, said=said, why=why, now=now):
+            self.store.bump("retail_todo_pushed")
+            return
+        self.store.bump("retail_todo_push_failed")
+        self.store.set_note(
+            f"retail_todo_undelivered:{gid}",
+            f"{now:%m-%d %H:%M} 待办没能推到企微群：{why[:60]}",
+        )
 
     def _receipt_too_soon(self, gid: str, now: datetime) -> bool:
         """刚回过一次「我叫同事来」，就别再回第二次。

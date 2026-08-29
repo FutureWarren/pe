@@ -155,6 +155,23 @@ def main() -> int:
     print("  订单数据：未接（在云盛 ERP 的「订单中心」里）——"
           "订单/取货/发票/维修进度类一律转人工。**没有数据就不要装作有。**")
 
+    # ---------------------------------------------------------------- ⑥ 出口
+    head("⑥ AI 答不了的时候，谁会知道")
+    if s.retail_todo_webhook:
+        print(f"  {OK} 待办推企微群机器人（已配 webhook）")
+        if not s.public_base_url:
+            print(f"  {WARN}没配 RESPONDER_PUBLIC_BASE_URL——"
+                  f"推送里就带不上「看完整对话」的链接，")
+            print("       而公众号那头没有客服工作台，销售收到提醒也无处可看")
+    else:
+        print(f"  {BAD} 没配（RESPONDER_RETAIL_TODO_WEBHOOK）")
+        print("       待办只落运维小记——**查得到，但没有人会去查，那等于没有待办**。")
+        print("       客户问了一句 AI 答不了的话，后台一切正常，")
+        print("       而那边没有任何人知道。这是整条链路上最后一处静默失败。")
+        print("       做法：企微里建一个群 → 群设置 → 群机器人 → 添加 → 复制 Webhook")
+        print("       （不需要任何管理员审批，也不用 access_token）")
+        blockers.append("配上 RESPONDER_RETAIL_TODO_WEBHOOK（企微群机器人，五分钟）")
+
     # ---------------------------------------------------------------- 结论
     head("还差这几步")
     if not blockers:
