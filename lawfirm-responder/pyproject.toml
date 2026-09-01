@@ -36,17 +36,14 @@ dev = [
 [project.scripts]
 responder-api = "responder.app:serve"
 
-[tool.setuptools]
-packages = [
-  "responder",
-  "responder.engine",
-  "responder.compliance",
-  "responder.reply",
-  "responder.gateway",
-  "responder.notify",
-  "responder.store",
-  "responder.console",
-]
+# **自动发现，不手写清单。**
+# 手写过一版，代价是真实的：新增的 `responder.retail` 谁也没想起来往清单里加，
+# 于是 `pip install .` 根本不装它，服务在干净环境里起不来
+# （ModuleNotFoundError: No module named 'responder.retail'）。
+# 而本地永远测不出来——本地是从源码目录跑的，Python 加载的是当前目录，
+# 不是装好的那份。这跟仓库里反复出现的「封闭枚举必然漏」是同一件事。
+[tool.setuptools.packages.find]
+include = ["responder*"]
 
 [tool.setuptools.package-data]
 "responder.console" = ["static/*.html"]

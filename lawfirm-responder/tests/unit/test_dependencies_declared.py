@@ -83,3 +83,30 @@ def test_one_http_client_not_two():
     于是「网络出问题时会怎样」这个问题在不同文件里有不同答案。
     """
     assert "requests" not in _imported(), "又混进来一个 requests，请改用 httpx"
+
+
+def test_every_subpackage_actually_gets_installed():
+    """**新增一个子包，别人要记得去改打包清单——这种事没人记得住。**
+
+    手写清单那一版的代价是真实的：`responder.retail` 加进来之后没人往清单里
+    补，`pip install .` 就不装它，服务在干净环境里起不来。而本地永远测不出来
+    ——本地是从源码目录跑的，Python 加载的是当前目录，不是装好的那份。
+    （连「干净环境验证」都会被这一点骗过去，如果它也在源码目录里跑。）
+    """
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    setuptools_cfg = cfg.get("tool", {}).get("setuptools", {})
+    on_disk = {
+        ".".join(q.relative_to(ROOT).parts[:-1])
+        for q in (ROOT / "responder").rglob("__init__.py")
+    }
+
+    if "find" in setuptools_cfg.get("packages", {}):
+        return  # 自动发现，天然不会漏
+
+    listed = set(setuptools_cfg.get("packages", []))
+    assert listed == on_disk, (
+        "打包清单跟磁盘上的子包对不上（少的那些不会被安装）：\n"
+        f"  漏掉：{sorted(on_disk - listed)}\n"
+        f"  多余：{sorted(listed - on_disk)}\n"
+        "建议直接改成自动发现：[tool.setuptools.packages.find] include = ['responder*']"
+    )
