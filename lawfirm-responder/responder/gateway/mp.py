@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
 
-import requests
+import httpx
 
 from responder.config import Settings, get_settings
 
@@ -293,7 +293,7 @@ class MpClient:
 
         data: dict = {}
         try:
-            r = requests.post(
+            r = httpx.post(
                 f"{API}/cgi-bin/stable_token",
                 json={
                     "grant_type": "client_credential",
@@ -311,7 +311,7 @@ class MpClient:
             if data:
                 logger.warning("stable_token 不可用（%s），回落 cgi-bin/token——"
                                "此后与同号的其他系统会互相顶掉凭据", data)
-            r = requests.get(
+            r = httpx.get(
                 f"{API}/cgi-bin/token",
                 params={
                     "grant_type": "client_credential",
@@ -339,7 +339,7 @@ class MpClient:
         if not self.available():
             return False
         try:
-            r = requests.post(
+            r = httpx.post(
                 f"{API}/cgi-bin/message/custom/send",
                 params={"access_token": self._access_token()},
                 json={
@@ -365,7 +365,7 @@ class MpClient:
         if not self.available():
             return {}
         try:
-            r = requests.get(
+            r = httpx.get(
                 f"{API}/cgi-bin/user/info",
                 params={"access_token": self._access_token(),
                         "openid": openid, "lang": "zh_CN"},

@@ -217,8 +217,8 @@ def _client(monkeypatch, *, stable=None, plain=None):
         calls.append(url)
         return _Resp(plain or {"access_token": "PLAIN", "expires_in": 7200})
 
-    monkeypatch.setattr(mp.requests, "post", fake_post)
-    monkeypatch.setattr(mp.requests, "get", fake_get)
+    monkeypatch.setattr(mp.httpx, "post", fake_post)
+    monkeypatch.setattr(mp.httpx, "get", fake_get)
     c = mp.MpClient(Settings(mp_app_id="wx", mp_app_secret="s"))
     return c, calls
 

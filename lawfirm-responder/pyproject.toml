@@ -20,6 +20,11 @@ dependencies = [
   "openpyxl>=3.1,<4.0",
   # 客户进线二维码：本地生成，链接不经过任何第三方生码服务
   "segno>=1.6,<2.0",
+  # 下面两个原先是「靠别的包顺带装上」的，代码里直接 import 了却没声明。
+  # 那种依赖在本地一点征兆都没有，只在干净环境里炸——而且是**启动那一刻**炸。
+  # 由 tests/unit/test_dependencies_declared.py 守着，别再删。
+  "starlette>=0.37,<1.0",       # console/api.py 直接用
+  "python-dotenv>=1.0,<2.0",    # config.py 读 .env
 ]
 
 [project.optional-dependencies]
