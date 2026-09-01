@@ -10,11 +10,15 @@
 
 | 名称 | 值 |
 |---|---|
-| 回调地址（URL） | `https://responder-production.up.railway.app/mp/callback` |
+| 回调地址（URL） | `https://kf-production-ff85.up.railway.app/mp/callback` |
 | 令牌（Token） | `SYHWOmU4GM8nA3xfprq9PIFWuZBo` |
 | 消息加解密方式 | **明文模式** |
 
 > 这台是**临时测试机**（Railway，免费，随时可删）。它只用来回答上面那一个问题。
+>
+> **已经按微信的方式验过一遍了**（公网可达 / 配置验证回显正确 / 伪造签名被拒 403 /
+> 收消息回 success / 计数能看到）。所以第 2 步如果报错，问题一定在微信那一侧，
+> 不在服务器——这一点先确定下来，能省掉一整轮猜。
 > 正式上线要换成境内服务器（见 `docs/deploy.md`）——原因不是省钱，是
 > **发消息要用固定出口 IP**（公众号的 IP 白名单），而这类平台的出口 IP 不固定。
 > 收消息不受这个限制，所以拿它验「收不收得到」正好。
@@ -75,7 +79,7 @@
 手机或电脑浏览器打开：
 
 ```
-https://responder-production.up.railway.app/health
+https://kf-production-ff85.up.railway.app/health
 ```
 
 找 `"mp_callbacks"` 这个数字：
