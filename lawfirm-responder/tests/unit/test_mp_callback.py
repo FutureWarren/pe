@@ -152,3 +152,59 @@ def test_no_token_configured_shuts_the_door(tmp_path):
     c = app_for(tmp_path, token="")
     assert c.get("/mp/callback", params=qs(echo="x")).status_code == 403
     assert c.post("/mp/callback", params=qs(), content=TEXT_XML).status_code == 403
+
+
+# ------------------------------------------------------------ ④ 接通那一刻
+def test_health_reports_the_callback_count_without_a_token(tmp_path, monkeypatch):
+    """**接通那一刻唯一能证明「通了」的东西，要能在手机上查。**
+
+    控制台要带令牌头，手机浏览器里打不开；而「填完服务器配置之后到底通没通」
+    恰恰是站在电脑前的人最想立刻知道的一件事。
+    一个整数不含任何客户信息，代价是零。
+    """
+    monkeypatch.setenv("RESPONDER_DB_PATH", str(tmp_path / "h.db"))
+    monkeypatch.setenv("RESPONDER_MODE", "shadow")
+    monkeypatch.setenv("RESPONDER_MP_CALLBACK_TOKEN", TOKEN)
+    from responder.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        from responder.app import create_app
+
+        c = TestClient(create_app())
+        assert c.get("/health").json()["mp_callbacks"] == 0
+        assert c.post("/mp/callback", params=qs(), content=TEXT_XML).text == "success"
+        assert c.get("/health").json()["mp_callbacks"] == 1
+    finally:
+        get_settings.cache_clear()
+
+
+def test_a_paas_port_overrides_the_local_default(monkeypatch):
+    """Railway 这类平台把端口从环境变量塞进来，并要求监听 0.0.0.0。
+
+    自建服务器上没有 PORT，于是维持 127.0.0.1 + nginx——**不能因为加了
+    PaaS 支持就顺手把那台机器的 uvicorn 暴露到公网。**
+    """
+    from responder import app as app_mod
+
+    seen = {}
+
+    class FakeUvicorn:
+        @staticmethod
+        def run(_app, host, port):
+            seen.update(host=host, port=port)
+
+    monkeypatch.setitem(__import__("sys").modules, "uvicorn", FakeUvicorn)
+    monkeypatch.setattr(app_mod, "create_app", lambda: None)
+
+    monkeypatch.delenv("PORT", raising=False)
+    app_mod.serve()
+    assert seen["host"] == "127.0.0.1"
+
+    monkeypatch.setenv("PORT", "8080")
+    app_mod.serve()
+    assert seen == {"host": "0.0.0.0", "port": 8080}
+
+    monkeypatch.setenv("PORT", "不是数字")
+    app_mod.serve()
+    assert seen["host"] == "127.0.0.1", "PORT 不合法时要退回本机，不能裸奔"

@@ -113,6 +113,11 @@ def create_app() -> FastAPI:
             # 放在这个免鉴权端点上，是因为控制台要带令牌头、手机上打不开；
             # 一个整数不含任何客户信息，代价是零。
             "enter_events": store.count_event_messages(),
+            # 公众号回调累计条数。**接通那一刻唯一能证明「通了」的东西**，
+            # 而它要能在手机上查——控制台要带令牌头，手机上打不开。
+            # 一个整数不含任何客户信息，代价是零。
+            "mp_callbacks": int(
+                (store.counter("mp_cb_event") or {}).get("n", 0) or 0),
             # 运维指令执行情况。「什么都没收到」有两种完全不同的原因，
             # 这两个数把它们分开：ops_done=0 → 指令还没跑（新版没上或没到点）；
             # ops_done>0 且 ops_error 非空 → 跑了，但企微把消息拒了（码在 error 里）。
@@ -133,7 +138,24 @@ def create_app() -> FastAPI:
 
 
 def serve() -> None:
+    """启动服务。
+
+    **`PORT` 存在时一切听平台的**（Railway / Render / Fly 这类 PaaS 会把端口
+    从环境变量塞进来，并且要求进程监听 `0.0.0.0`）。自建服务器上没有这个变量，
+    于是维持原来的默认：`127.0.0.1` + 配置里的端口，前面挡一层 nginx——
+    那台机器上把 uvicorn 直接暴露到公网是另一回事，不能因为加了 PaaS 支持
+    就顺手改掉。
+    """
+    import os
+
     import uvicorn
 
     settings = get_settings()
-    uvicorn.run(create_app(), host=settings.api_host, port=settings.api_port)
+    host, port = settings.api_host, settings.api_port
+    if env_port := os.environ.get("PORT"):
+        try:
+            port = int(env_port)
+            host = "0.0.0.0"  # noqa: S104 — PaaS 要求，见上
+        except ValueError:
+            logging.warning("PORT=%r 不是数字，按配置里的端口启动", env_port)
+    uvicorn.run(create_app(), host=host, port=port)
