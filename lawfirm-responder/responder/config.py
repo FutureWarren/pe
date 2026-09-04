@@ -1,0 +1,383 @@
+"""运行配置。所有阈值可通过环境变量按部署调整，敏感信息不入库。"""
+
+from functools import lru_cache
+from pathlib import Path
+
+from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 把 .env 中的非 RESPONDER_ 前缀变量（DEEPSEEK_API_KEY / ANTHROPIC_API_KEY）载入环境
+load_dotenv()
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="RESPONDER_", env_file=".env", extra="ignore"
+    )
+
+    # shadow: 只判断不发言，AI 草稿仅进入控制台; live: 自动发言
+    mode: str = "shadow"
+
+    wecom_corp_id: str = ""
+    wecom_token: str = ""
+    wecom_encoding_aes_key: str = ""
+    wecom_corp_secret: str = ""
+    wecom_agent_id: str = ""
+
+    # 微信客服：独立 Secret（后台 → 客户与上下游 → 微信客服 → API）。
+    # 该通道客户消息全量推送、无需 @ 触发，是新咨询首响的主通道。
+    wecom_kf_secret: str = ""
+    kf_enabled: bool = True
+
+    # 智能机器人（群聊 @ 触发）：独立的 Token / EncodingAESKey，在后台创建机器人时获得。
+    # 收：机器人回调；发：优先用回调随消息下发的会话 webhook（员工零配置），
+    # 过期则回落该群人工配置的群机器人 webhook。
+    wecom_bot_token: str = ""
+    wecom_bot_aes_key: str = ""
+    bot_enabled: bool = True
+    # 会话 webhook 的可用窗口。企微侧为分钟级，这里取保守值：宁可回落到人工通道，
+    # 也不要拿一个已过期的地址去发（发失败客户就等于没收到回复）。
+    bot_webhook_ttl_seconds: int = 240
+    # 群聊会话首次出现时自动建档，接收线索简报的默认对象（群里查不到「接待人」）
+    bot_default_notify_userid: str = ""
+    # 客服会话首次出现时自动建档，用于话术点名；留空则话术说「承办律师」
+    kf_default_lawyer_name: str = ""
+    kf_default_case_type: str = ""
+    # 客户扫码进入客服会话即主动打招呼（不等他先开口）。
+    # 空窗口是最大的流失点：客户点进来看到一片空白，很多人直接就退了。
+    # **默认关闭（2026-08-12，律所方决定）。** 企微后台「微信客服 → 欢迎语」
+    # 已经配了一条，客户进会话时企微自己会发。我们再发一条，客户连着看到
+    # 两句招呼——那恰恰是「一看就知道是机器人」最典型的样子。
+    # 一个窗口只该有一个人在说话。
+    # 机制保留：后台没配欢迎语的部署方式（或换个客服账号）打开即可用。
+    kf_welcome_on_enter: bool = False
+
+    # ---- 抖音企业号私信（open.douyin.com 开发者后台申请，需蓝V认证企业号）
+    # 业务依据：用户 first pass 多在抖音而非微信（微信要先扫码，多一个动作）。
+    douyin_enabled: bool = True
+    douyin_client_key: str = ""
+    douyin_client_secret: str = ""
+    # 回调签名校验的 Token 与消息加密 Key（在开发者后台配置回调地址时设定）。
+    # aes_key 留空 = 平台推明文 JSON，不做解密。
+    douyin_callback_token: str = ""
+    douyin_encoding_aes_key: str = ""
+    # 发送私信的接口地址。抖音文档站在部署环境不可达，故做成配置项：
+    # 凭据到手后跑 scripts/douyin_smoke.py 校正，不必改代码重新部署。
+    douyin_send_url: str = "https://open.douyin.com/im/send/msg/"
+    # 平台硬限制，不是我们的策略，**不要往大了调**：
+    # 用户发言后 24 小时内才允许回复；同一窗口内用户下次开口前最多 6 条。
+    douyin_reply_window_seconds: int = 86400
+    douyin_max_parts_per_window: int = 6
+    # 分条发送在抖音要收敛：一条回复拆 3 条，两轮就打满配额，
+    # 真正要紧的话（要电话、邀约到所）反而发不出去。
+    douyin_split_max_parts: int = 2
+    # 客户进入私信会话页即打招呼（平台要求 30 秒内响应，故走确定性模板不进模型）
+    douyin_welcome_on_enter: bool = True
+
+    # ---- 微信公众号（服务号）：酷机时代售后的主通道，见 gateway/mp.py
+    # 选它而不是微信客服，是因为品牌方管控下企微开不了客服号，而他们有一个
+    # 已认证服务号 + 两万多关注用户——**这条路少了整个「引流」环节**。
+    mp_app_id: str = ""
+    mp_app_secret: str = ""
+    # 回调验签 Token。**留空 = 接入口关闭**（默认拒绝，与抖音口径一致）：
+    # 不验签等于把公网地址敞开，任何人都能伪造客户消息灌进来、
+    # 骗走客服消息额度、让 AI 对着伪造的「客户」说话。
+    mp_callback_token: str = ""
+    mp_encoding_aes_key: str = ""     # 安全模式才需要；留空 = 明文模式
+    # 分条上限。平台规定同一窗口最多 5 条，这里定 3 是留余量——
+    # 一轮回复占满额度的话，客户追问时我们一个字都发不出去。
+    mp_split_max_parts: int = 3
+
+    # ---- 零售模式（酷机时代，见 responder/retail/ 与 docs/retail-kuji.md）
+    # **默认 off**：本仓库同时是律所的生产代码，零售链路必须显式打开才生效。
+    # off = 完全不启用；shadow = 全流程照跑、回复入库但不外发（上线第一周就该用它）；
+    # live = 真发。
+    retail_mode: str = "off"
+    # 门店每天导出的库存表（.csv / .xlsx）。留空 = 价格库存类一律转人工——
+    # 这是对的：**没有数据就不要装作有**。
+    retail_catalog_path: str = ""
+    # 超过这个时长的表不许用来报价。昨天的价今天报出去，门店要么认（亏钱）
+    # 要么不认（客诉），两个都比多问一句贵。
+    retail_catalog_max_age_hours: float = 24.0
+    # 真人在这个窗口内说过话，AI 一律让位（与律所侧 takeover 同一套规则）。
+    retail_takeover_seconds: int = 1800
+    # 「我这就跟 X 的同事说一声」里的 X。留空则说「离您最近的门店」。
+    retail_store_hint: str = ""
+    # 销售待办推到哪个企微群（群机器人 webhook，可填完整 URL 或只填 key）。
+    # **留空 = 待办只落运维小记**——查得到，但没有人会去查，那等于没有待办。
+    # 选群机器人是因为它不需要任何审批、不需要 access_token（不跟别的系统抢凭据），
+    # 而销售本来就在企微里。见 responder/retail/notify.py。
+    retail_todo_webhook: str = ""
+    # 门店自己维护的话术表（意图,话术）。留空则用代码里的出厂默认。
+    # 它管的是「保修/激活/门店/活动」这类写一次长期有效的答案——**全是对外承诺**，
+    # 该由门店自己定；改一条要立刻生效，不能等发版。见 responder/retail/phrases.py。
+    retail_phrases_path: str = ""
+    # 抖音会话建档后线索简报的默认接收人（抖音侧没有「接待人」可查）
+    douyin_default_notify_userid: str = ""
+
+    # ---- 外部渠道接入（RPA 等自动化工具搬运，见 gateway/channel.py 与 docs/channels.md）
+    channel_enabled: bool = True
+    # 接入令牌。**必须与 admin_token 分开**：RPA 跑在一台随时可能被人碰的
+    # 桌面电脑上，令牌等于摊在那儿；共用一个，控制台就跟着一起丢了。
+    # 留空 = 不开放接入口（默认拒绝，不是默认放行）。
+    channel_token: str = ""
+    # 一条回复排进发件箱多久没人来取就报警。RPA 那头卡住是**静默失败**：
+    # 客户在等，而我们后台一片安静。这个数就是「静悄悄」的容忍上限。
+    channel_stale_alert_minutes: int = 15
+    # 一个渠道多久完全没动静就报警（含空转心跳）。比上面那个宽得多：
+    # 半天没客户说话是正常的，半天连不上才是故障。
+    channel_silent_alert_hours: int = 6
+
+    # ---- 会话转接（见 docs/kf-handoff.md）
+    # 强意愿线索直接把会话转给分到的律师，他在企微客服工作台接着聊，
+    # 省掉「打电话」这个最容易断的环节。
+    handoff_enabled: bool = True
+    # 哪些优先级触发转接。紧急线索无论优先级一律转。
+    # 别放宽到 P1/P2——一周 416 人进私信，全转过去律师什么也别干了。
+    # 转接接口路径。企微文档站在部署环境不可达，故做成配置项：
+    # 控制台自检探到正确路径后改这里，不必改代码重新部署。
+    # 转接成功后顺带把承办律师的名片推给客户（企微「升级服务 → 专员服务」）。
+    # 转接只解决「谁来回这句话」，名片解决「客户认识了谁」——后者才是
+    # 从一次咨询变成长期关系的那一步。推荐语留空＝用企微后台配好的那句，
+    # 话术留在律所自己手上。
+    # 面谈邀约里点名的资历（律所方 2026-08-12：「重点是要邀约到所里边来，
+    # 我们这边有专业的主任律师」）。**留空即不提**——律协禁止虚假/夸大宣传，
+    # 所以这句话必须是真的：真由主任律师接待才写「主任律师」。
+    office_senior_title: str = "主任律师"
+    # **律所书面授权、可以对客说出口的原话**，`|` 分隔。
+    # 2026-08-12 律所方拍板主打「免费法律咨询」，并在我两次提出
+    # 《律师业务推广行为规则》第十条（禁止以不收费招揽业务）之后重申
+    # 「你不要管，按我说的做」。这是律所的执业判断，由律所承担。
+    #
+    # 只放行逐字定下的这几句，**不等于把费用闸门拆掉**：模型仍然不能
+    # 自己编出「打三折」「代理费一万」这类律所没授权也不知情的话。
+    # 改这一项等于改一次对外承诺，须律所方本人确认。
+    # 列表**第一句是主打的那句**（`templates.free_claim()` 取它），
+    # 其余几句同样授权、同样放行，只是不作为默认。
+    # 2026-08-12 律所方定稿：主打「免费咨询」。
+    approved_claims: str = "免费咨询|咨询是免费的|首次咨询免费"
+    upgrade_service_enabled: bool = True
+    upgrade_service_wording: str = ""
+    kf_trans_path: str = "kf/service_state/trans"
+    kf_state_path: str = "kf/service_state/get"
+    # 转接后律师迟迟不开口 → 清掉转接记录，客户之后还能重新转。
+    # 转接的含义是「让客户出现在人工的工作台里」，不是「AI 闭嘴」——
+    # 真人开口之前 AI 一直接着陪（见 engine/decision.py），所以这里不需要
+    # 任何「静默宽限期」；这个数只回答一个问题：等多久算彻底放弃等这个人。
+    handoff_reclaim_seconds: int = 1800
+    # 企微「接待人」名单自动跟随律师名册的兜底间隔（秒；置 0 关掉自动同步）。
+    # 律所侧要维护的名单**只有两份**（律师名册 + 企微后台的升级服务范围），
+    # 接待人是企微自己的第三份，内容永远等于名册——所以由程序保持一致。
+    # 名册一改会立刻同步，这个数只管「有人在企微后台手工删过接待人」这类漂移。
+    kf_servicer_sync_seconds: int = 900
+
+    # ---- 每日战报：管理员不必打开任何页面就知道昨天怎么样。
+    # 控制台是给「在系统里干活的人」用的；所主任要的是一份推到眼前的摘要。
+    # 让他每天主动去点开一个网页看数字，这件事不会持续超过一周。
+    daily_digest_enabled: bool = True
+    daily_digest_hour: int = 9  # 本地时间几点推（0-23）
+    # 收件人留空则用 default_notify_userid
+    daily_digest_userid: str = ""
+
+    # 律所线下地址：邀约到所面谈的话术里用。留空则只约时间不报地址。
+    office_address: str = "上海市松江区九峰路88号平高广场11楼"
+    office_name: str = "上海松沪律师事务所"
+    # 客户聊到第几条还没留联系方式时，主动开口要电话。
+    # 2026-08 曾从 3 下调到 2（抖音漏斗显示开口的人里四成聊完就走）。
+    # **2026-08-08 又调回 3**：律所方实测原话——「AI 应该在了解完基础信息
+    # 之后，再去引导客户留联系方式」「这一长串的说话方式，让客户一看就会
+    # 觉得这是不是 AI」。客户第二句话刚问完一个法律问题就被要号码，
+    # 那不像接待，像推销，而推销的第一反应是关掉窗口。
+    # 另有一道更硬的闸：**必须客户已经把事说出来过**（`rules.has_substance`），
+    # 光凑够条数不算——两句寒暄也能凑够数。
+    ask_contact_after_messages: int = 3
+    # 承接类回复（「我帮您问下律师」）默认没有下一步，客户看完就没事干了。
+    # 业务决策 2026-08：每条回复都要留一个下一步，哪怕只是轻轻推一句。
+    handoff_next_step: bool = True
+    # 挽留：会话静默这么久且仍未留联系方式 → 补发一条（一通对话只发一次）。
+    # 对标抖音「自动挽留」（其官方数据：留资率 +7.4%）。0 或关闭则不发。
+    winback_enabled: bool = True
+    winback_idle_seconds: int = 1800
+
+    # LLM 供应商：deepseek | anthropic | auto（auto = 谁的 key 在就用谁，deepseek 优先）
+    # 业务决策 2026-07：默认 DeepSeek（成本考虑）；Anthropic 路径保留可随时切回。
+    #
+    # **默认从 auto 改成 deepseek（2026-08-12）。** `auto` 意味着「哪个 key 在
+    # 就发给谁」——环境里多一个 ANTHROPIC_API_KEY，客户的咨询原文就会**静默地**
+    # 改走境外服务商。那不是换个模型的事：《个人信息保护法》上它从「向第三方提供」
+    # 变成「个人信息出境」，要求完全不同，而律所对此毫不知情。
+    # 处理者是谁必须是一个明确的选择，不能是环境变量的副作用。
+    llm_provider: str = "deepseek"
+    deepseek_model: str = "deepseek-chat"
+    claude_model: str = "claude-opus-4-8"
+
+    # AI 在群内的身份定位：普通销售顾问角色，不明示 AI 身份（业务决策 2026-07）。
+    # 全量消息留痕入库，可溯源。
+    ai_persona_name: str = "顾问助理"
+
+    # 免责句式开关：业务决策暂不落地，机制保留，合伙人审定句式后置 True
+    disclaimer_required: bool = False
+
+    # ---- 数据留存（《个人信息保护法》第 19 条：保存期限应为实现目的所必要的最短时间）
+    #
+    # 库里躺的是真实公民的咨询原文和手机号：欠薪、离婚、伤情、家人有没有被拘留。
+    # 四张表从上线起只进不出，一年几千人无限期堆在一台机器上。
+    #
+    # **0 = 不清理**，这是**当前的默认值，而且是刻意的**：保留多久是律所的
+    # 业务决策（要兼顾利益冲突检查、回访、以及可能的诉讼时效），
+    # 不该由写代码的人替他们定。律所拍板后把天数填进来即可，机制已经就位。
+    # 填之前请确认：删掉的会话在控制台里也就查不到了，这是不可逆的。
+    retention_days: int = 0
+    # 消息原文可以比线索档案先删：档案里只有摘要和联系方式，是跟进要用的；
+    # 原文才是最敏感的那部分。留空则跟随 retention_days。
+    retention_days_messages: int = 0
+
+    # 回调异步处理：立即回 success（企微 5 秒超时红线），实际处理交后台工作线程。
+    # 仅测试/本机联调可关。
+    callback_async: bool = True
+    # 后台线程定时事务间隔（秒）：补位等待到点复评、紧急提醒超时升级
+    worker_poll_seconds: float = 10.0
+
+    # ---- LLM 层（deepseek/anthropic 任一 key 未配置时自动降级为纯规则/模板路径）
+    # 边界样本复核：规则判「沉默」但可能是漏掉的问题时，交给模型二次确认
+    llm_refine_enabled: bool = True
+    # 直接回答路径用模型生成一般性法律框架
+    llm_answer_enabled: bool = True
+    llm_timeout_seconds: float = 15.0
+    llm_max_tokens_answer: int = 500
+    # 注入模型的群聊上下文条数
+    history_window: int = 10
+
+    # ---- 筛查门槛（律所方 2026-08-13：「不能在客户都没有描述清楚案情的情况下
+    # 就转接给人工啊，那人工还是得再问一轮」，见 engine/screening.py）
+    # 四件事（时间线/对方/材料/诉求）问到几件才算「案情说清楚了」、可以转人工。
+    # 定 3 不定 4：有些案子天然缺一件（工伤里「对方是谁」常常不必问），
+    # 凑齐反而变成查户口。**客户主动要真人时这道门槛一律不生效**——
+    # 他在伸手，让他先答完四道题才叫人是本末倒置。
+    screening_min_slots: int = 3
+    # 问满几轮还是不齐就照转，单子上写明缺什么。客户可能就是话少、
+    # 可能在开车语音打字——为了凑满一格把热客户扣在 AI 手里，比少问一件贵得多。
+    screening_max_rounds: int = 4
+
+    # ---- 长期记忆：律所自己的知识库（见 responder/memory.py）
+    # 检索到的「本所口径」注入模型上下文，让 AI 答得像你们所而不是像一本教科书。
+    # 只有人工审核过（approved）的条目会被引用——话术须人审是合规护栏。
+    knowledge_enabled: bool = True
+    # 注入几条。多了会挤占上下文、也更容易把不相关的口径带进来。
+    knowledge_top_k: int = 3
+
+    # ---- 线索简报：筛查完成后把咨询整理成交接单推给接待人
+    lead_brief_enabled: bool = True
+    # 全量推送（业务决策 2026-08，律所方：「我们有很多的客服，全部都得推给客服，
+    # 不能躺死在对话里」）。系统只负责标好强弱，推不推由人手决定，不由系统替他们定。
+    # 关掉则回到旧口径：只推有意向的（冷线索仅归档）。
+    notify_all_leads: bool = True
+    lead_history_window: int = 30  # 整理简报时回看的对话条数
+    # 会话静默多久后为「有意向但未触发即时通知」的咨询补一份简报（秒）
+    lead_idle_seconds: int = 900
+    # 同一客户两次咨询的分隔阈值：超过此空档视为另一次咨询，不并入同一张交接单
+    lead_session_gap_seconds: int = 7200
+
+    # ---- 分案与优先级（规则定义与权重见 docs/lead-routing.md；阈值调整须人工确认）
+    # P0 强意愿 / P1 有意愿 的分数门槛
+    priority_p0_threshold: int = 60
+    priority_p1_threshold: int = 30
+    # P0 线索超过该时长仍未标记「已联系」→ 追加提醒并抄送第二责任人
+    lead_sla_enabled: bool = True
+    lead_p0_sla_seconds: int = 3600
+    # P1 同样要有人管，只是时限宽得多。P1 是「有意愿但还没留电话」——
+    # 它不该占用律师的即时注意力（那是 P0 的特权），但放着不管就是白丢：
+    # 单子推出去之后没有任何机制会再提起它。0 = 关闭 P1 督办。
+    lead_p1_sla_seconds: int = 86400
+    # 紧急线索强推交接单的冷却时间：客户连发几条急消息，律师只该收一张单
+    lead_force_cooldown_seconds: int = 600
+    # 控制台对外基础地址（生成律师登录链接用）；留空时从请求 Host 推断
+    public_base_url: str = ""
+    # 群聊单条回复长度上限（字符），超出按句号截断
+    answer_max_chars: int = 240
+
+    # 分条发送：多句内容拆成 1~3 条微信消息，条间隔模拟打字节奏（真人感）
+    split_messages: bool = True
+    split_max_parts: int = 3
+    # 条间隔（律所方 2026-08-12 定为 3 秒）：原来 1.5 秒太快，
+    # 在微信里看就是几条消息同时蹦出来——**「一股脑发」是客户认出机器人
+    # 最直接的一条线索**，比措辞本身更明显。真人打一句话要想一下、要打字。
+    # 首条不等：首响时长是北极星指标，让客户干等换不来任何东西，
+    # 需要放慢的是「后面几条之间」。
+    split_delay_seconds: float = 3.0
+
+    # AI 补位等待时长（秒）。[待定] 默认白天 2.5 分钟、夜间 1 分钟，可按群配置覆盖。
+    wait_seconds_day: int = 150
+    wait_seconds_night: int = 60
+    # 一对一客服会话：AI 即第一响应人，等待无意义，默认即时响应
+    kf_wait_seconds: int = 0
+    night_start_hour: int = 21
+    night_end_hour: int = 8
+
+    # 律师群内发言后 AI 静默时长（秒）
+    takeover_seconds: int = 1800
+
+    # 紧急提醒升级时长（秒）
+    escalation_seconds: int = 600
+    # 群档案未配律师企微号时的兜底提醒接收人（话术已向客户承诺「已通知律师」，
+    # 提醒必须真的送达；客服会话会自动取该客服账号的接待人，此项为最后兜底）
+    default_notify_userid: str = ""
+
+    db_path: str = "responder.db"
+    api_host: str = "127.0.0.1"
+    api_port: int = 8020
+
+    # ---- 远程升级：让运维/Claude 无需登录服务器即可拉取新版并重启。
+    # 只允许拉取下方写死的仓库目录与分支，不接受任何外部输入，
+    # 因此权限边界等同于「持有 admin_token 者可部署本仓库的新提交」。
+    self_update_enabled: bool = True
+    # 自动升级：服务器自己定时看远端分支有没有新提交，有就拉下来重启。
+    # 存在的理由很实在——运维侧不一定够得着这台服务器（网络策略/没有 SSH），
+    # 但服务器自己够得着 GitHub。关掉则回到「人工点按钮」。
+    auto_update_enabled: bool = True
+    auto_update_interval_seconds: int = 300
+    # 客户刚说过话就不重启：重启会丢掉内存队列里没处理完的消息。
+    # 升级晚五分钟没关系，客户的消息掉了有关系。
+    auto_update_quiet_seconds: int = 120
+    update_repo_dir: str = "/opt/pe"
+    update_branch: str = "claude/law-firm-wechat-ai-responder-q3nttv"
+    update_pip: str = "/opt/pe-venv/bin/pip"
+    # 升级脚本用它做「新版本起不起得来」的冒烟检查（见 ops._SCRIPT）。
+    # 与 pip 同一个虚拟环境，否则测的不是真正要跑的那套依赖。
+    update_python: str = "/opt/pe-venv/bin/python"
+    update_log: str = "/tmp/responder-update.log"
+
+    # 控制台/ingest 访问令牌：公网部署必填（deploy.sh 自动生成）。
+    # 为空时不鉴权（仅限本机开发）；企微回调路由不受此限（有签名校验）。
+    admin_token: str = ""
+    # 反向代理跳数。0 = 不信任 X-Forwarded-For（默认，也是直连公网时唯一安全的值）。
+    # 配成 1 表示前面有一层自己的 nginx，取 XFF **最右边**那一跳。
+    # 采信最左边等于不设防：那一段完全由客户端自己写。
+    trusted_proxy_hops: int = 0
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+def persist_setting(key: str, value: str, env_path: str = ".env") -> bool:
+    """把一项配置写回 .env，使运行时改动（如切换运行模式）在重启后仍生效。
+
+    .env 不存在（测试/临时环境）时静默跳过，返回 False。
+    """
+    p = Path(env_path)
+    if not p.exists():
+        return False
+    lines = p.read_text(encoding="utf-8").splitlines()
+    prefix = f"{key}="
+    replaced = False
+    for i, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[i] = prefix + value
+            replaced = True
+            break
+    if not replaced:
+        lines.append(prefix + value)
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True

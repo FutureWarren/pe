@@ -1,0 +1,7 @@
+__pycache__/
+*.egg-info/
+.env
+*.db
+.pytest_cache/
+.ruff_cache/
+server.pid

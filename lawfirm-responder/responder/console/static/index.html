@@ -1,0 +1,3047 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230F2D4A'/%3E%3Ctext x='16' y='21' font-size='13' fill='%23fff' text-anchor='middle' font-family='serif'%3E%E6%9D%BE%3C/text%3E%3C/svg%3E">
+<title>松沪律所 · AI 响应助手控制台</title>
+<style>
+/* ================= 设计令牌（规范 v2.0 §1） ================= */
+:root {
+  color-scheme: light;
+  --bg: #F7F5F0; --card: #FFFFFF; --card-2: #F2EFE9;
+  --line: #E7E2D8; --line-strong: #D9D2C3;
+  --ink-1: #1C2B3A; --ink-2: #4C5A68; --ink-3: #6E7883;
+  --brand: #1E4E79; --brand-deep: #0F2D4A; --brand-tint: #EAF1F8;
+  --brand-btn: #1E4E79; --brand-btn-ink: #FFFFFF;
+  --accent: #8A6D1E; --accent-line: #C2A65C;
+  --ok: #1E7A46; --ok-bg: #E9F4EC;
+  --warn: #9E6A00; --warn-bg: #FAF1DE;
+  --bad: #C23B36; --bad-bg: #FBECEA;
+  --chip-bg: #F2EFE9; --scrim: rgba(15,29,42,.45);
+  --s1: #2A78D6; --s2: #EB6834; --s3: #1BAF7A; /* 仅看板分布图 */
+  --r-1: 6px; --r-2: 10px; --r-3: 14px; --r-4: 20px; --r-full: 999px;
+  --shadow-1: 0 1px 2px rgba(16,32,54,.05);
+  --shadow-2: 0 2px 8px rgba(16,32,54,.08);
+  --shadow-3: 0 12px 32px rgba(15,45,74,.18);
+  --topbar-ink: #FFFFFF; --topbar-bg: #0F2D4A;
+  --topbar-line: rgba(194,166,92,.6);
+  --capsule-bg: rgba(255,255,255,.12); --capsule-ink: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #12171E; --card: #1A2129; --card-2: #212A34;
+    --line: #2C3642; --line-strong: #3A4654;
+    --ink-1: #EDF0F4; --ink-2: #A7B1BC; --ink-3: #8B96A4;
+    --brand: #8FB3DE; --brand-deep: #1A2129; --brand-tint: #223245;
+    --brand-btn: #33628F; --brand-btn-ink: #F2F7FC;
+    --accent: #C9AC63; --accent-line: #C9AC63;
+    --ok: #57BE84; --ok-bg: #1C3226;
+    --warn: #DFA84E; --warn-bg: #362E1B;
+    --bad: #E5726C; --bad-bg: #3A2422;
+    --chip-bg: #232D38; --scrim: rgba(0,0,0,.55);
+    --s1: #3987E5; --s2: #D95926; --s3: #199E70;
+    --shadow-1: none; --shadow-2: 0 0 #0000;
+    --shadow-3: 0 8px 24px rgba(0,0,0,.4);
+    --topbar-ink: var(--ink-1); --topbar-bg: var(--card);
+    --topbar-line: var(--line);
+    --capsule-bg: #232D38; --capsule-ink: var(--ink-1);
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: system-ui, -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans",
+    "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  background: var(--bg); color: var(--ink-1);
+  font-size: 15px; line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  padding-bottom: calc(60px + env(safe-area-inset-bottom));
+}
+button { font: inherit; cursor: pointer; color: inherit; background: none; border: 0; padding: 0; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 2px;
+}
+.serif {
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC",
+    "SimSun", Georgia, serif;
+  font-weight: 500; letter-spacing: .08em;
+}
+svg.ico {
+  width: 16px; height: 16px; flex: none; vertical-align: -3px;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* ================= 印章徽标 ================= */
+.seal {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand-deep); color: #fff; border-radius: 8px; flex: none;
+}
+@media (prefers-color-scheme: dark) { .seal { background: var(--brand-btn); } }
+.seal.lg { width: 48px; height: 48px; font-size: 18px; }
+.seal.sm { width: 24px; height: 24px; font-size: 11px; border-radius: 6px; }
+.seal.md { width: 32px; height: 32px; font-size: 13px; }
+
+/* ================= 按钮四级 ================= */
+.btn-primary {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--brand-btn); color: var(--brand-btn-ink);
+  border-radius: var(--r-2); height: 44px; padding: 0 20px;
+  font-size: 15px; font-weight: 600;
+}
+.btn-primary.xl { height: 48px; width: 100%; }
+.btn-tonal {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--brand-tint); color: var(--brand);
+  border-radius: var(--r-2); height: 36px; padding: 0 14px;
+  font-size: 13px; font-weight: 600;
+}
+.btn-outline {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--card); border: 1px solid var(--line-strong); color: var(--ink-1);
+  border-radius: var(--r-2); height: 40px; padding: 0 16px; font-size: 14px;
+}
+.btn-text {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--brand); font-size: 13px; font-weight: 600;
+  min-height: 44px; padding: 0 8px;
+}
+.btn-text.muted { color: var(--ink-2); }
+button:active { opacity: .8; }
+button:disabled { opacity: .4; cursor: default; }
+
+/* ================= Chip / Badge ================= */
+.chip, .badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; padding: 2px 8px; border-radius: var(--r-1); white-space: nowrap;
+  max-width: 46vw; overflow: hidden; text-overflow: ellipsis;
+}
+.chip { background: var(--chip-bg); color: var(--ink-2); }
+/* 时间范围切换：选中态要一眼看得出，否则看板上的数字属于哪一段全靠猜 */
+button.chip { cursor: pointer; border: 1px solid transparent; padding: 6px 14px; font-size: 13px; }
+button.chip[aria-pressed="true"] {
+  background: var(--brand); color: #fff; font-weight: 600;
+}
+.chip .tx, .badge .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.badge, button.time { position: relative; }
+button.badge::after, button.time::after { content: ""; position: absolute; inset: -8px; }
+.badge.ok { background: var(--ok-bg); color: var(--ok); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.bad { background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+.badge.brand { background: var(--brand-tint); color: var(--brand); }
+.badge svg.ico { width: 14px; height: 14px; }
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+/* ================= 布局骨架 ================= */
+header#topbar {
+  position: sticky; top: 0; z-index: 6;
+  background: var(--topbar-bg); color: var(--topbar-ink);
+  border-bottom: 1px solid var(--topbar-line);
+  height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 16px;
+}
+header#topbar .word { font-size: 16px; }
+header#topbar .app { font-size: 13px; opacity: .75; display: flex; align-items: center; gap: 8px; }
+header#topbar .app::before { content: ""; width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .6; }
+.capsule {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  background: var(--capsule-bg); color: var(--capsule-ink);
+  border-radius: var(--r-full); padding: 5px 12px; font-size: 12px;
+}
+.capsule .dot.pulse { animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+
+#banner {
+  background: var(--warn-bg); color: var(--warn); font-size: 13px;
+  padding: 10px 16px; display: none;
+}
+#banner.show { display: block; }
+
+main { max-width: 720px; margin: 0 auto; padding: 12px 16px 32px; }
+.page-title { display: none; }
+
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-3);
+  padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow-1);
+}
+.card.urgent { position: relative; overflow: hidden; }
+.card.urgent::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--bad);
+}
+.row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.time {
+  font-size: 12px; color: var(--ink-3); margin-left: auto; white-space: nowrap;
+  min-height: auto; padding: 4px 0 4px 8px;
+}
+.body-l { font-size: 16px; line-height: 1.7; margin: 8px 0 6px; white-space: pre-wrap; word-break: break-word; }
+.meta { font-size: 12px; color: var(--ink-3); }
+.eyebrow {
+  font-size: 12px; font-weight: 600; color: var(--ink-3); letter-spacing: .05em;
+  margin: 20px 0 8px;
+}
+.eyebrow:first-child { margin-top: 4px; }
+.overview { font-size: 15px; color: var(--ink-2); margin: 4px 0 12px; }
+
+.empty { text-align: center; padding: 48px 24px; color: var(--ink-3); }
+.empty svg { width: 40px; height: 40px; color: var(--ink-3); stroke-width: 1.5; }
+.empty .t1 { font-size: 15px; color: var(--ink-2); margin-top: 12px; }
+.empty .t2 { font-size: 13px; margin-top: 6px; line-height: 1.6; }
+
+.skel .bar { background: var(--card-2); border-radius: 6px; height: 14px; margin: 8px 0; }
+.err-card { text-align: center; padding: 40px 24px; }
+.err-card svg { width: 40px; height: 40px; color: var(--ink-3); stroke-width: 1.5; }
+.err-card p { margin: 12px 0 16px; color: var(--ink-2); font-size: 15px; }
+
+/* ================= 底部导航 / 桌面侧栏 ================= */
+nav#nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 8;
+  display: flex; background: var(--card); border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+nav#nav .brand, nav#nav .nav-foot { display: none; }
+nav#nav .navbtn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 0 6px; font-size: 12px; color: var(--ink-3); position: relative;
+}
+nav#nav .navbtn svg { width: 22px; height: 22px; }
+nav#nav .navbtn.on { color: var(--brand); font-weight: 600; }
+nav#nav .navbtn .nbadge {
+  position: absolute; top: 4px; left: 50%; margin-left: 10px;
+  background: var(--bad); color: #fff; font-size: 10px; font-weight: 600;
+  border-radius: var(--r-full); min-width: 16px; height: 16px; line-height: 16px;
+  padding: 0 4px; text-align: center; box-shadow: 0 0 0 1.5px var(--card);
+}
+@media (prefers-color-scheme: dark) { nav#nav .navbtn .nbadge { color: #12171E; } }
+
+/* ================= 看板 ================= */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-3); padding: 14px 16px; }
+.tile .n { font-size: 28px; font-weight: 700; line-height: 1.1; }
+.tile .l { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+.tile .duo { display: flex; gap: 16px; }
+.tile .duo .n { font-size: 20px; }
+.tile .duo .l { font-size: 11px; }
+.dist { display: flex; height: 24px; border-radius: var(--r-1); overflow: hidden; gap: 2px; margin: 10px 0 10px; }
+.dist div { min-width: 4px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+
+/* ================= Segmented ================= */
+.seg {
+  display: flex; background: var(--chip-bg); border-radius: var(--r-2); padding: 3px;
+  margin-bottom: 12px;
+}
+.seg button {
+  flex: 1; height: 36px; border-radius: 8px; font-size: 14px; color: var(--ink-2);
+}
+.seg button.on { background: var(--card); color: var(--brand); font-weight: 600; box-shadow: var(--shadow-1); }
+
+/* ================= 回复卡 ================= */
+.quote {
+  border-left: 2px solid var(--brand-tint); padding-left: 10px;
+  font-size: 16px; line-height: 1.7; margin: 8px 0 6px;
+  white-space: pre-wrap; word-break: break-word;
+}
+@media (prefers-color-scheme: dark) { .quote { border-left-color: var(--brand-tint); } }
+.quote.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.fb-row { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 6px; }
+.fb-note { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+
+/* ================= 表单 ================= */
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
+.field label .req { color: var(--bad); }
+.field input, .field select, .field textarea {
+  font: inherit; font-size: 16px; width: 100%; height: 44px; padding: 0 14px;
+  border-radius: var(--r-2); border: 1px solid var(--line); background: var(--bg); color: var(--ink-1);
+}
+.field textarea { height: auto; min-height: 84px; padding: 10px 14px; resize: vertical; }
+.field input:focus, .field select:focus, .field textarea:focus {
+  border-color: var(--brand); border-width: 1.5px; outline: none;
+}
+.field .help { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+.field.error input { border-color: var(--bad); }
+.field.error .help { color: var(--bad); }
+.field input[readonly] { background: var(--chip-bg); color: var(--ink-2); }
+#sheet .field input, #sheet .field select { height: 48px; }
+.btn-danger { color: var(--bad); }
+
+/* ================= 开关 ================= */
+.switch { position: relative; width: 46px; height: 28px; flex: none; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; border-radius: var(--r-full); background: var(--line-strong); transition: .15s; pointer-events: none; }
+.switch span::after {
+  content: ""; position: absolute; width: 24px; height: 24px; border-radius: 50%;
+  background: #fff; top: 2px; left: 2px; transition: .15s; box-shadow: var(--shadow-2), 0 1px 3px rgba(0,0,0,.2);
+}
+.switch input:checked + span { background: var(--ok); }
+.switch input:checked + span::after { left: 20px; }
+.switch input:focus-visible + span { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* ================= Sheet / Modal ================= */
+#sheetWrap { position: fixed; inset: 0; z-index: 30; display: none; }
+#sheetWrap.show { display: block; }
+#sheetWrap .scrim { position: absolute; inset: 0; background: var(--scrim); }
+#sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; max-height: 88vh; overflow-y: auto;
+  background: var(--card); border-radius: var(--r-4) var(--r-4) 0 0; box-shadow: var(--shadow-3);
+  padding: 8px 20px calc(20px + env(safe-area-inset-bottom));
+  animation: up .2s ease-out;
+}
+@media (prefers-color-scheme: dark) { #sheet { background: var(--card-2); } }
+@keyframes up { from { transform: translateY(24px); opacity: .6; } }
+#sheet .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--ink-3); opacity: .3; margin: 4px auto 12px; }
+#sheet h2 { font-size: 17px; font-weight: 600; line-height: 1.3; margin-bottom: 4px; padding-right: 44px; }
+#sheet .close { position: absolute; top: 10px; right: 8px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink-2); }
+#sheet .sub { font-size: 12px; color: var(--ink-3); margin-bottom: 12px; }
+
+.fb-opts { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.fb-opts button {
+  height: 40px; padding: 0 14px; border-radius: var(--r-2);
+  border: 1px solid var(--line-strong); background: var(--card); font-size: 14px; color: var(--ink-1);
+}
+@media (prefers-color-scheme: dark) { .fb-opts button { background: var(--card-2); } }
+.fb-opts button.on { border-color: var(--brand); color: var(--brand); background: var(--brand-tint); font-weight: 600; }
+
+.status-rows { margin: 8px 0 4px; }
+.status-rows .srow { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.status-rows .srow:last-child { border-bottom: 0; }
+.status-rows .k { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.status-rows .v { font-size: 13px; color: var(--ink-2); margin-top: 2px; line-height: 1.6; }
+.gold-tag { display: inline-block; width: 3px; height: 14px; background: var(--accent-line); border-radius: 1px; margin-right: 8px; vertical-align: -2px; }
+
+/* ================= Toast ================= */
+#toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(72px + env(safe-area-inset-bottom)); z-index: 40;
+  max-width: 92%; display: none; align-items: center; gap: 10px;
+  background: #1C2B3A; color: #fff; border-radius: var(--r-2);
+  padding: 10px 16px; font-size: 14px; box-shadow: var(--shadow-3);
+}
+@media (prefers-color-scheme: dark) { #toast { background: var(--card-2); color: var(--ink-1); border: 1px solid var(--line-strong); } }
+#toast.show { display: flex; }
+#toast .undo { color: var(--accent-line); font-weight: 600; padding: 4px 8px; margin: -4px -8px -4px 0; }
+
+/* ================= 登录 ================= */
+#login {
+  position: fixed; inset: 0; z-index: 50; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px;
+}
+#login[hidden] { display: none; }
+/* 组件类里的 display（如 .btn-outline 的 inline-flex）会盖掉浏览器对 hidden 的
+   默认 display:none，导致「加载更多/自动分派」这类按钮藏不住。全局兜住。 */
+[hidden] { display: none !important; }
+#login .box { width: min(360px, 100%); text-align: center; }
+#login .goldline { width: 24px; height: 2px; background: var(--accent-line); margin: 0 auto 16px; }
+#login .firm { font-size: 22px; letter-spacing: .12em; color: var(--ink-1); margin-top: 16px; }
+#login .app { font-size: 13px; color: var(--ink-3); margin-top: 6px; }
+#login form { margin-top: 40px; text-align: left; }
+#login .tokwrap { position: relative; }
+#login .tokwrap svg.lock { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
+#login .tokwrap input { padding-left: 42px; padding-right: 48px; }
+#login .eye { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink-3); }
+#login .errline { color: var(--bad); font-size: 13px; min-height: 1.4em; margin: 8px 0 12px; }
+#login .foot { position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); font-size: 12px; color: var(--ink-3); }
+
+/* ================= 桌面端 ================= */
+@media (min-width: 900px) {
+  body { padding-bottom: 32px; padding-left: 232px; }
+  header#topbar, .capsule.mobile { display: none; }
+  nav#nav {
+    top: 0; bottom: 0; right: auto; width: 232px; flex-direction: column;
+    border-top: 0; border-right: 1px solid var(--line); padding: 24px 12px 16px;
+  }
+  nav#nav .brand { display: block; padding: 0 12px 20px; }
+  nav#nav .brand .word { font-size: 16px; color: var(--ink-1); display: block; margin-top: 10px; }
+  nav#nav .brand .app { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  nav#nav .brand .goldline { width: 24px; height: 1px; background: var(--accent-line); margin-top: 12px; }
+  nav#nav .navbtn {
+    flex: none; flex-direction: row; gap: 10px; justify-content: flex-start;
+    height: 44px; padding: 0 12px; border-radius: var(--r-2); font-size: 14px; color: var(--ink-2);
+  }
+  nav#nav .navbtn svg { width: 20px; height: 20px; }
+  nav#nav .navbtn.on { background: var(--brand-tint); color: var(--brand); }
+  nav#nav .navbtn .nbadge { position: static; margin-left: auto; box-shadow: none; }
+  .tile .n { font-size: 32px; }
+  #toast .undo { color: #8FB3DE; }
+  nav#nav .nav-foot { display: block; margin-top: auto; padding: 0 12px; }
+  nav#nav .nav-foot .capsule { margin: 0 0 10px; background: var(--chip-bg); color: var(--ink-1); cursor: pointer; }
+  main { padding: 28px 32px 48px; max-width: 780px; }
+  .page-title {
+    display: block; font-size: 17px; font-weight: 600; margin-bottom: 16px;
+    padding-top: 12px; border-top: 2px solid var(--accent-line);
+  }
+  #sheet {
+    left: 50%; right: auto; bottom: auto; top: 50%; transform: translate(-50%, -50%);
+    width: 480px; border-radius: 16px; animation: none; max-height: 86vh;
+  }
+  #sheet.wide { width: 560px; }
+  #sheet .grab { display: none; }
+  #toast { bottom: 32px; }
+  .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); }
+}
+@media (min-width: 1200px) {
+  main { max-width: 1024px; }
+  .tiles { grid-template-columns: repeat(5, 1fr); }
+  .board-split { display: grid; grid-template-columns: 7fr 5fr; gap: 10px; align-items: start; }
+  .board-split .tiles { grid-template-columns: 1fr 1fr; }
+  #groupList { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #groupList .card { margin-bottom: 0; }
+  #teamList { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #teamList .card { margin-bottom: 0; }
+}
+/* 角色门控：律师身份不渲染管理入口（服务端仍强制鉴权，这里只是少画） */
+body:not([data-role=admin]) .admin-only { display: none !important; }
+/* 检索条：几百条线索/群档案时的生存工具 */
+.filterbar { margin-bottom: 8px; }
+.searchwrap { display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  background: var(--card, #fff); border: 1px solid var(--line); border-radius: 10px; }
+.searchwrap .ico { width: 17px; height: 17px; color: var(--ink-2); flex: none; }
+.searchwrap input { flex: 1; border: 0; outline: 0; background: transparent;
+  min-height: 44px; font-size: 16px; color: var(--ink-1); }
+.chiprow { display: flex; gap: 6px; margin-top: 8px; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.chiprow::-webkit-scrollbar { display: none; }
+.fchip { position: relative; flex: none; padding: 6px 12px; border-radius: 999px;
+  font-size: 13px; border: 1px solid var(--line); background: var(--card, #fff);
+  color: var(--ink-2); min-height: 34px; }
+/* 视觉尺寸保持紧凑，热区补足到易点范围（横向滚动条上的小胶囊尤其难点） */
+.fchip::after { content: ""; position: absolute; inset: -6px; }
+.fchip.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+  /* 深色下 --brand 是浅蓝，白字压上去只有约 2.2:1，选中态基本读不出来 */
+  .fchip.on { background: var(--brand-btn); border-color: var(--brand-btn); color: var(--brand-btn-ink); }
+}
+:root[data-theme=dark] .fchip.on {
+  background: var(--brand-btn); border-color: var(--brand-btn); color: var(--brand-btn-ink);
+}
+/* 优先级标识：P0 必须一眼跳出来 */
+.pchip { display:inline-flex; align-items:center; gap:4px; padding:2px 9px;
+  border-radius:999px; font-size:12px; font-weight:700; letter-spacing:.02em; }
+.pchip.p0 { background: var(--bad-bg, #FBEAEA); color: var(--bad); }
+.pchip.p1 { background: var(--warn-bg); color: var(--warn); }
+.pchip.p2 { background: var(--chip-bg); color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M9 13.5l2 2 4-4.5"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-6 4V6z"/><path d="M8 9h8M8 12h5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-8M12 20V5M19 20v-6"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3.5 19.5c0-3.2 2.4-5.3 5.5-5.3s5.5 2.1 5.5 5.3"/><circle cx="17" cy="9.5" r="2.4"/><path d="M17.5 14.4c2 .3 3.5 1.9 3.5 4.1"/></symbol>
+  <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M9 10h6M9 14h6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4 18-7z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V13"/><path d="M12 16.5h.01"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 2.8V11c0 4.4-2.9 7.8-7 9-4.1-1.2-7-4.6-7-9V5.8L12 3z"/><path d="M9.3 12l1.9 1.9 3.5-3.8"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1 1-4L16.5 4.5z"/></symbol>
+  <symbol id="i-thumb" viewBox="0 0 24 24"><path d="M4 11h3v9H4z"/><path d="M7 19.2V11l3.6-6.8c1.1 0 2 .9 2 2V10h5.1c1.1 0 1.9 1 1.7 2l-1 5.6c-.2.9-.9 1.5-1.8 1.5H9.4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+  <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/><path d="M4 4l16 16"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-handoff" viewBox="0 0 24 24"><path d="M4 20v-7a4 4 0 0 1 4-4h11"/><path d="M15 4.5L19.5 9 15 13.5"/></symbol>
+  <symbol id="i-silence" viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-6 4V6z"/><path d="M5 4l15 15"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M9 13h.01M15 13h.01"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3v4h-4"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 3c.5 3-1.5 4-3 5.5S6.5 12 6.5 14a5.5 5.5 0 0 0 11 0c0-2.5-1.5-4-3-6-1 1.5-2 2-2.5 1.5C11.4 8.8 12 5.5 12 3z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6 3h3l2 5-2.5 1.5a12 12 0 0 0 5 5L15 12l5 2v3a2 2 0 0 1-2.2 2A17 17 0 0 1 4 5.2 2 2 0 0 1 6 3z"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="M15 8l4 4-4 4M19 12H9"/></symbol>
+</svg>
+
+<!-- ================= 登录 ================= -->
+<div id="login" hidden>
+  <div class="box">
+    <span class="seal lg serif">松沪</span>
+    <div class="goldline" style="margin-top:16px;margin-bottom:0"></div>
+    <div class="firm serif">上海松沪律师事务所</div>
+    <div class="app">AI 响应助手 · 管理控制台</div>
+    <form onsubmit="return doLogin(event)">
+      <div class="field">
+        <label for="tokenInput">访问令牌</label>
+        <div class="tokwrap">
+          <svg class="ico lock"><use href="#i-lock"/></svg>
+          <input id="tokenInput" type="password" autocomplete="off" placeholder="请输入访问令牌">
+          <button type="button" class="eye" onclick="toggleEye()" aria-label="显示令牌">
+            <svg class="ico" id="eyeIco"><use href="#i-eye"/></svg>
+          </button>
+        </div>
+        <div class="help">令牌由系统管理员在部署时提供，输入一次即可，下次自动进入</div>
+      </div>
+      <div class="errline" id="loginErr"></div>
+      <button type="submit" class="btn-primary xl" id="loginBtn">进入控制台</button>
+    </form>
+  </div>
+  <div class="foot">仅限所内授权人员使用</div>
+</div>
+
+<!-- ================= 顶部栏（手机） ================= -->
+<header id="topbar">
+  <span class="seal sm serif">松</span>
+  <span class="word serif">松沪律所</span>
+  <span class="app">AI 助手</span>
+  <button class="capsule mobile" id="capsule" onclick="openStatusPanel()">
+    <span class="dot" id="capDot" style="background:#8FB3DE"></span><span id="capText">连接中…</span>
+  </button>
+</header>
+
+<div id="banner"></div>
+
+<main>
+  <section id="tab-todo">
+    <div class="page-title">待办</div>
+    <div id="todoList"></div>
+  </section>
+
+  <section id="tab-leads" hidden>
+    <div class="page-title">线索</div>
+    <div class="seg" style="margin-bottom:10px">
+      <button id="segLeadNew" class="on" onclick="setLeadView('new')">待跟进</button>
+      <button id="segLeadDoing" onclick="setLeadView('contacted')">跟进中</button>
+      <button id="segLeadAll" onclick="setLeadView('')">全部</button>
+    </div>
+    <div class="filterbar">
+      <div class="searchwrap">
+        <svg class="ico"><use href="#i-search"/></svg>
+        <input id="leadQ" type="search" placeholder="搜电话 / 姓名 / 案由 / 备注"
+               oninput="debouncedLeadSearch()">
+      </div>
+      <div class="chiprow" id="leadFilters">
+        <button class="fchip" data-f="priority" data-v="P0" onclick="toggleLeadFilter(this)">P0 强意愿</button>
+        <button class="fchip" data-f="priority" data-v="P1" onclick="toggleLeadFilter(this)">P1</button>
+        <button class="fchip" data-f="source" data-v="dy" onclick="toggleLeadFilter(this)">抖音</button>
+        <button class="fchip" data-f="source" data-v="kf" onclick="toggleLeadFilter(this)">微信客服</button>
+        <button class="fchip" data-f="source" data-v="group" onclick="toggleLeadFilter(this)">群聊</button>
+      </div>
+    </div>
+    <div class="meta" id="leadCount" style="margin:2px 2px 10px"></div>
+    <div id="leadList"></div>
+    <button class="btn-outline" id="leadMore" hidden style="width:100%;margin-bottom:10px"
+            onclick="loadLeads(true)">加载更多</button>
+    <input type="file" id="kzFile" accept=".csv,.xlsx,.xlsm" hidden onchange="uploadKezi(this)">
+    <button class="btn-outline admin-only" style="width:100%"
+            onclick="document.getElementById('kzFile').click()">
+      <svg class="ico"><use href="#i-plus"/></svg>导入平台客资表
+    </button>
+  </section>
+
+  <section id="tab-log" hidden>
+    <div class="page-title">记录</div>
+    <div class="seg">
+      <button id="segReplies" class="on" onclick="setLogView('replies')">AI 回复</button>
+      <button id="segDecisions" onclick="setLogView('decisions')">全部判断</button>
+    </div>
+    <div id="logList"></div>
+  </section>
+
+  <section id="tab-board" hidden>
+    <div class="page-title">看板</div>
+    <!-- 时间切换：管理员看的是「今天怎么样」「这个月怎么样」。
+         全时段累计只在开张第一天有意义，之后它越来越像一个常数。 -->
+    <div class="row" style="gap:6px;margin-bottom:10px;align-items:center">
+      <button class="chip" data-range="today" onclick="setRange('today')">今天</button>
+      <button class="chip" data-range="7d" onclick="setRange('7d')">近 7 天</button>
+      <button class="chip" data-range="month" onclick="setRange('month')">本月</button>
+      <button class="chip" data-range="all" onclick="setRange('all')">全部</button>
+      <!-- 管理员的主视图其实是那张表，见 exportLeads()。
+           注释必须写成 HTML 注释：这一段是静态 HTML，不是 JS 模板字符串，
+           写成 ${''/* */} 会被原样打印到按钮上（已经在真机上丢过一次脸）。 -->
+      <button class="btn-outline admin-only" style="margin-left:auto"
+        onclick="exportLeads()">
+        <svg class="ico"><use href="#i-clipboard"/></svg>导出客户档案
+      </button>
+    </div>
+    <!-- 只在真有事要人看时出现：语音/图片消息、紧急情形。
+         常驻的待办列表会让管理员一打开就觉得「这些都要我处理？」——角色搞反了。 -->
+    <div class="card" style="margin-bottom:10px;border-left:3px solid var(--warn)"
+         id="pendingCard" hidden>
+      <div class="eyebrow" style="margin:0 0 2px">需要人看一眼</div>
+      <div class="meta">AI 读不了的消息（语音/图片）和紧急情形，其余都已自动派单</div>
+      <div id="pendingList" style="margin-top:8px"></div>
+    </div>
+    <div class="card admin-only" style="margin-bottom:10px" id="staffCard" hidden>
+      <div class="eyebrow" style="margin:0 0 2px">员工处理情况</div>
+      <div class="meta">分到几单、跟进了几单、多久跟上——线索的价值随时间塌得很快</div>
+      <div id="staffTable" style="margin-top:8px"></div>
+    </div>
+    <div class="card" style="margin-bottom:10px">
+      <div class="eyebrow" style="margin:0 0 2px">线索转化</div>
+      <div class="meta">从 AI 首轮筛查到成交的全过程</div>
+      <div class="row" style="margin-top:10px;flex-wrap:nowrap;gap:0" id="funnel"></div>
+      <div class="meta" id="funnelSrc" style="margin-top:6px"></div>
+    </div>
+    <div class="board-split">
+      <div class="tiles" id="tiles"></div>
+      <div class="card" style="margin-top:10px">
+        <div class="eyebrow" style="margin:0 0 2px">消息三分类分布</div>
+        <div class="meta">AI 对每条客户消息作出的三种处理</div>
+        <div class="dist" id="dist"></div>
+        <div class="legend" id="distLegend"></div>
+      </div>
+    </div>
+    <div class="card admin-only" style="margin-top:10px" id="lawyerBoardCard" hidden>
+      <div class="eyebrow" style="margin:0 0 2px">分律师负载</div>
+      <div class="meta">在办 = 待跟进 + 已联系；P0 = 待联系的强意愿单</div>
+      <div id="lawyerBoard" style="margin-top:8px"></div>
+    </div>
+    <div class="meta" id="boardFoot" style="margin-top:10px"></div>
+  </section>
+
+  <section id="tab-groups" hidden>
+    <div class="page-title">会话管理</div>
+    <div class="filterbar">
+      <div class="searchwrap">
+        <svg class="ico"><use href="#i-search"/></svg>
+        <input id="groupQ" type="search" placeholder="搜名称 / 律师 / 案由 / 电话"
+               oninput="debouncedGroupSearch()">
+      </div>
+      <div class="chiprow" id="groupFilters">
+        <button class="fchip" data-v="dy" onclick="toggleGroupFilter(this)">抖音</button>
+        <button class="fchip" data-v="kf" onclick="toggleGroupFilter(this)">微信客服</button>
+        <button class="fchip" data-v="group" onclick="toggleGroupFilter(this)">群聊</button>
+      </div>
+    </div>
+    <div class="meta" id="groupCount" style="margin:2px 2px 10px"></div>
+    <div id="groupList"></div>
+    <button class="btn-outline" id="groupMore" hidden style="width:100%;margin-bottom:10px"
+            onclick="renderGroups(true)">加载更多</button>
+    <button class="btn-outline" style="width:100%" onclick="editGroup(null)">
+      <svg class="ico"><use href="#i-plus"/></svg>新增群档案
+    </button>
+  </section>
+
+  <section id="tab-team" hidden>
+    <div class="page-title">团队</div>
+    <div class="meta" style="margin-bottom:12px">
+      名册里有在班律师时，新线索按「在办最少」自动派单；名册为空则一切照旧。
+    </div>
+    <div id="teamList"></div>
+    <button class="btn-outline" style="width:100%" onclick="editLawyer(null)">
+      <svg class="ico"><use href="#i-plus"/></svg>添加律师
+    </button>
+    <button class="btn-outline" id="bulkAssignBtn" hidden style="width:100%;margin-top:8px"
+            onclick="askBulkAssign()">
+      <svg class="ico"><use href="#i-refresh"/></svg>自动分派未指派线索<span id="bulkAssignN"></span>
+    </button>
+  </section>
+
+  <!-- 知识库：AI 答客户时会引用的所内口径。**只有「已启用」的条目会被引用**，
+       导入和机器提炼一律先落「待审核」——条目就是话术，一条写错的口径会被
+       AI 一字不差地重复几百遍，所以必须有人过一眼才对客户生效。 -->
+  <section id="tab-kb" hidden>
+    <div class="page-title">知识库</div>
+    <div class="meta" style="margin-bottom:10px">
+      所内统一口径。AI 遇到相近的问题会照这里的说法答；审核通过后才生效。
+    </div>
+    <div class="seg" style="margin-bottom:10px">
+      <button id="segKbDraft" class="on" onclick="setKbView('draft')">待审核<span id="kbNDraft"></span></button>
+      <button id="segKbOk" onclick="setKbView('approved')">已启用<span id="kbNOk"></span></button>
+      <button id="segKbOff" onclick="setKbView('retired')">已停用<span id="kbNOff"></span></button>
+    </div>
+    <div id="kbList"></div>
+    <button class="btn-outline" style="width:100%" onclick="editKnowledge(null)">
+      <svg class="ico"><use href="#i-plus"/></svg>新增一条口径
+    </button>
+    <button class="btn-outline" style="width:100%;margin-top:8px" onclick="openKbImport()">
+      <svg class="ico"><use href="#i-plus"/></svg>批量粘贴导入
+    </button>
+  </section>
+</main>
+
+<nav id="nav">
+  <div class="brand">
+    <span class="seal md serif">松沪</span>
+    <span class="word serif">松沪律所</span>
+    <span class="app">AI 响应助手</span>
+    <div class="goldline"></div>
+  </div>
+  <!-- 顺序即优先级。看板在最前：管理员每天第一眼要看的是「今天怎么样、
+       谁在跟、跟得如何」。AI 对话记录挪到最后并改名「AI 质检」——
+       律所方原话「不想看到那么多 AI 对话，那么乱」：它是偶尔抽查的工具，
+       不是每天要读的信息流，摆在第三位就等于天天在请人去读它。 -->
+  <button class="navbtn on" id="nav-board" onclick="setTab('board', true)">
+    <svg class="ico"><use href="#i-chart"/></svg><span>看板</span>
+  </button>
+  <button class="navbtn" id="nav-leads" onclick="setTab('leads', true)" style="position:relative">
+    <svg class="ico"><use href="#i-flame"/></svg><span>线索</span><span class="nbadge" id="leadBadge" hidden></span>
+  </button>
+  <!-- 「待办」不再是一个常驻页签（律所方 2026-08）：线索自动派单，
+       没有需要人工排队认领的东西。但它兜住的那几类**不能丢**——语音/图片
+       消息 AI 读不了、紧急情形需要人当场看一眼。这些改为在看板顶部
+       只在「有」的时候出现一张卡（renderPending），没有就完全不占地方。 -->
+  <button class="navbtn admin-only" id="nav-groups" onclick="setTab('groups', true)">
+    <svg class="ico"><use href="#i-users"/></svg><span>会话</span>
+  </button>
+  <button class="navbtn admin-only" id="nav-team" onclick="setTab('team', true)">
+    <svg class="ico"><use href="#i-briefcase"/></svg><span>团队</span>
+  </button>
+  <button class="navbtn admin-only" id="nav-kb" onclick="setTab('kb', true)" style="position:relative">
+    <svg class="ico"><use href="#i-book"/></svg><span>知识库</span><span class="nbadge" id="kbBadge" hidden></span>
+  </button>
+  <button class="navbtn" id="nav-log" onclick="setTab('log', true)">
+    <svg class="ico"><use href="#i-message"/></svg><span>AI 质检</span>
+  </button>
+  <div class="nav-foot">
+    <button class="capsule" onclick="openStatusPanel()" style="width:100%">
+      <span class="dot" id="capDot2" style="background:#8FB3DE"></span><span id="capText2">连接中…</span>
+    </button>
+    <button class="btn-text muted" onclick="logout()"><svg class="ico"><use href="#i-logout"/></svg>退出登录</button>
+  </div>
+</nav>
+
+<div id="sheetWrap">
+  <div class="scrim" onclick="closeSheet()"></div>
+  <div id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1">
+    <div class="grab"></div>
+    <button class="close" onclick="closeSheet()" aria-label="关闭"><svg class="ico"><use href="#i-x"/></svg></button>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* ============ 术语映射（P0-1：未知枚举一律「—」） ============ */
+const ZH = {
+  action: { answer: "直接回答", handoff: "安抚承接", silence: "保持沉默" },
+  category: { general_law: "通用法律", case_status: "案件进展", fee: "费用咨询",
+              urgent: "紧急", contact: "找人/催复", chitchat: "闲聊",
+              greeting: "开场引导", other: "其他" },
+  status: { signed: "已成交", prospect: "咨询中" },
+  todo: { pending: "待跟进", sent: "已提醒", escalated: "已提醒第二责任人", done: "已处理" },
+};
+const zh = (map, key) => (map && map[key]) || "—";
+const ico = (name, cls) => `<svg class="ico ${cls || ""}"><use href="#i-${name}"/></svg>`;
+
+/* localStorage 在部分 WebView/隐私模式下会抛异常：全部经安全封装，失败退内存 */
+const _mem = {};
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return _mem[k] ?? null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} _mem[k] = v; }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} delete _mem[k]; }
+
+let token = lsGet("admin_token") || "";
+/* 深链参数：t=登录令牌（不进服务器日志故走 # 片段）、g=直接打开的会话。
+   交接单里那条「看完整对话」就靠 g —— 律师点一下直达，不用登录翻找。 */
+const _hash = new URLSearchParams(location.hash.slice(1));
+/* /g/<会话id> 会把它注入到 window（见 console/api.py）——企业微信会把 `#`
+   转义成 %23，靠片段传参在真机上直接 404，所以主路径是普通路径段。
+   仍兼容旧的 #g= 链接：已经发出去的交接单里还是那个形式。 */
+const deepLinkGroup = window.__deepLinkGroup || _hash.get("g") || "";
+if (_hash.get("t")) {
+  token = decodeURIComponent(_hash.get("t"));
+  lsSet("admin_token", token);
+}
+if (location.hash) {
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+}
+let me = null; // /console/me 的结果：{role, userid, name}
+let tab = "board", logView = "replies", groupsCache = [], loadedOnce = {};
+let lastSuccess = null, offline = false, logReq = 0;
+const expanded = new Set(), lastSig = {}, repliesFb = {};
+
+/* ============ 基础设施 ============ */
+async function api(path, opts = {}) {
+  /* 带 body 却没写 Content-Type 时自动补 JSON。FastAPI 会把没有类型的 body
+     当成表单，直接 422——而前端只会看到一个「操作失败」，看不出原因。
+     知识库那四个按钮（通过/停用/改写/新增）就是这么全军覆没的：
+     功能都在，接口都对，就是一个请求头没写。
+     显式写了的（比如批量导入的 text/plain）优先，不被覆盖。 */
+  const auto = (typeof opts.body === "string" && !/^\s*[\w-]+\//.test(opts.body))
+    ? { "Content-Type": "application/json" } : {};
+  opts.headers = Object.assign({ "X-Admin-Token": token }, auto, opts.headers || {});
+  let r;
+  try {
+    r = await fetch("/console" + path, opts);
+  } catch (e) { setOffline(true); throw e; }
+  if (r.status === 401) {
+    showLogin("登录已过期或令牌已更换，请重新输入访问令牌");
+    throw new Error("401");
+  }
+  if (!r.ok) {
+    /* 带上服务端 detail：否则「推送失败」永远提示「检查接待人」，
+       而真实原因可能是影子模式、文件缺列、越权等完全不同的事 */
+    let detail = "";
+    try { detail = (await r.json()).detail || ""; } catch (e) {}
+    const err = new Error("HTTP " + r.status);
+    err.detail = detail;
+    err.status = r.status;
+    throw err;
+  }
+  setOffline(false);
+  lastSuccess = new Date();
+  return r.json();
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function fmtLast(t) {
+  /* 跨天后只显示 22:10 会让人分不清是今天还是昨天 */
+  const now = new Date();
+  const sameDay = t.getFullYear() === now.getFullYear()
+    && t.getMonth() === now.getMonth() && t.getDate() === now.getDate();
+  return (sameDay ? "" : dayLabel(t.toISOString()) + " ") + fmtHM(t);
+}
+function fmtHM(t) {
+  return String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
+}
+function fmtFull(iso) {
+  const t = new Date(iso);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")} ${fmtHM(t)}`;
+}
+function ago(iso) {
+  if (!iso) return "";
+  const t = new Date(iso), s = (Date.now() - t.getTime()) / 1000;
+  if (s < 60) return "刚刚";
+  if (s < 3600) return Math.floor(s / 60) + " 分钟前";
+  if (s < 86400) return Math.floor(s / 3600) + " 小时前";
+  return `${t.getMonth() + 1}月${t.getDate()}日 ${fmtHM(t)}`;
+}
+/* P2-10 相对时间点击切换完整时间 */
+function timeEl(iso) {
+  return `<button class="time" data-iso="${esc(iso || "")}" onclick="flipTime(this)">${ago(iso)}</button>`;
+}
+function flipTime(el) {
+  const iso = el.dataset.iso;
+  if (!iso) return;
+  el.textContent = el.dataset.flipped ? ago(iso) : fmtFull(iso);
+  el.dataset.flipped = el.dataset.flipped ? "" : "1";
+}
+function dayLabel(iso) {
+  const t = new Date(iso), now = new Date();
+  const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const d = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  const diff = Math.round((d0 - d) / 86400000);
+  if (diff === 0) return "今天";
+  if (diff === 1) return "昨天";
+  return `${t.getMonth() + 1}月${t.getDate()}日`;
+}
+function groupName(gid) {
+  const g = groupsCache.find(x => x.group_id === gid);
+  if (g && g.name) return g.name;
+  return gid.length > 12 ? gid.slice(0, 12) + "…" : gid;
+}
+function skeleton() {
+  return Array(3).fill(0).map(() => `
+    <div class="card skel" aria-hidden="true">
+      <div class="bar" style="width:40%"></div>
+      <div class="bar" style="width:90%"></div>
+      <div class="bar" style="width:70%"></div>
+    </div>`).join("");
+}
+function errCard(retryFn) {
+  return `
+    <div class="card err-card">
+      ${ico("alert")}
+      <p>暂时连不上服务器，请检查网络后重试</p>
+      <button class="btn-outline" onclick="${retryFn}()">${ico("refresh")}重试</button>
+    </div>`;
+}
+function emptyState(icon, t1, t2) {
+  return `<div class="empty">${ico(icon)}<div class="t1">${t1}</div><div class="t2">${t2}</div></div>`;
+}
+
+/* ============ Toast（P0-2） ============ */
+let toastTimer = null, undoFn = null;
+function toast(msg, ok = true, undo = null) {
+  const el = document.getElementById("toast");
+  clearTimeout(toastTimer); undoFn = undo;
+  el.innerHTML = ico(ok ? "check" : "alert") + `<span>${esc(msg)}</span>` +
+    (undo ? `<button class="undo" onclick="runUndo()">撤销</button>` : "");
+  el.classList.add("show");
+  toastTimer = setTimeout(() => el.classList.remove("show"), undo ? 8000 : 2500);
+}
+async function runUndo() {
+  document.getElementById("toast").classList.remove("show");
+  if (undoFn) { const f = undoFn; undoFn = null; try { await f(); } catch (e) { toast("操作失败，请重试", false); } }
+}
+
+/* ============ Sheet：焦点圈禁 + 还焦 + 脏表单保护 ============ */
+let sheetDirty = false, sheetReturnFocus = null;
+function sheetOpen() { return document.getElementById("sheetWrap").classList.contains("show"); }
+function _setInert(on) {
+  for (const id of ["topbar", "nav", "banner"]) {
+    const el = document.getElementById(id);
+    if (el) try { el.inert = on; } catch (e) {}
+  }
+  const m = document.querySelector("main");
+  if (m) try { m.inert = on; } catch (e) {}
+}
+function openSheet(html, wide = false) {
+  sheetDirty = false;
+  sheetReturnFocus = document.activeElement;
+  const body = document.getElementById("sheetBody");
+  body.innerHTML = html;
+  const h2 = body.querySelector("h2");
+  if (h2) h2.id = "sheetTitle";
+  document.getElementById("sheet").classList.toggle("wide", wide);
+  document.getElementById("sheetWrap").classList.add("show");
+  document.body.style.overflow = "hidden";
+  _setInert(true);
+  document.getElementById("sheet").focus();
+}
+/* 有未保存输入时，误触遮罩/Esc 先确认再关（P0 级防丢单） */
+function closeSheet() {
+  if (sheetDirty && !document.getElementById("discardBar")) {
+    const bar = document.createElement("div");
+    bar.id = "discardBar";
+    bar.style.cssText = "display:flex;align-items:center;gap:10px;margin-top:14px;" +
+      "padding:12px 14px;background:var(--warn-bg);border-radius:10px";
+    bar.innerHTML = `<span style="font-size:14px;color:var(--warn)">放弃已填写的内容？</span>
+      <button class="btn-text muted" style="margin-left:auto;min-height:36px"
+        onclick="this.parentNode.remove()">继续填写</button>
+      <button class="btn-text" style="min-height:36px;color:var(--bad)"
+        onclick="forceCloseSheet()">放弃</button>`;
+    document.getElementById("sheetBody").appendChild(bar);
+    bar.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  forceCloseSheet();
+}
+function forceCloseSheet() {
+  sheetDirty = false;
+  document.getElementById("sheetWrap").classList.remove("show");
+  document.body.style.overflow = "";
+  _setInert(false);
+  if (sheetReturnFocus && sheetReturnFocus.isConnected) {
+    try { sheetReturnFocus.focus(); } catch (e) {}
+  }
+  sheetReturnFocus = null;
+}
+document.getElementById("sheetBody").addEventListener("input", () => { sheetDirty = true; });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && sheetOpen()) { closeSheet(); return; }
+  if (e.key === "Tab" && sheetOpen()) {
+    const els = document.getElementById("sheet").querySelectorAll(
+      "button, input, select, textarea, [tabindex]:not([tabindex='-1'])");
+    const list = Array.from(els).filter(el => !el.disabled && el.offsetParent !== null);
+    if (!list.length) return;
+    const first = list[0], last = list[list.length - 1];
+    if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+    else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+  }
+});
+
+/* ============ 登录 ============ */
+function showLogin(msg) {
+  document.getElementById("loginErr").textContent = msg || "";
+  document.getElementById("login").hidden = false;
+}
+function toggleEye() {
+  const inp = document.getElementById("tokenInput");
+  const isPw = inp.type === "password";
+  inp.type = isPw ? "text" : "password";
+  document.getElementById("eyeIco").innerHTML = `<use href="#i-${isPw ? "eyeoff" : "eye"}"/>`;
+}
+function applyRole() {
+  document.body.dataset.role = me ? me.role : "";
+  // 律师身份若停在管理页（如上次会话是管理员），拉回待办
+  if (me && me.role !== "admin" && (tab === "groups" || tab === "team")) setTab("leads");
+}
+async function whoami() {
+  me = await api("/me");
+  applyRole();
+}
+async function doLogin(ev, retried = false) {
+  if (ev) ev.preventDefault();
+  const btn = document.getElementById("loginBtn");
+  token = document.getElementById("tokenInput").value.trim();
+  btn.disabled = true; btn.textContent = "验证中…";
+  try {
+    await whoami();
+    lsSet("admin_token", token);
+    document.getElementById("login").hidden = true;
+    refresh();
+    if (!lsGet("help_seen")) {
+      lsSet("help_seen", "1");
+      setTimeout(openStatusPanel, 400);
+    }
+  } catch (e) {
+    /* 报错要说真话：升级重启大约十几秒，那期间的失败跟「令牌错了」「没网」
+       是三件完全不同的事，混成一句「连不上服务器」会让人去查根本没问题的地方。
+       网络类失败自动重试一次——重启窗口通常几秒就过去了，不该让人自己猜。 */
+    const st = e.status || 0;
+    if (st === 401 || st === 403 || String(e.message) === "401") {
+      showLogin("令牌不正确，请核对后重试。如遗忘请联系系统管理员");
+    } else if (st >= 500) {
+      showLogin("服务器正在重启（多半是在自动升级），十几秒后再点一次就好");
+    } else if (!st && !retried) {
+      showLogin("正在重试……");
+      btn.textContent = "重试中…";
+      await new Promise(r => setTimeout(r, 3000));
+      return doLogin(null, true);
+    } else {
+      /* 带上真实原因：光说「连不上」时排查过一整轮网络，而真凶可能是
+         某个状态码或浏览器的 Load failed——这行字省下的是几个来回。 */
+      const why = st ? `服务器返回 ${st}` : (e.message || "请求未送达");
+      showLogin(`暂时连不上服务器（${why}），请把这行字发给管理员`);
+    }
+  }
+  btn.disabled = false; btn.textContent = "进入控制台";
+  return false;
+}
+function logout() {
+  lsDel("admin_token"); token = ""; me = null;
+  document.body.dataset.role = "";
+  forceCloseSheet(); showLogin("");
+  toast("已退出登录");
+}
+
+/* ============ 状态面板（兼帮助 P1-6） ============ */
+let healthCache = null;
+function openStatusPanel() {
+  const h = healthCache || {};
+  const modeTxt = h.mode === "live"
+    ? "正式模式——AI 会自动在客户群内发送回复"
+    : "影子模式——演练中：AI 只起草回复供内部查看，不会真的发进客户群";
+  const llmTxt = h.llm && h.llm !== "rules-only"
+    ? "AI 引擎正常" : "规则模式——AI 引擎未接入，当前按预设规则运行";
+  const qTxt = h.queued ? `${h.queued} 条` : "畅通";
+  /* 通道是并列的多条进线口，逐条报状态——只说「已接入/未接入」看不出缺哪条 */
+  const chans = [
+    h.kf ? "微信客服 ✓（扫码、腾讯地图「联系商家」都走这条）" : "微信客服 ✗ 未接入",
+    h.douyin ? "抖音私信 ✓" : "抖音私信 ✗ 未接入（需开放平台权限过审）",
+  ];
+  const kfTxt = chans.join("；");
+  openSheet(`
+    <h2><span class="gold-tag"></span>系统状态</h2>
+    <div class="status-rows">
+      <div class="srow">
+        <div class="k">运行模式</div>
+        <div class="v">${esc(modeTxt)}</div>
+        <button class="btn-outline admin-only" style="margin-top:8px" onclick="askSwitchMode()">
+          ${h.mode === "live" ? "切回影子模式（停止对外发言）" : "切换到正式模式"}
+        </button>
+      </div>
+      ${me && me.userid ? `<div class="srow"><div class="k">当前身份</div>
+        <div class="v">${esc(me.name)}（${me.role === "admin" ? "管理员" : "律师"}）</div></div>` : ""}
+      <div class="srow"><div class="k">AI 引擎</div><div class="v">${esc(llmTxt)}</div></div>
+      <div class="srow"><div class="k">接入通道</div><div class="v">${esc(kfTxt)}</div>
+        ${h.kf ? `<button class="btn-outline admin-only" style="margin-top:8px"
+          onclick="openKfQr()">${ico("phone")}获取客户进线二维码</button>` : ""}
+      </div>
+      <div class="srow"><div class="k">待处理队列</div><div class="v">${esc(qTxt)}</div></div>
+      <div class="srow"><div class="k">后台处理线程</div><div class="v">${
+        h.worker_alive === false
+          ? `<b style="color:var(--danger)">已停止 —— 消息进得来但没人处理，所有客户都收不到回复</b>`
+          : (h.worker_idle_seconds > 90
+              ? `<b style="color:var(--warn,#E0A458)">${Math.round(h.worker_idle_seconds)} 秒没动静，多半卡在某个外部接口上</b>`
+              : `正常（${Math.round(h.worker_idle_seconds || 0)} 秒前刚跑过一轮）`)
+      }</div></div>
+      ${h.kf ? `<div class="srow admin-only"><div class="k">会话转接</div>
+        <div class="v">把客户直接交给律师在原窗口接着聊，不用打电话。<br>
+          要维护的名单只有两份：<b>这里的律师名册</b> 和 <b>企微后台「升级服务」的范围</b>，
+          两份保持一致就行。</div>
+        <button class="btn-primary" style="margin-top:8px" onclick="checkHandoff()">
+          ${ico("users")}检查两份名单是否一致
+        </button>
+        <button class="btn-outline" style="margin-top:8px" onclick="addServicers()">
+          ${ico("refresh")}立即同步接待人
+        </button>
+        <div id="hoResult" class="meta" style="margin-top:8px"></div>
+      </div>` : ""}
+      <div class="srow admin-only"><div class="k">客户告知</div>
+        <div class="v">客户在这里讲的是欠薪、离婚、伤情、家人有没有被拘留，
+          我们还会向他要手机号。按《个人信息保护法》，处理前要告诉他：谁在处理、
+          用来干什么、想删找谁。<br>
+          <b>这句话由您粘进企微后台的「欢迎语」</b>——一个窗口只该有一个人在说话，
+          而且那是律所署名的告知，比 AI 逐句生成的更经得起看。</div>
+        <button class="btn-outline" style="margin-top:8px" onclick="copyNotice()">
+          ${ico("clipboard")}复制告知文案
+        </button>
+      </div>
+      <div class="srow admin-only"><div class="k">访问令牌</div>
+        <div class="v">换成一句记得住的话，或复制免输入链接存成书签</div>
+        <button class="btn-outline" style="margin-top:8px" onclick="copyLoginLink()">
+          ${ico("clipboard")}复制免输入登录链接
+        </button>
+        <button class="btn-outline" style="margin-top:8px" onclick="askChangeToken()">
+          ${ico("lock")}修改访问令牌
+        </button>
+      </div>
+      <div class="srow admin-only"><div class="k">程序版本</div>
+        <div class="v" id="verLine">${h.commit ? esc(h.commit) : "—"}</div>
+        <button class="btn-outline" style="margin-top:8px" onclick="askUpdate()">
+          ${ico("refresh")}升级到最新版
+        </button>
+      </div>
+    </div>
+    <div class="eyebrow">使用说明</div>
+    <div class="status-rows">
+      <div class="srow"><div class="k">${ico("clipboard")}待办</div><div class="v">AI 先稳住了客户，这里列出需要您接手的事项</div></div>
+      <div class="srow"><div class="k">${ico("flame")}线索</div><div class="v">客户留了联系方式或想约面谈时，AI 整理好的交接单，可直接拨号跟进</div></div>
+      <div class="srow"><div class="k">${ico("message")}记录</div><div class="v">AI 说过的每句话都在这里，点「有帮助」或「需修正」能让它越来越像您</div></div>
+      <div class="srow"><div class="k">${ico("chart")}看板</div><div class="v">AI 的工作量与质量总览</div></div>
+      <div class="srow"><div class="k">${ico("users")}会话</div><div class="v">全部客户会话档案：控制 AI 开关、承办律师与接入通道</div></div>
+    </div>
+    <button class="btn-text muted" onclick="logout()" style="margin-top:8px">${ico("logout")}退出登录</button>
+  `);
+}
+/* 客户进线二维码：扫码即进咨询窗口，不是加好友 */
+async function openKfQr() {
+  openSheet(`<h2>客户进线二维码</h2><div id="qrBody">${skeleton()}</div>`);
+  let accounts = [];
+  try {
+    accounts = (await api("/diagnostics")).kf.accounts || [];
+  } catch (e) {
+    document.getElementById("qrBody").innerHTML = "<p class='meta'>暂时取不到客服账号，请稍后重试</p>";
+    return;
+  }
+  if (!accounts.length) {
+    document.getElementById("qrBody").innerHTML =
+      "<p class='meta'>还没有客服账号。请在企微后台「客户与上下游 → 微信客服」里创建。</p>";
+    return;
+  }
+  /* 图片带令牌只能走 fetch → blob（<img src> 不会带自定义请求头） */
+  const parts = await Promise.all(accounts.map(async a => {
+    let src = "";
+    try {
+      const r = await fetch("/console/kf/qrcode?open_kfid=" + encodeURIComponent(a.open_kfid),
+        { headers: { "X-Admin-Token": token } });
+      if (r.ok) src = URL.createObjectURL(await r.blob());
+    } catch (e) {}
+    return `<div style="text-align:center;margin-bottom:18px">
+      <div style="font-weight:600;font-size:15px;margin-bottom:8px">${esc(a.name || a.open_kfid)}</div>
+      ${src ? `<img src="${src}" alt="进线二维码" style="width:200px;height:200px;border-radius:12px">
+        <div><a class="btn-text" href="${src}" download="${esc(a.name || "kf")}-二维码.png">下载图片</a></div>`
+        : `<div class="meta">该账号二维码生成失败</div>`}
+    </div>`;
+  }));
+  document.getElementById("qrBody").innerHTML = parts.join("") + `
+    <div class="meta" style="line-height:1.8">
+      客户用<b>微信</b>扫这个码就直接进入咨询窗口——<b>不需要加好友、不需要通过验证</b>，
+      也不占用任何员工的个人微信。<br>
+      可以印在名片、易拉宝、朋友圈图、官网和公众号菜单里。扫码后 AI 立刻应答并做首轮筛查。
+    </div>`;
+}
+
+/* 切正式模式 = AI 开始真的对客户说话，不可撤回，必须二次确认 */
+function askSwitchMode() {
+  const toLive = !healthCache || healthCache.mode !== "live";
+  openSheet(toLive ? `
+    <h2>切换到正式模式？</h2>
+    <p style="font-size:15px;margin:12px 0 8px">切换后，AI 生成的回复将<b>直接发送给客户</b>，客户会立即看到。</p>
+    <p style="font-size:13px;color:var(--ink-2);margin-bottom:20px">建议先在「记录」里看过几条草稿，确认话术合适后再切换。随时可以切回。</p>
+    <button class="btn-primary xl" onclick="doSwitchMode('live')">确认切换到正式模式</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">暂不切换</button>
+  ` : `
+    <h2>切回影子模式？</h2>
+    <p style="font-size:15px;margin:12px 0 20px">切换后 AI 不再对客户发言，只在后台起草供内部查看。</p>
+    <button class="btn-primary xl" onclick="doSwitchMode('shadow')">确认切回影子模式</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">保持正式模式</button>
+  `);
+}
+async function doSwitchMode(mode) {
+  try {
+    await api("/mode", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    forceCloseSheet();
+    toast(mode === "live" ? "已切换到正式模式，AI 开始对客户发言" : "已切回影子模式，AI 不再对外发言");
+    lastSig.log = null;
+    await loadHealth();
+    refresh();
+  } catch (e) { toast("操作失败，请重试", false); }
+}
+
+/* 转接就绪自检。
+   律所侧要维护的名单**只有两份**，这里就按两份来讲（2026-08-12 律所方要求）：
+     名单一：律师名册 —— 就在「团队」页，人员进出只改这里；
+     名单二：企微后台「微信客服 → 升级服务」的成员范围 —— 只能在企微后台点。
+   企微自己还有第三份「接待人」，但它的内容永远等于名单一，已由程序自动同步，
+   所以不作为一份要人维护的名单呈现——只在同步没跟上时报出来。 */
+async function checkHandoff() {
+  const el = document.getElementById("hoResult");
+  el.textContent = "检查中……";
+  let r;
+  try { r = await api("/kf/handoff-probe"); }
+  catch (e) { el.textContent = "检查失败，请重试"; return; }
+  if (r.error) { el.innerHTML = `<b style="color:var(--danger)">${esc(r.error)}</b>`; return; }
+  const nm = p => esc(p.name || p.userid);
+  const lines = [`${r.ready ? "✅" : "⚠️"} ${esc(r.hint)}`];
+  if (!r.enabled) lines.push("⚠️ 转接开关是关的（RESPONDER_HANDOFF_ENABLED）");
+  if (r.mode !== "live") lines.push(`⚠️ 当前是${esc(r.mode)}模式，不会真的转接`);
+
+  /* ---- 名单一：律师名册（我们这边，您维护） */
+  lines.push(`<br><b>名单一 · 律师名册（在「团队」页改）</b>`);
+  lines.push(r.roster_size
+    ? `　在职 ${r.roster_size} 位：${(r.roster || []).map(nm).join("、")}`
+    : `　❌ 一个人都没有 —— 转接没有对象，先去「团队」页加人`);
+
+  /* ---- 名单二：企微后台（律所自己在企微管理后台点） */
+  const up = r.upgrade || {};
+  lines.push(`<br><b>名单二 · 企微后台「微信客服 → 升级服务」</b>`);
+  if (up.error) {
+    lines.push(`　⚠️ 读不到：${esc(up.hint || up.error)}`);
+  } else if (up.departments) {
+    lines.push(`　已配 ${up.departments} 个部门`
+      + (up.userids.length ? ` + ${up.userids.length} 位成员` : ""));
+    lines.push(`　<span class="muted">配的是部门（邀约谈案部这种），里面具体有谁企微不让我读——`
+      + `请确认<b>名单一里的每个人都在那个部门里</b>，否则他的名片推不给客户</span>`);
+  } else if (!up.userids || !up.userids.length) {
+    lines.push(`　❌ 一个人都没配 —— 律师名片推不给客户，去企微后台把名单一的人加进去`);
+  } else {
+    lines.push(`　已配 ${up.userids.length} 位`);
+    lines.push((up.missing || []).length
+      ? `　❌ 名单一有人不在这里：${up.missing.map(nm).join("、")}　—— 他们的名片推不给客户`
+      : `　✅ 与名单一一致`);
+  }
+
+  /* ---- 企微接待人：程序自动同步，只在没跟上时才说话 */
+  const behind = (r.accounts || []).filter(a => a.in_use !== false && a.missing.length);
+  lines.push(`<br><span class="muted">企微「接待人」名单由程序自动跟随名单一，不用您管`
+    + (r.servicer_sync ? `（${esc(r.servicer_sync)}）` : "") + `</span>`);
+  for (const a of behind) {
+    lines.push(`　❌ 「${esc(a.name || a.open_kfid)}」还差：${a.missing.map(nm).join("、")}`
+      + `　—— 点下面的「立即同步接待人」`);
+    if (a.hint) lines.push(`　<b style="color:var(--gold,#C6A15B)">👉 ${esc(a.hint)}</b>`);
+  }
+  if (!r.servicer_auto) lines.push(`　⚠️ 自动同步是关的（RESPONDER_KF_SERVICER_SYNC_SECONDS=0）`);
+
+  /* ---- 转接触发条件：把条件原样摆出来，而不是一个「P0」——
+         那三个字什么也没说明，所主任看到它只会再问一次「那 P0 是什么」 */
+  lines.push(`<br><b>什么时候转给律师</b>`);
+  lines.push(`　客户出现下面任一情况：${(r.triggers || []).map(esc).join(" · ")}`);
+  const sp = r.state_probe || {};
+  if (sp.ok) lines.push(`　✅ 转接接口已连通（当前会话状态 ${sp.service_state}）`);
+  else if (sp.error) lines.push(`　❌ 接口探测失败：${esc(sp.error)}`);
+  else if (sp.reason) lines.push(`　… ${esc(sp.reason)}`);
+  el.innerHTML = lines.join("<br>");
+}
+
+/* 立刻把名册同步成客服账号的接待人。**平时不用点**——后台每次名册变动都会自动跑，
+   这个按钮只是「我不想等」。留着它是因为出问题时人需要一个能当场按、当场看结果的东西。
+   为什么不能在企微后台点：那个账号由企微应用托管，后台里点「开始使用」反而会夺走
+   管理权、打断消息推送。所以由服务器直接调接口加，加完立刻回读列表确认。 */
+async function addServicers() {
+  /* 「状态」面板和「团队」页都能调它，所以结果面板取当前存在的那一个 */
+  const el = document.getElementById("hoResult") || document.getElementById("teamSvHint");
+  el.textContent = "正在同步……";
+  let r;
+  try { r = await api("/kf/servicers/add", { method: "POST" }); }
+  catch (e) { el.innerHTML = `<b style="color:var(--danger)">${esc(e.detail || "同步失败，请重试")}</b>`; return; }
+  const lines = [r.ok ? "✅ 企微那边已经跟名册一致了" : "⚠️ 有人没同步上"];
+  if ((r.skipped || []).length) {
+    lines.push(`<span class="muted">没动这些账号（没有客户从那里进来）：${r.skipped.map(esc).join("、")}</span>`);
+  }
+  for (const a of r.accounts) {
+    lines.push(`「${esc(a.name || a.open_kfid)}」已就位 ${a.added.length} 位`);
+    if (a.failed.length) lines.push(`　❌ 没加上：${a.failed.map(esc).join("、")}`);
+    /* 先说怎么办，再说原始报错——律所侧看「48007」等于看一串乱码 */
+    if (a.hint) lines.push(`　<b style="color:var(--gold,#C6A15B)">👉 ${esc(a.hint)}</b>`);
+    if (a.error) lines.push(`　<span class="muted">原始报错：${esc(a.error)}</span>`);
+  }
+  el.innerHTML = lines.join("<br>");
+  if (document.getElementById("teamList")) loadTeam();  // 就地刷新那几个徽标
+}
+
+/* 客户告知文案：复制给律所粘进企微后台欢迎语。
+   刻意不由代码对客发送——一个窗口只该有一个人在说话，而且这是律所对客户
+   作出的法律承诺，应当由律所自己署名，措辞也该由律所定稿。 */
+async function copyNotice() {
+  let text = "";
+  try { text = (await api("/privacy-notice")).text; }
+  catch (e) { toast("取不到文案，请重试", false); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("已复制。粘到企微后台「微信客服 → 欢迎语」里，措辞可以自己改");
+  } catch (e) {
+    openSheet(`<h2>客户告知文案</h2>
+      <p style="font-size:14px;color:var(--muted);margin:10px 0">
+        长按全选复制，粘到企微后台「微信客服 → 欢迎语」。
+        <b>措辞请律所定稿</b>——这是对客户作出的承诺，不是一段话术。</p>
+      <textarea readonly rows="7" style="width:100%;font-size:13px"
+        onclick="this.select()">${esc(text)}</textarea>`);
+  }
+}
+
+/* 免输入登录链接：把令牌放进 # 片段存成书签，点一下直接进。
+   放 # 而不是 ? 是有原因的——# 后面的内容不会随请求发到服务器，
+   因此不会落进任何访问日志。 */
+async function copyLoginLink() {
+  const url = `${location.origin}/ui#t=${encodeURIComponent(token)}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast("链接已复制，存成书签即可免输入");
+  } catch (e) {
+    /* 手机浏览器常拒绝后台写剪贴板：退而展示出来让用户自己长按复制 */
+    openSheet(`<h2>免输入登录链接</h2>
+      <p style="font-size:14px;color:var(--muted);margin:10px 0">
+        长按下面这段全选复制，存成书签，以后点一下直接进。
+        <b>这条链接等同于密码，别转发给外人。</b></p>
+      <textarea readonly rows="3" style="width:100%;font-size:13px"
+        onclick="this.select()">${esc(url)}</textarea>`);
+  }
+}
+
+/* 修改访问令牌：允许改成一句记得住的话（服务端有连续输错锁定兜底），
+   但不允许取消——这台机器在公网上，控制台里是全部客户咨询的原文。 */
+function askChangeToken() {
+  openSheet(`
+    <h2>修改访问令牌</h2>
+    <p style="font-size:15px;margin:12px 0 8px">建议用一句好记的话，
+      比如 <code>qingchen-6-lubiao</code>。至少 12 位，掺一个「-」或数字。</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
+      改完这台设备会自动用新令牌，其他设备需要重新输入一次。</p>
+    <input id="newToken" type="text" autocomplete="off" placeholder="新的访问令牌"
+      style="width:100%;padding:12px;font-size:16px">
+    <div id="tokenErr" class="meta" style="color:var(--danger);margin-top:8px"></div>
+    <button class="btn-primary xl" style="margin-top:12px" onclick="doChangeToken()">
+      确认修改
+    </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+      onclick="closeSheet()">取消</button>`);
+}
+async function doChangeToken() {
+  const v = document.getElementById("newToken").value.trim();
+  const err = document.getElementById("tokenErr");
+  err.textContent = "";
+  try {
+    await api("/admin-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: v }),
+    });
+  } catch (e) {
+    err.textContent = e.detail || "修改失败，请重试";
+    return;
+  }
+  token = v; lsSet("admin_token", v);
+  closeSheet();
+  toast("令牌已更新，本机已自动切换");
+}
+
+/* 升级到最新版：服务器自己去仓库拉代码并重启。
+   做成按钮是因为运维通道可能不通（网络策略变更过一次），
+   有了它，所里自己在浏览器上点一下就能升级，不必等任何人。 */
+function askUpdate() {
+  openSheet(`
+    <h2>升级到最新版？</h2>
+    <p style="font-size:15px;margin:12px 0 8px">服务器会拉取最新程序并重启，
+      整个过程约 <b>半分钟</b>。期间客户发来的消息会排队，不会丢。</p>
+    <p style="font-size:13px;color:var(--ink-2);margin-bottom:20px">
+      当前版本 ${esc((healthCache && healthCache.commit) || "未知")}</p>
+    <button class="btn-primary xl" onclick="doUpdate()">确认升级</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+      onclick="closeSheet()">暂不升级</button>
+  `);
+}
+async function doUpdate() {
+  const before = (healthCache && healthCache.commit) || "";
+  try {
+    const r = await api("/update", { method: "POST" });
+    if (r.ok === false) { toast(r.error || "升级未启动", false); return; }
+  } catch (e) { toast("升级未能启动，请重试", false); return; }
+  forceCloseSheet();
+  toast("正在升级，请稍候……");
+  /* 重启期间请求必然失败，所以只看「版本号变了」这一个信号，失败一律当作还没起来 */
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      const h = await (await fetch("/health")).json();
+      if (h.commit && h.commit !== before) {
+        healthCache = h; paintCapsule();
+        const el = document.getElementById("verLine");
+        if (el) el.textContent = h.commit;
+        toast(`已升级到 ${h.commit}`);
+        lastSig.log = null; refresh();
+        return;
+      }
+    } catch (e) { /* 重启中，继续等 */ }
+  }
+  toast("升级仍在进行，稍后刷新页面查看", false);
+}
+
+function setOffline(off) {
+  if (off === offline) { if (off) updateBanner(); return; }
+  offline = off;
+  updateBanner(); paintCapsule();
+}
+function updateBanner() {
+  const b = document.getElementById("banner");
+  if (offline) {
+    b.textContent = "无法连接服务器，正在自动重试" +
+      (lastSuccess ? ` · 上次成功更新 ${fmtHM(lastSuccess)}` : "");
+    b.classList.add("show");
+  } else b.classList.remove("show");
+}
+function paintCapsule() {
+  let dot, txt;
+  if (offline) { dot = "var(--bad)"; txt = "服务离线"; }
+  else if (healthCache && healthCache.mode === "live") { dot = "var(--ok)"; txt = "正式模式"; }
+  else { dot = "#8FB3DE"; txt = "影子模式"; }
+  for (const [d, t] of [["capDot", "capText"], ["capDot2", "capText2"]]) {
+    const de = document.getElementById(d), te = document.getElementById(t);
+    if (de) { de.style.background = dot; de.classList.toggle("pulse", offline); }
+    if (te) te.textContent = txt;
+  }
+}
+async function loadHealth() {
+  try {
+    const r = await fetch("/health");
+    if (!r.ok) throw new Error();
+    healthCache = await r.json();
+    setOffline(false);
+  } catch (e) { setOffline(true); }
+  paintCapsule();
+}
+
+/* ============ 待办 ============ */
+async function loadTodo() {
+  const el = document.getElementById("todoList");
+  if (!loadedOnce.todo) el.innerHTML = skeleton();
+  let list;
+  try { list = await api("/todo"); }
+  catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadTodo"); return; }
+  loadedOnce.todo = true;
+  list = list.filter(r => r.status !== "done");
+  paintTodoBadge(list.length);
+  /* 数据未变不重渲染：轮询静默、不打断阅读与操作（P1-9） */
+  const sig = JSON.stringify(list);
+  if (lastSig.todo === sig) return;
+  lastSig.todo = sig;
+  if (!list.length) {
+    el.innerHTML = emptyState("clipboard", "暂无待跟进事项",
+      "客户消息一切正常，AI 正在值守。需要人工跟进的事项会出现在这里，并在下方角标提醒您。");
+    return;
+  }
+  const urgent = list.filter(r => r.urgent), normal = list.filter(r => !r.urgent);
+  /* 客户问的什么＝主角。摘要里那句「客户群 X 有待跟进消息」在这里是冗余的
+     （群名已是 chip、紧急已是 badge），把它挤掉正文会让律师扫不到重点。 */
+  const cardHtml = r => {
+    const q = r.question || (r.summary || "").split("\n").find(l => l.startsWith("客户问题："))?.slice(5) || r.summary;
+    const ai = r.ai_reply || (r.summary || "").split("\n").find(l => l.startsWith("AI 已回复："))?.slice(7) || "";
+    const tip = (r.summary || "").split("\n").find(l => l.startsWith("建议回复要点："))?.slice(7) || "";
+    return `
+    <div class="card ${r.urgent ? "urgent" : ""}" id="todo-${r.id}">
+      <div class="row">
+        ${r.urgent ? `<span class="badge bad"><span class="dot" style="background:var(--bad)"></span>紧急</span>` : ""}
+        <span class="chip"><span class="tx">${esc(groupName(r.group_id))}</span></span>
+        ${r.escalated_at ? `<span class="badge warn">已提醒第二责任人</span>` : ""}
+        ${timeEl(r.created_at)}
+      </div>
+      <div class="body-l">${esc(q)}</div>
+      ${ai ? `<div class="meta" style="border-left:2px solid var(--line);padding-left:10px;margin-top:6px">AI 已回复：${esc(ai)}</div>` : ""}
+      ${tip ? `<div class="meta" style="margin-top:6px">${esc(tip)}</div>` : ""}
+      <div class="row fb-row">
+        <button class="btn-text muted" data-act="convo" data-gid="${esc(r.group_id)}">${ico("message")}查看对话</button>
+        <button class="btn-tonal" style="margin-left:auto" onclick="doneTodo(${r.id})">${ico("check")}标记已处理</button>
+      </div>
+    </div>`;
+  };
+  el.innerHTML =
+    `<div class="overview">共 ${list.length} 条待跟进${urgent.length ? `，其中 ${urgent.length} 条紧急` : ""}</div>` +
+    (urgent.length ? `<div class="eyebrow">紧急 · ${urgent.length}</div>` + urgent.map(cardHtml).join("") : "") +
+    (normal.length ? `<div class="eyebrow">其他待办 · ${normal.length}</div>` + normal.map(cardHtml).join("") : "");
+}
+function paintTodoBadge(n) {
+  const badge = document.getElementById("todoBadge");
+  if (!badge) return;  // 待办页签取消后这个角标就不存在了
+  badge.hidden = n === 0;
+  badge.textContent = n > 99 ? "99+" : n;
+}
+/* 角标是跨页告警：不在待办页时轮询也要更新计数 */
+async function refreshTodoBadge() {
+  try {
+    const list = await api("/todo");
+    paintTodoBadge(list.filter(r => r.status !== "done").length);
+  } catch (e) { /* 静默 */ }
+}
+async function doneTodo(id) {
+  const card = document.getElementById("todo-" + id);
+  try {
+    await api(`/todo/${id}/done`, { method: "POST" });
+    if (card) { card.style.transition = "opacity .2s, transform .2s"; card.style.opacity = "0"; card.style.transform = "translateY(-6px)"; }
+    lastSig.todo = null;
+    setTimeout(() => { loadTodo(); renderPending(); }, 220);
+    toast("已标记处理", true, async () => {
+      await api(`/todo/${id}/reopen`, { method: "POST" });
+      lastSig.todo = null;
+      loadTodo(); renderPending();
+    });
+  } catch (e) {
+    toast("操作失败，请重试", false); lastSig.todo = null; loadTodo(); renderPending();
+  }
+}
+
+/* ============ 会话原文（复核依据） ============ */
+/* 律师要「进到客户和 AI 聊天的那个窗口里」，靠的就是这一下。
+   自动转接只在 P0/紧急时发生，但律师常常看完交接单自己判断这单该接——
+   没有这个按钮，他就只剩打电话，而打电话正是转接要取代的那一环。 */
+async function takeOver(gid) {
+  openSheet(`
+    <h2>转给我接手？</h2>
+    <p style="font-size:15px;margin:12px 0 8px">这通会话会出现在您企业微信的
+      <b>「微信客服」工作台</b>，历史消息齐全，您直接回复即可，客户在原窗口就能看到。</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
+      转接后 AI 自动闭嘴，不会跟您抢话。转之前会先跟客户说一句，
+      免得他对着一段静默干等。</p>
+    <div id="toErr" class="meta" style="color:var(--danger);margin-bottom:8px"></div>
+    <button class="btn-primary xl" id="toBtn" data-act="dotakeover" data-gid="${esc(gid)}">
+      确认转给我
+    </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+      onclick="closeSheet()">取消</button>`);
+}
+async function doTakeOver(gid) {
+  const btn = document.getElementById("toBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "转接中…"; }
+  try {
+    await api(`/groups/${encodeURIComponent(gid)}/takeover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  } catch (e) {
+    const el = document.getElementById("toErr");
+    if (el) el.textContent = e.detail || "转接失败，请重试";
+    if (btn) { btn.disabled = false; btn.textContent = "确认转给我"; }
+    return;
+  }
+  closeSheet();
+  toast("已转接，请到企业微信「微信客服」里接着聊");
+}
+
+async function openConversation(gid) {
+  openSheet(`<h2>完整对话</h2><div class="sub">${esc(groupName(gid))}</div>
+    <button class="btn-outline" style="margin:10px 0" data-act="takeover" data-gid="${esc(gid)}">
+      <svg class="ico"><use href="#i-users"/></svg>转给我接手（在企微里直接跟客户聊）
+    </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin:-4px 0 0"
+            data-act="release" data-gid="${esc(gid)}">
+      <svg class="ico"><use href="#i-refresh"/></svg>收回给 AI（人接不上时用）
+    </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin:0"
+            data-act="diagnose" data-gid="${esc(gid)}">
+      <svg class="ico"><use href="#i-alert"/></svg>为什么没回复？
+    </button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin:0 0 8px"
+            data-act="forget" data-gid="${esc(gid)}">
+      <svg class="ico"><use href="#i-refresh"/></svg>清空这个客户，重新测一遍
+    </button>
+    <div id="diagBox"></div>
+    <div id="convoBody">${skeleton()}</div>`);
+  let list;
+  try { list = await api(`/conversation?group_id=${encodeURIComponent(gid)}`); }
+  catch (e) { document.getElementById("convoBody").innerHTML =
+    `<div class="meta">对话加载失败，请重试</div>`; return; }
+  const el = document.getElementById("convoBody");
+  if (!el) return;
+  if (!list.length) { el.innerHTML = `<div class="meta">暂无消息记录</div>`; return; }
+  el.innerHTML = list.map(m => {
+    const staff = m.sender_is_staff;
+    return `<div style="margin:12px 0;display:flex;flex-direction:column;align-items:${staff ? "flex-end" : "flex-start"}">
+      <div class="meta" style="margin-bottom:2px">${staff ? "我方" : "客户"} · ${ago(m.created_at)}</div>
+      <div style="max-width:88%;padding:8px 12px;border-radius:10px;font-size:15px;line-height:1.6;
+        white-space:pre-wrap;word-break:break-word;
+        background:${staff ? "var(--brand-tint)" : "var(--chip-bg)"};
+        color:${staff ? "var(--brand)" : "var(--ink-1)"}">${esc(m.content || "（非文字消息）")}</div>
+    </div>`;
+  }).join("");
+}
+
+/* ============ 线索 ============ */
+const INTENT = {
+  hot: { zh: "高意向", cls: "bad" },
+  warm: { zh: "有意向", cls: "warn" },
+  cold: { zh: "一般咨询", cls: "" },
+};
+const LEAD_STATUS = { new: "待跟进", contacted: "已联系", converted: "已成交", invalid: "无效" };
+const URGENCY = { high: "紧急", medium: "较急", low: "一般" };
+const PRIORITY = {
+  P0: { zh: "P0 强意愿", cls: "p0" },
+  P1: { zh: "P1 有意愿", cls: "p1" },
+  P2: { zh: "P2 一般", cls: "p2" },
+};
+let teamCache = [];
+function lawyerName(userid) {
+  const l = teamCache.find(x => x.userid === userid);
+  return l && l.name ? l.name : userid;
+}
+let leadView = "new";
+/* 检索/过滤/分页状态：导入一次抖音客资就是 350+ 条，没有它们列表等于不可用 */
+const leadFilter = { q: "", priority: "", source: "" };
+let leadOffset = 0, leadItems = [], leadTotal = 0;
+const LEAD_PAGE = 60;
+
+let leadSearchTimer = null;
+function debouncedLeadSearch() {
+  clearTimeout(leadSearchTimer);
+  leadSearchTimer = setTimeout(() => {
+    leadFilter.q = document.getElementById("leadQ").value.trim();
+    lastSig.leads = null;
+    loadLeads();
+  }, 300);
+}
+function toggleLeadFilter(btn) {
+  const { f, v } = btn.dataset;
+  // 同组互斥：再点一次取消
+  leadFilter[f] = leadFilter[f] === v ? "" : v;
+  document.querySelectorAll(`#leadFilters .fchip[data-f='${f}']`).forEach(b =>
+    b.classList.toggle("on", leadFilter[f] === b.dataset.v));
+  lastSig.leads = null;
+  loadLeads();
+}
+function leadQuery(offset) {
+  const p = new URLSearchParams();
+  if (leadView) p.set("status", leadView);
+  if (leadFilter.q) p.set("q", leadFilter.q);
+  if (leadFilter.priority) p.set("priority", leadFilter.priority);
+  if (leadFilter.source) p.set("source", leadFilter.source);
+  p.set("limit", LEAD_PAGE);
+  p.set("offset", offset);
+  return "/leads?" + p.toString();
+}
+/* 来源标识：让律师一眼知道这个客户从哪来、该用什么方式回访 */
+function leadSource(gid) {
+  if (gid.startsWith("dy:")) return "抖音";
+  if (gid.startsWith("kf:")) return "微信客服";
+  return "群聊";
+}
+
+function setLeadView(v) {
+  leadView = v;
+  document.getElementById("segLeadNew").classList.toggle("on", v === "new");
+  document.getElementById("segLeadDoing").classList.toggle("on", v === "contacted");
+  document.getElementById("segLeadAll").classList.toggle("on", v === "");
+  lastSig.leads = null;
+  loadLeads();
+}
+async function loadLeads(more = false) {
+  const el = document.getElementById("leadList");
+  if (!loadedOnce.leads && !more) el.innerHTML = skeleton();
+  let r;
+  try {
+    r = await api(leadQuery(more ? leadOffset + LEAD_PAGE : 0));
+    // 承办人姓名与改派选单需要名册；律师身份无权也无需
+    if (me && me.role === "admin" && !teamCache.length) {
+      try { teamCache = await api("/lawyers"); } catch (e) {}
+    }
+  }
+  catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadLeads"); return; }
+  loadedOnce.leads = true;
+  if (more) {
+    leadOffset += LEAD_PAGE;
+    leadItems = leadItems.concat(r.items);
+  } else {
+    leadOffset = 0;
+    leadItems = r.items;
+  }
+  leadTotal = r.total;
+  const list = leadItems;
+  const hasFilter = leadFilter.q || leadFilter.priority || leadFilter.source;
+  document.getElementById("leadCount").textContent =
+    leadTotal ? `共 ${leadTotal} 条${list.length < leadTotal ? ` · 已显示 ${list.length}` : ""}` : "";
+  document.getElementById("leadMore").hidden = list.length >= leadTotal;
+  const sig = leadView + JSON.stringify(list);
+  if (lastSig.leads === sig) return;
+  lastSig.leads = sig;
+  if (!list.length) {
+    el.innerHTML = hasFilter
+      ? emptyState("search", "没有匹配的线索", "换个关键词，或点掉上面的筛选条件再试")
+      : emptyState("flame",
+          leadView ? "暂无待跟进线索" : "还没有线索记录",
+          "客户在咨询中留下联系方式、或表达面谈意愿时，AI 会自动整理一份交接单放到这里，并推送给接待律师。");
+    return;
+  }
+  el.innerHTML = list.map(l => {
+    let facts = [], factors = [];
+    try { facts = JSON.parse(l.key_facts || "[]"); } catch (e) {}
+    try { factors = JSON.parse(l.factors || "[]"); } catch (e) {}
+    const it = INTENT[l.intent] || INTENT.cold;
+    const pr = PRIORITY[l.priority];
+    // 律师看到的全是自己的单，「X承办」是废话；只有管理员全量视角需要归属
+    const who = (me && me.role === "admin" && l.assigned_userid)
+      ? lawyerName(l.assigned_userid) : "";
+    return `
+      <div class="card ${l.priority === "P0" ? "urgent" : ""}">
+        <div class="row">
+          ${pr ? `<span class="pchip ${pr.cls}">${pr.zh}</span>`
+               : `<span class="badge ${it.cls}">${it.zh}</span>`}
+          <span class="chip">${leadSource(l.group_id)}</span>
+          <span class="chip"><span class="tx">${esc(groupName(l.group_id))}</span></span>
+          ${l.case_type ? `<span class="chip">${esc(l.case_type)}</span>` : ""}
+          ${l.urgency === "high" ? `<span class="badge warn">${esc(URGENCY[l.urgency])}</span>` : ""}
+          ${l.status !== "new" ? `<span class="chip">${esc(LEAD_STATUS[l.status] || l.status)}</span>` : ""}
+          ${l.notified_at ? "" : `<span class="badge warn">未推送</span>`}
+          ${timeEl(l.updated_at)}
+        </div>
+        <div class="body-l">${esc(l.summary || "（未归纳）")}</div>
+        ${facts.length ? `<div class="meta" style="line-height:1.8">${
+          facts.map(f => "· " + esc(f)).join("<br>")}</div>` : ""}
+        ${factors.length ? `<div class="meta" style="margin-top:6px">优先依据：${
+          factors.map(f => esc(f.label + " +" + f.points)).join(" · ")}</div>` : ""}
+        <div class="row" style="margin-top:10px">
+          ${l.contact
+            ? `<a href="tel:${esc(l.contact)}" class="btn-tonal" style="text-decoration:none">${ico("phone")}${esc(l.contact)}</a>`
+            : `<span class="meta">客户未留联系方式</span>`}
+          ${who ? `<span class="chip" style="margin-left:auto">${esc(who)}承办</span>` : ""}
+          <button class="btn-text muted admin-only" ${who ? "" : 'style="margin-left:auto"'}
+            onclick="openAssign(${l.id})">${who ? "改派" : "指派律师"}</button>
+        </div>
+        ${l.opening_line ? `<div style="margin-top:10px;padding:8px 12px;border-radius:8px;
+          background:var(--brand-tint);color:var(--brand);font-size:14px;line-height:1.6">
+          开场参考：${esc(l.opening_line)}</div>` : ""}
+        ${l.suggested_action ? `<div class="meta" style="margin-top:6px">建议：${esc(l.suggested_action)}</div>` : ""}
+        ${l.notes ? `<div style="margin-top:8px;padding:8px 12px;border-radius:8px;
+          background:var(--chip-bg);font-size:13px;line-height:1.6;color:var(--ink-1)">
+          ${ico("note")}${esc(l.notes)}</div>` : ""}
+        <div class="row fb-row">
+          <button class="btn-text muted" data-act="convo" data-gid="${esc(l.group_id)}">${ico("message")}对话</button>
+          <button class="btn-text muted" onclick="editNotes(${l.id})">${ico("note")}${l.notes ? "改备注" : "记备注"}</button>
+          ${l.notified_at ? "" : `<button class="btn-text" onclick="notifyLead(${l.id})">${ico("refresh")}推送</button>`}
+          ${l.status === "new" ? `
+            <button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'contacted')">${ico("check")}已联系</button>
+            <button class="btn-text muted" onclick="setLead(${l.id},'invalid')">无效</button>`
+            : `<button class="btn-text" style="margin-left:auto" onclick="setLead(${l.id},'converted')">标记成交</button>
+               <button class="btn-text muted" onclick="setLead(${l.id},'new')">退回</button>`}
+        </div>
+      </div>`;
+  }).join("");
+}
+function editNotes(id) {
+  const l = leadItems.find(x => x.id === id) || {};
+  openSheet(`<h2>跟进备注</h2>
+    <div class="meta" style="margin:6px 0 10px">打完电话记两句：聊到哪了、下一步做什么、什么时候再联系</div>
+    <textarea id="noteText" style="width:100%;min-height:120px;font-size:16px;line-height:1.7;
+      padding:12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink-1)"
+      placeholder="例：已通话，欠薪 4 万有欠条，周五来所面谈，带劳动合同">${esc(l.notes || "")}</textarea>
+    <button class="btn-primary xl" style="margin-top:12px" onclick="saveNotes(${id})">保存</button>`);
+}
+async function saveNotes(id) {
+  const text = document.getElementById("noteText").value.trim();
+  try {
+    await api(`/leads/${id}/notes`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: text }),
+    });
+    sheetDirty = false; forceCloseSheet();
+    toast("备注已保存");
+    lastSig.leads = null;
+    loadLeads();
+  } catch (e) { toast("保存失败，请重试", false); }
+}
+async function setLead(id, status, silent = false) {
+  const prev = (leadItems.find(x => x.id === id) || {}).status || "new";
+  try {
+    const r = await api(`/leads/${id}/status`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (!silent) {
+      let msg = status === "converted" ? "已标记成交 🎉"
+        : `已标记为${LEAD_STATUS[status] || status}`;
+      if (r && r.todos_closed) msg += `，同时结掉 ${r.todos_closed} 条待办`;
+      /* 「无效」与「已联系」紧邻，误触会把活线索打死——给一条可撤销的退路 */
+      toast(msg, true, status === "invalid" ? () => setLead(id, prev, true) : null);
+    }
+    lastSig.leads = null;
+    loadLeads(); refreshLeadBadge(); refreshTodoBadge();
+  } catch (e) { toast("操作失败，请重试", false); }
+}
+async function notifyLead(id) {
+  try {
+    const r = await api(`/leads/${id}/notify`, { method: "POST" });
+    toast("已推送给 " + (r.to || "接待人"));
+    lastSig.leads = null;
+    loadLeads();
+  } catch (e) { toast(e.detail || "推送失败，请检查该会话是否已配置接待人", false); }
+}
+async function refreshLeadBadge() {
+  /* 只数「待跟进的 P0 强意愿」：角标要表达「现在必须打的电话」，
+     数全部积压（导入 359 条后永远 99+）等于没有信息 */
+  try {
+    const r = await api("/leads?status=new&priority=P0&limit=1");
+    const n = r.total || 0;
+    const b = document.getElementById("leadBadge");
+    b.hidden = n === 0;
+    b.textContent = n > 99 ? "99+" : n;
+  } catch (e) { /* 静默 */ }
+}
+
+/* ============ 客资导入 ============ */
+async function uploadKezi(input) {
+  const file = input.files && input.files[0];
+  input.value = "";                       // 允许连续上传同一个文件
+  if (!file) return;
+  toast("正在导入 " + file.name + "…");
+  try {
+    /* 原始字节直传（服务端不依赖 multipart）；默认不推送，导入后人工复核 */
+    const r = await api("/leads/import?filename=" + encodeURIComponent(file.name), {
+      method: "POST", body: file,
+    });
+    const bits = [`新增 ${r.imported} 条`];
+    if (r.updated) bits.push(`更新 ${r.updated} 条`);
+    if (r.no_contact) bits.push(`${r.no_contact} 条手机号不可用已跳过`);
+    toast(bits.join(" · "));
+    lastSig.leads = null;
+    loadLeads(); refreshLeadBadge();
+    /* 导完就把「下一步」摆到眼前：否则批量分派入口藏在团队 tab 里没人找得到，
+       几百条线索就一直躺着没有承办人 */
+    if (r.imported && !r.no_contact) {
+      try {
+        const m = await api("/metrics");
+        if (m.leads_unassigned > 0) {
+          if (!teamCache.length) { try { teamCache = await api("/lawyers"); } catch (e) {} }
+          if (teamCache.some(l => l.active && l.on_duty)) { askBulkAssign(); return; }
+          openSheet(`<h2>导入完成，还差一步</h2>
+            <p style="font-size:15px;margin:12px 0">这批线索有 ${m.leads_unassigned} 条还没有承办律师。
+            先到「团队」里添加律师，之后一键分派即可。</p>
+            <button class="btn-primary xl" onclick="forceCloseSheet();setTab('team')">去添加律师</button>`);
+          return;
+        }
+      } catch (e) { /* 引导失败不影响导入结果 */ }
+    }
+    if (r.no_contact) {
+      openSheet(`<h2>有 ${r.no_contact} 条没导进来</h2>
+        <p style="font-size:15px;margin:12px 0">这些行的手机号是打码的（如 138****5678）或为空，
+        打不通就没法跟进，所以没有放进队列。</p>
+        <p class="meta">请到抖音来客「线索经营 → 客资中心」里查看这几条的完整号码，
+        或确认导出时是否勾选了完整手机号。</p>`);
+    }
+  } catch (e) {
+    toast(e.detail || "导入失败，请重试", false);
+  }
+}
+
+/* ============ 指派 / 改派 ============ */
+async function openAssign(leadId) {
+  if (!teamCache.length) {
+    try { teamCache = await api("/lawyers"); } catch (e) {}
+  }
+  const usable = teamCache.filter(l => l.active);
+  if (!usable.length) {
+    openSheet(`<h2>指派律师</h2>
+      <p class="meta" style="margin-top:10px">名册还是空的。先在「团队」里添加律师，
+      之后新线索按在办量自动派单，这里用于手动调整。</p>
+      <button class="btn-primary xl" style="margin-top:14px" onclick="forceCloseSheet();setTab('team')">去添加律师</button>`);
+    return;
+  }
+  openSheet(`<h2>指派律师</h2>
+    <div class="meta" style="margin:6px 0 10px">改派会立即企微通知新负责人，并同步该会话的承办律师</div>
+    ${usable.map(l => `
+      <button class="btn-outline" style="width:100%;justify-content:space-between;margin-bottom:8px"
+        data-act="assign" data-lead="${leadId}" data-uid="${esc(l.userid)}">
+        <span>${esc(l.name || l.userid)}${l.on_duty ? "" : "（停接新单）"}</span>
+        <span class="meta">在办 ${l.open}${l.p0 ? " · P0×" + l.p0 : ""}</span>
+      </button>`).join("")}`);
+}
+async function doAssign(leadId, userid) {
+  try {
+    const r = await api(`/leads/${leadId}/assign`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userid }),
+    });
+    forceCloseSheet();
+    toast(r && r.notified
+      ? "已改派并通知 " + lawyerName(userid)
+      : `已改派给 ${lawyerName(userid)}（${(r && r.hint) || "未发送通知"}）`);
+    lastSig.leads = null;
+    loadLeads();
+  } catch (e) { toast("改派失败，请重试", false); }
+}
+
+/* ============ 团队 ============ */
+async function loadTeam() {
+  const el = document.getElementById("teamList");
+  if (!loadedOnce.team) el.innerHTML = skeleton();
+  try { teamCache = await api("/lawyers"); }
+  catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadTeam"); return; }
+  loadedOnce.team = true;
+  if (!teamCache.length) {
+    el.innerHTML = emptyState("briefcase", "还没有律师账号",
+      "添加律师后：新线索按在办量轮流派单；每位律师用自己的登录链接进工作台，只看派给自己的客户。");
+    return;
+  }
+  el.innerHTML = teamCache.map(l => `
+    <div class="card" style="${l.active ? "" : "opacity:.55"}">
+      <div class="row" style="flex-wrap:nowrap">
+        <b style="font-size:15px;flex:none">${esc(l.name || l.userid)}</b>
+        <span class="meta" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(l.userid)}</span>
+        ${l.role === "admin" ? `<span class="chip">管理</span>` : ""}
+        ${l.active ? "" : `<span class="badge warn">已停用</span>`}
+        <label class="switch" style="margin-left:auto" title="是否接收新派单">
+          <input type="checkbox" ${l.on_duty ? "checked" : ""} ${l.active ? "" : "disabled"}
+            aria-label="接单开关" data-act="duty" data-uid="${esc(l.userid)}">
+          <span></span>
+        </label>
+      </div>
+      <div class="meta" style="margin-top:2px">在办 ${l.open} 单${l.p0 ? ` · 其中 P0 待联系 ${l.p0} 单` : ""}
+        ${l.has_token ? "" : " · 尚未开通登录"}</div>
+      <div class="meta" style="margin-top:2px" data-sv="${esc(l.userid)}"></div>
+      <div class="row fb-row">
+        <button class="btn-text" data-act="sendlogin" data-uid="${esc(l.userid)}">${ico("send")}发登录链接</button>
+        <button class="btn-text muted" data-act="copylogin" data-uid="${esc(l.userid)}">复制链接</button>
+        <button class="btn-text muted" data-act="editlawyer" data-uid="${esc(l.userid)}">编辑</button>
+        <button class="btn-text muted" style="margin-left:auto" data-act="dellawyer" data-uid="${esc(l.userid)}">移除</button>
+      </div>
+    </div>`).join("") + `<div class="meta" id="teamSvHint" style="margin-top:8px"></div>`;
+  paintServicerBadges();
+}
+
+/* 「这个人在企微那边配齐了没有」——转接的硬前置，画在他本人那张卡上。
+   律所方原话：「EZID 都配对了，也收得到每日 update，就是收不到转接」。
+   这不矛盾：**那是几份互不相干的名单**——日报走自建应用的可见范围，
+   转接走客服账号的接待人列表，推名片走企微后台的升级服务范围，
+   企微里它们完全不通消息。所以这条状态必须画在他本人那张卡上；
+   藏在一个要点右上角才能打开的面板里，等于没有。
+
+   接待人那份由程序自动同步（见 responder/kfroster.py），所以这里对它的措辞是
+   「同步中」而不是「你去加」；真正要人动手的只有企微后台那一份。 */
+async function paintServicerBadges() {
+  const slots = document.querySelectorAll("[data-sv]");
+  if (!slots.length) return;
+  let r;
+  try { r = await api("/kf/handoff-probe"); }
+  catch (e) { return; }            // 未接客服 / 非管理员：不画，也不报错
+  if (!r || !r.accounts || !r.accounts.length) return;
+  /* **按客服账号逐个算，不取交集。** 律所常常不止一个客服账号
+     （真机：「松沪律所咨询」已托管给应用，「上海松沪律师事务所在线客服」
+     还在网页后台管着）。取交集的话，一个没配好的账号会把所有人都染红——
+     而客户实际走的那个入口可能完全是通的。**说错「坏了」和漏报一样贵**：
+     人会跑去修一个没坏的东西。
+     判据用接待人全集而不是 probe 的 missing——后者只算在职律师，
+     停用但名下还压着单的律师会被整个漏掉，那些单一样转不过去。 */
+  const accs = r.accounts.filter(a => a.in_use !== false).map(a => ({
+    name: a.name || a.open_kfid, set: new Set(a.servicers || []),
+  }));
+  if (!accs.length) return;   // 企业名下的其它客服账号不是我们这条链路，不评价
+  /* 企微后台「升级服务」那份名单：只有配的是具体成员时才能逐人核对。
+     配的是部门（律所现在配的是「邀约谈案部」）时，里面有谁企微不让我们读——
+     **读不到就一个字都不下结论**，否则会把整份名册误报成没配好。 */
+  const up = r.upgrade || {};
+  const upSet = (!up.error && !up.departments && (up.userids || []).length)
+    ? new Set(up.userids) : null;
+  let needAdd = false;
+  for (const el of slots) {
+    const uid = el.getAttribute("data-sv");
+    const l = (teamCache || []).find(x => x.userid === uid) || {};
+    const bad = accs.filter(a => !a.set.has(uid)).map(a => a.name);
+    const noCard = upSet && !upSet.has(uid);   // 不在企微后台那份名单里
+    if (!l.active) {
+      /* 停用 + 名下有单 = 最安静的那种坏：单子看着有人管，实际转不过去 */
+      el.innerHTML = l.open
+        ? `<b style="color:var(--warn,#E0A458)">⚠️ 已停用，名下 ${l.open} 单转接不过去，请先改派</b>`
+        : `<span class="muted">已停用，不参与转接</span>`;
+      continue;
+    }
+    if (bad.length) needAdd = true;
+    const bits = [];
+    if (bad.length) {
+      /* 接待人是自动同步的，所以这是「还没轮到」而不是「你漏配了」 */
+      const where = accs.length > 1 ? `「${esc(bad.join("」「"))}」的` : "";
+      bits.push(`<span style="color:var(--warn,#E0A458)">⏳ ${where}接待人还在同步（约一分钟）</span>`);
+    }
+    if (noCard) {
+      bits.push(`<b style="color:var(--danger)">⚠️ 不在企微后台「升级服务」名单里 —— 他的名片推不给客户</b>`);
+    }
+    el.innerHTML = bits.length ? bits.join("<br>")
+      : `<span style="color:var(--ok)">✓ 可接收客户转接</span>`;
+  }
+  const hint = document.getElementById("teamSvHint");
+  if (!hint) return;
+  /* 账号没托管给应用时，自动同步也一样会拿 48007——先把原因摆出来，
+     否则「⏳ 同步中」会一直转下去，而没人知道它其实永远不会成功 */
+  const blocked = r.accounts.filter(a => a.hint).map(a => `「${esc(a.name || a.open_kfid)}」${esc(a.hint)}`);
+  hint.innerHTML = (blocked.length ? `<b style="color:var(--gold,#C6A15B)">👉 ${blocked.join("<br>👉 ")}</b><br>` : "")
+    + `<span class="muted">这份名册就是客服名单。企微那边的「接待人」由系统自动跟着改，
+       您只需要另外确认一件事：企微后台「微信客服 → 升级服务」里配的部门/成员，
+       要把这里的人都包含进去。</span>`
+    + (needAdd ? `<button class="btn-outline" style="width:100%;margin-top:6px" onclick="addServicers()">不想等，现在就同步</button>` : "");
+}
+
+function editLawyer(userid) {
+  const l = teamCache.find(x => x.userid === userid) ||
+    { userid: "", name: "", role: "lawyer", on_duty: true, active: true };
+  const isNew = !userid;
+  openSheet(`<h2>${isNew ? "添加律师" : "编辑律师"}</h2>
+    <div class="field"><label>企微账号（userid）</label>
+      <input id="lw_id" value="${esc(l.userid)}" ${isNew ? "" : "disabled"}
+        placeholder="企微通讯录里的账号，如 zhangsan">
+      ${isNew ? `<div class="help">在企业微信管理后台 → 通讯录 → 成员详情里能看到</div>` : ""}
+    </div>
+    <div class="field"><label>姓名</label><input id="lw_name" value="${esc(l.name)}" placeholder="张三"></div>
+    <div class="row" style="margin:8px 0">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px">
+        <input type="checkbox" id="lw_admin" ${l.role === "admin" ? "checked" : ""}>管理权限（看全所数据）
+      </label>
+      ${isNew ? "" : `<label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-left:auto">
+        <input type="checkbox" id="lw_active" ${l.active ? "checked" : ""}>启用
+      </label>`}
+    </div>
+    <button class="btn-primary xl" onclick="saveLawyer(${isNew})">保存</button>`);
+}
+/* AI 不说话有十几种可能，而它们在客户那头长得一模一样——一片空白。
+   这个按钮把「到底卡在哪」直接说成人话，省掉一轮轮猜测和截图。 */
+async function diagnose(gid) {
+  const box = document.getElementById("diagBox");
+  if (box) box.innerHTML = `<div class="meta">检查中…</div>`;
+  let d;
+  try { d = await api(`/diagnose?group_id=${encodeURIComponent(gid)}`); }
+  catch (e) { if (box) box.innerHTML = `<div class="meta">自检失败，请重试</div>`; return; }
+  if (!box) return;
+  const list = (d.blockers || []).length
+    ? (d.blockers || []).map(b => `<div style="margin:4px 0">· ${esc(b)}</div>`).join("")
+    : `<div style="margin:4px 0">· ${esc(d.verdict || "")}</div>`;
+  const ok = (d.checks || []).map(c => `<div class="meta">✓ ${esc(c)}</div>`).join("");
+  const dec = d.last_decision
+    ? `<div class="meta" style="margin-top:6px">最后一次判断：${esc(d.last_decision.action)}
+       ${d.last_decision.should_speak ? "（要发言）" : "（不发言）"} ·
+       ${esc((d.last_decision.reasons || []).join(" / "))}</div>` : "";
+  box.innerHTML = `<div class="card" style="margin:0 0 10px">
+      <b style="font-size:15px">自检结果</b>
+      <div style="font-size:14px;line-height:1.7;margin-top:6px">${list}</div>
+      ${ok}${dec}
+    </div>`;
+}
+async function releaseToAi(gid) {
+  try { await api(`/groups/${encodeURIComponent(gid)}/release`, { method: "POST" }); }
+  catch (e) { toast(e.detail || "操作失败，请重试", false); return; }
+  toast("已收回给 AI，它会立刻继续接待");
+  groupsCache = []; refresh();
+}
+/* 「清空这个客户」——给测试用的。
+   律所方原话：「我每次跑测试都得用新的微信号，有点麻烦」。
+   而这不只是麻烦：**每次换号，测到的永远是「新客户」**，
+   跨会话记忆、二次问候、再推送判据这些只在老客户身上发生的事，
+   用新号一次也测不到。
+   删数据不可撤销，所以走确认层；已委托客户由服务端直接拒（那是台账）。 */
+function askForget(gid) {
+  openSheet(`<h2>清空这个客户？</h2>
+    <div class="sub">${esc(groupName(gid))}</div>
+    <p style="font-size:15px;margin:12px 0 8px;line-height:1.7">
+      聊天记录、AI 的判断与回复、线索、跨会话记忆、转接状态<b>全部删除，不可恢复</b>。
+      客户档案本身（案由、承办律师、AI 开关）保留。<br><br>
+      清完之后他再扫码进来，AI 会当成第一次见到他——<b>这正是用同一个微信号
+      反复跑测试的办法</b>。</p>
+    <div class="meta" style="margin-bottom:16px;line-height:1.7">
+      收到客户的删除要求时也用这个按钮。有一件事要跟他说清楚：
+      <b>每天一份的整库备份保留 30 天</b>，那里面的副本会在 30 天内自然滚掉，
+      不会再被系统使用。</div>
+    <button class="btn-primary xl" data-act="doforget" data-gid="${esc(gid)}">确认清空</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+            onclick="closeSheet()">取消</button>`);
+}
+async function doForget(gid) {
+  let r;
+  try { r = await api(`/groups/${encodeURIComponent(gid)}/forget`, { method: "POST" }); }
+  catch (e) { toast(e.detail || "清空失败，请重试", false); return; }
+  closeSheet();
+  toast(r.hint || "已清空，现在用同一个微信号扫码就是一次全新对话");
+  groupsCache = []; refresh();
+}
+function askDeleteLawyer(userid) {
+  const l = (teamCache || []).find(x => x.userid === userid) || {};
+  openSheet(`<h2>把 ${esc(l.name || userid)} 移出名册？</h2>
+    <p style="font-size:15px;margin:12px 0 8px;line-height:1.7">
+      移除后他不再接单，登录链接也失效。<br>
+      <b>只是想让他暂时不接单的话，用「编辑」里的启用开关更合适</b>——
+      那样历史归属还在，回来了打开就能继续。</p>
+    <div class="meta" style="margin-bottom:16px">名下还有在办线索时无法移除，会提示你先改派。</div>
+    <button class="btn-primary xl" onclick="doDeleteLawyer('${esc(userid)}')">确认移除</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">取消</button>`);
+}
+async function doDeleteLawyer(userid) {
+  try { await api(`/lawyers/${encodeURIComponent(userid)}`, { method: "DELETE" }); }
+  catch (e) { toast(e.detail || "移除失败，请重试", false); return; }
+  closeSheet(); toast("已移出名册"); loadTeam();
+}
+async function saveLawyer(isNew) {
+  const userid = document.getElementById("lw_id").value.trim();
+  if (!userid) { toast("请填写企微账号", false); return; }
+  const body = {
+    name: document.getElementById("lw_name").value.trim(),
+    role: document.getElementById("lw_admin").checked ? "admin" : "lawyer",
+    on_duty: true,
+    active: isNew ? true : document.getElementById("lw_active").checked,
+  };
+  const old = teamCache.find(x => x.userid === userid);
+  if (old) body.on_duty = !!old.on_duty;
+  try {
+    await api(`/lawyers/${encodeURIComponent(userid)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    sheetDirty = false; forceCloseSheet();
+    toast(isNew ? "已添加；点「发登录链接」即可开通其工作台" : "已保存");
+    loadedOnce.team = false;
+    loadTeam();
+  } catch (e) { toast("保存失败，请重试", false); }
+}
+async function toggleDuty(userid, input) {
+  const l = teamCache.find(x => x.userid === userid);
+  try {
+    await api(`/lawyers/${encodeURIComponent(userid)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: l.name, role: l.role,
+        on_duty: input.checked, active: !!l.active,
+      }),
+    });
+    l.on_duty = input.checked;
+    toast(input.checked ? "已恢复接单" : "已暂停接新单（手上的单不受影响）");
+  } catch (e) { input.checked = !input.checked; toast("操作失败，请重试", false); }
+}
+async function refreshBulkAssign() {
+  /* 有名册且有未指派的在办线索时，才亮出批量分派入口 */
+  try {
+    const m = await api("/metrics");
+    const n = m.leads_unassigned || 0;
+    const btn = document.getElementById("bulkAssignBtn");
+    btn.hidden = !(n > 0 && teamCache.some(l => l.active && l.on_duty));
+    document.getElementById("bulkAssignN").textContent = n ? `（${n} 条）` : "";
+  } catch (e) { /* 静默 */ }
+}
+function askBulkAssign() {
+  openSheet(`<h2>自动分派未指派线索？</h2>
+    <p style="font-size:15px;margin:12px 0 8px">按「谁在办的最少谁先接」把所有未指派的
+    待跟进/已联系线索分给在班客服。</p>
+    <p class="meta" style="margin-bottom:16px">不会给律师发企微消息——分派结果直接出现在
+    各自的工作台里，避免一次性弹几百条通知。</p>
+    <button class="btn-primary xl" onclick="doBulkAssign()">开始分派</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px"
+      onclick="closeSheet()">先不用</button>`);
+}
+async function doBulkAssign() {
+  sheetDirty = false; forceCloseSheet();
+  toast("正在分派…");
+  try {
+    const r = await api("/leads/assign-unrouted", { method: "POST" });
+    toast(r.hint || `已分派 ${r.assigned} 条`);
+    loadedOnce.team = false;
+    loadTeam(); refreshBulkAssign();
+    lastSig.leads = null;
+  } catch (e) { toast("分派失败，请重试", false); }
+}
+async function sendLogin(userid) {
+  try {
+    await api(`/lawyers/${encodeURIComponent(userid)}/send-login`, { method: "POST" });
+    toast("已把登录链接企微发给 " + lawyerName(userid) + "（旧链接同时失效）");
+    loadedOnce.team = false; loadTeam();
+  } catch (e) { toast("发送失败：确认该账号在应用可见范围内", false); }
+}
+async function copyLogin(userid) {
+  try {
+    const r = await api(`/lawyers/${encodeURIComponent(userid)}/token`, { method: "POST" });
+    const url = r.login_url || r.token;
+    let copied = false;
+    try { await navigator.clipboard.writeText(url); copied = true; } catch (e) {}
+    if (copied) toast("登录链接已复制（旧链接已失效），请私发给本人");
+    else openSheet(`<h2>登录链接</h2>
+      <p class="meta" style="margin:8px 0">请完整复制后私发给本人（旧链接已失效）：</p>
+      <textarea readonly style="width:100%;min-height:90px" onclick="this.select()">${esc(url)}</textarea>`);
+    loadedOnce.team = false; loadTeam();
+  } catch (e) { toast("生成失败，请重试", false); }
+}
+
+/* ============ 记录 ============ */
+function setLogView(v) {
+  logView = v;
+  document.getElementById("segReplies").classList.toggle("on", v === "replies");
+  document.getElementById("segDecisions").classList.toggle("on", v === "decisions");
+  loadedOnce.log = false;
+  lastSig.log = null;
+  loadLog();
+}
+function withDayGroups(list, render) {
+  let out = "", lastDay = "";
+  for (const item of list) {
+    const d = dayLabel(item.created_at);
+    if (d !== lastDay) { out += `<div class="eyebrow">${d}</div>`; lastDay = d; }
+    out += render(item);
+  }
+  return out;
+}
+async function loadLog() {
+  const el = document.getElementById("logList");
+  const seq = ++logReq; // 分段快速切换/轮询重叠时，过期响应直接丢弃
+  if (!loadedOnce.log) el.innerHTML = skeleton();
+  try {
+    if (logView === "replies") {
+      const list = await api("/replies?limit=100");
+      if (seq !== logReq) return;
+      loadedOnce.log = true;
+      for (const r of list) repliesFb[r.id] = r.feedback || "";
+      const sig = "r" + JSON.stringify(list);
+      if (lastSig.log === sig) return;
+      lastSig.log = sig;
+      if (!list.length) {
+        const shadow = !healthCache || healthCache.mode !== "live";
+        el.innerHTML = emptyState("message", "还没有 AI 回复记录", shadow
+          ? "当前为影子模式，AI 起草的回复会先显示在这里，供您查看和反馈，不会发进客户群。"
+          : "AI 在客户群发言后，每一条都会在这里留痕。");
+        return;
+      }
+      el.innerHTML = withDayGroups(list, r => {
+        const fb = !r.feedback ? `
+            <button class="btn-text" style="margin-left:auto" onclick="feedbackGood(${r.id})">${ico("thumb")}有帮助</button>
+            <button class="btn-text" onclick="openFeedback(${r.id})">${ico("edit")}需修正</button>`
+          : r.feedback === "good"
+            ? `<button class="badge ok" style="margin-left:auto" onclick="openFeedback(${r.id})">${ico("check")}已标记：有帮助</button>`
+            : `<button class="badge warn" style="margin-left:auto" onclick="openFeedback(${r.id})">${ico("edit")}已标记需修正</button>`;
+        const note = r.feedback && r.feedback.startsWith("needs_fix:") && r.feedback.slice(10)
+          ? `<div class="fb-note">备注：${esc(r.feedback.slice(10))}</div>` : "";
+        const isOpen = expanded.has("r" + r.id);
+        /* 客户原话在上、AI 回复在下：复核一句话是否得当，得先看见它在回什么 */
+        return `
+          <div class="card">
+            <div class="row">
+              ${r.mode === "live" ? `<span class="badge ok">已发出</span>`
+                                  : `<span class="badge brand">草稿</span>`}
+              <span class="chip">${zh(ZH.category, r.category)}</span>
+              ${r.compliance_passed ? "" : `<button class="badge warn" onclick="toggleNote(${r.id})">${ico("shield")}已替换</button>`}
+              <span class="chip"><span class="tx">${esc(groupName(r.group_id))}</span></span>
+              ${timeEl(r.created_at)}
+            </div>
+            <div class="fb-note" id="cmp-${r.id}" hidden>该回复触碰合规红线，已自动替换为安全话术——这是系统在保护所里，不是故障。</div>
+            ${r.question ? `<div class="meta" style="margin-top:8px">客户：${esc(r.question)}</div>` : ""}
+            <div class="quote ${isOpen ? "" : "clamp"}" id="q-${r.id}">${esc(r.text)}</div>
+            <button class="btn-text muted" id="qx-${r.id}" style="display:none;min-height:40px"
+                    onclick="toggleQuote(${r.id})">${isOpen ? "收起" : "展开"}</button>
+            <div class="row fb-row">
+              <button class="btn-text muted" data-act="convo" data-gid="${esc(r.group_id)}">${ico("message")}查看对话</button>
+              ${fb}
+            </div>
+            ${note}
+          </div>`;
+      });
+      requestAnimationFrame(() => {
+        for (const r of list) {
+          const q = document.getElementById("q-" + r.id), x = document.getElementById("qx-" + r.id);
+          if (q && x && (q.scrollHeight - q.clientHeight > 4 || expanded.has("r" + r.id)))
+            x.style.display = "inline-flex";
+        }
+      });
+    } else {
+      const list = await api("/decisions?limit=150");
+      if (seq !== logReq) return;
+      loadedOnce.log = true;
+      const sig = "d" + JSON.stringify(list);
+      if (lastSig.log === sig) return;
+      lastSig.log = sig;
+      if (!list.length) {
+        el.innerHTML = emptyState("message", "还没有判断记录",
+          "AI 对每条客户消息的处理判断（包括保持沉默）都会记录在这里，便于随时复查。");
+        return;
+      }
+      /* should_speak 是「判定应发言」：影子模式下措辞不得暗示已发出 */
+      const live = healthCache && healthCache.mode === "live";
+      el.innerHTML = withDayGroups(list, d => {
+        let reasons = [];
+        try { reasons = JSON.parse(d.reasons); } catch (e) {}
+        const act = d.action === "answer"
+          ? `<span class="badge brand">${ico("message")}直接回答</span>`
+          : d.action === "handoff"
+            ? `<span class="badge warn">${ico("handoff")}安抚承接</span>`
+            : `<span class="chip">${ico("silence")}${zh(ZH.action, d.action)}</span>`;
+        const spoke = !d.should_speak ? ""
+          : live ? `<span class="badge ok">已发言</span>`
+                 : `<span class="badge brand">已起草（演练）</span>`;
+        return `
+          <div class="card" style="padding:10px 14px">
+            <div class="row">
+              ${act}
+              <span class="chip">${zh(ZH.category, d.category)}</span>
+              ${d.urgent ? `<span class="badge bad"><span class="dot" style="background:var(--bad)"></span>紧急</span>` : ""}
+              ${spoke}
+              <span class="chip"><span class="tx">${esc(groupName(d.group_id))}</span></span>
+              ${timeEl(d.created_at)}
+            </div>
+            <div class="meta" style="margin-top:6px">${esc(reasons.join(" · "))}</div>
+          </div>`;
+      });
+    }
+  } catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadLog"); }
+}
+function toggleQuote(id) {
+  const q = document.getElementById("q-" + id), x = document.getElementById("qx-" + id);
+  const key = "r" + id;
+  if (expanded.has(key)) { expanded.delete(key); q.classList.add("clamp"); x.textContent = "展开"; }
+  else { expanded.add(key); q.classList.remove("clamp"); x.textContent = "收起"; }
+}
+function toggleNote(id) {
+  const n = document.getElementById("cmp-" + id);
+  if (n) n.hidden = !n.hidden;
+}
+async function setFeedback(id, val) {
+  await api(`/replies/${id}/feedback`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ feedback: val }),
+  });
+  repliesFb[id] = val;
+  lastSig.log = null;
+}
+/* 「有帮助」也可撤销：误触不污染话术迭代库 */
+async function feedbackGood(id) {
+  try {
+    await setFeedback(id, "good");
+    toast("已记录，感谢反馈", true, async () => { await setFeedback(id, ""); loadLog(); });
+    loadLog();
+  } catch (e) { toast("操作失败，请重试", false); }
+}
+let fbChoice = "";
+const FB_OPTS = ["内容不准确", "语气不合适", "不该由 AI 回复", "话术太长"];
+function openFeedback(id) {
+  /* 重开时回填已有反馈，且可改标回「有帮助」或清除标记 */
+  const cur = repliesFb[id] || "";
+  let note = "";
+  fbChoice = "";
+  if (cur.startsWith("needs_fix:")) {
+    const body = cur.slice(10);
+    const hit = FB_OPTS.find(o => body === o || body.startsWith(o + "："));
+    if (hit) { fbChoice = hit; note = body === hit ? "" : body.slice(hit.length + 1); }
+    else note = body;
+  }
+  openSheet(`
+    <h2>哪里需要修正？</h2>
+    <div class="sub">您的反馈会进入话术迭代库，帮助 AI 下次说得更好</div>
+    <div class="fb-opts">${FB_OPTS.map(o =>
+      `<button onclick="pickFb(this,'${o}')" class="${o === fbChoice ? "on" : ""}">${o}</button>`).join("")}</div>
+    <div class="field">
+      <label for="fbNote">补充说明（选填）</label>
+      <textarea id="fbNote" placeholder="例如：应该先安抚客户情绪" oninput="fbValidate()">${esc(note)}</textarea>
+    </div>
+    <button class="btn-primary xl" id="fbSubmit" disabled onclick="submitFb(${id})">提交反馈</button>
+    ${cur ? `<button class="btn-text" style="width:100%;justify-content:center;margin-top:6px"
+        onclick="relabel(${id}, 'good')">改标为：有帮助</button>
+      <button class="btn-text muted" style="width:100%;justify-content:center"
+        onclick="relabel(${id}, '')">清除反馈标记</button>` : ""}
+  `);
+  fbValidate();
+}
+async function relabel(id, val) {
+  try {
+    await setFeedback(id, val);
+    forceCloseSheet();
+    toast(val ? "已改标为「有帮助」" : "已清除反馈标记");
+    loadLog();
+  } catch (e) { toast("操作失败，请重试", false); }
+}
+function pickFb(btn, val) {
+  fbChoice = fbChoice === val ? "" : val;
+  document.querySelectorAll(".fb-opts button").forEach(b =>
+    b.classList.toggle("on", b.textContent === fbChoice));
+  fbValidate();
+}
+function fbValidate() {
+  const note = (document.getElementById("fbNote") || {}).value || "";
+  document.getElementById("fbSubmit").disabled = !fbChoice && !note.trim();
+}
+async function submitFb(id) {
+  const note = (document.getElementById("fbNote") || {}).value || "";
+  const text = [fbChoice, note.trim()].filter(Boolean).join("：");
+  const btn = document.getElementById("fbSubmit");
+  btn.disabled = true; btn.textContent = "提交中…";
+  try {
+    await setFeedback(id, "needs_fix:" + text);
+    forceCloseSheet(); toast("已记录，感谢反馈"); loadLog();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = "提交反馈";
+    toast("操作失败，请重试", false);
+  }
+}
+
+/* ============ 看板 ============ */
+/* 默认「今天」：管理员早上打开控制台，想知道的是昨天到今天发生了什么，
+   不是开张以来的累计——那个数字每天都差不多，看不出好坏。 */
+let boardRange = lsGet("board_range") || "today";
+
+function setRange(r) {
+  boardRange = r; lsSet("board_range", r);
+  lastSig.board = null;      // 换了时间范围必须重画，哪怕数字碰巧一样
+  loadBoard();
+}
+
+async function exportLeads() {
+  /* 管理员的主视图其实是一张表：能打印、能转发、能在会上过一遍。
+     用 fetch 而不是 <a download>，是因为要带令牌头。 */
+  toast("正在生成表格…");
+  try {
+    const r = await fetch(`/console/export/leads?range=${boardRange}`,
+      { headers: { "X-Admin-Token": token } });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const blob = await r.blob();
+    const name = decodeURIComponent(
+      (r.headers.get("content-disposition") || "").split("''")[1] || "客户档案.xlsx");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    a.remove(); URL.revokeObjectURL(url);
+    toast(`已导出 ${r.headers.get("x-row-count") || 0} 条`);
+  } catch (e) { toast("导出失败，请重试", false); }
+}
+
+/* 员工处理情况：管理员真正要看的那张表。
+   「在办数」只说明此刻手上压着多少，说明不了做得怎么样——
+   分到几单、跟进了几单、多久跟上，才是四个能问出话来的数。 */
+function renderStaff(staff, label) {
+  const card = document.getElementById("staffCard");
+  if (!card) return;
+  if (!staff.length) { card.hidden = true; return; }
+  card.hidden = false;
+  const head = `
+    <div class="row" style="flex-wrap:nowrap;padding:0 0 6px;border-bottom:1px solid var(--line)">
+      <span class="l" style="flex:2">律师</span>
+      <span class="l" style="flex:1;text-align:right">分到</span>
+      <span class="l" style="flex:1;text-align:right">已跟进</span>
+      <span class="l" style="flex:1;text-align:right">成交</span>
+      <span class="l" style="flex:1.4;text-align:right">平均响应</span>
+    </div>`;
+  document.getElementById("staffTable").innerHTML = head + staff.map(s => {
+    /* 未跟进的 P0 标红：这是唯一需要管理员当场做点什么的数 */
+    const warn = s.p0_pending > 0;
+    const hrs = s.avg_hours === null || s.avg_hours === undefined
+      ? "—" : (s.avg_hours < 1 ? "<1 小时" : `${s.avg_hours} 小时`);
+    return `
+      <div class="row" style="flex-wrap:nowrap;padding:8px 0;border-bottom:1px solid var(--line)">
+        <span style="flex:2;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${esc(s.name)}${warn ? ` <span class="pchip p0">P0×${s.p0_pending} 待联系</span>` : ""}
+        </span>
+        <span style="flex:1;text-align:right;font-size:14px">${s.assigned}</span>
+        <span style="flex:1;text-align:right;font-size:14px">${s.handled}
+          <span class="l">(${s.handled_rate}%)</span></span>
+        <span style="flex:1;text-align:right;font-size:14px;color:var(--ok)">${s.converted}</span>
+        <span style="flex:1.4;text-align:right;font-size:14px">${hrs}</span>
+      </div>`;
+  }).join("") +
+    `<div class="meta" style="margin-top:8px">「${esc(label)}」进线的线索 ·
+      平均响应 = 派单到首次标记「已联系」的间隔</div>`;
+}
+
+/* ============ 知识库 ============ */
+let kbView = "draft", kbCache = [];
+function setKbView(v) {
+  kbView = v;
+  for (const [id, k] of [["segKbDraft", "draft"], ["segKbOk", "approved"], ["segKbOff", "retired"]]) {
+    document.getElementById(id).classList.toggle("on", k === v);
+  }
+  loadKb();
+}
+async function loadKb() {
+  const el = document.getElementById("kbList");
+  if (!loadedOnce.kb) el.innerHTML = skeleton();
+  let data;
+  try { data = await api("/knowledge?status=" + kbView); }
+  catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadKb"); return; }
+  loadedOnce.kb = true;
+  kbCache = data.items || [];
+  const c = data.counts || {};
+  const n = (id, v) => { document.getElementById(id).textContent = v ? ` ${v}` : ""; };
+  n("kbNDraft", c.draft); n("kbNOk", c.approved); n("kbNOff", c.retired);
+  /* 待审核的条目挂角标：导进来没人审 = AI 一条也用不上，而看板上
+     什么都不会提示，很容易就这么放着了 */
+  const badge = document.getElementById("kbBadge");
+  badge.hidden = !c.draft;
+  badge.textContent = c.draft > 99 ? "99+" : c.draft;
+  if (!kbCache.length) {
+    el.innerHTML = kbView === "draft"
+      ? emptyState("book", "没有待审核的口径",
+          "把常见问答导进来（抖音后台那份就可以），审核通过后 AI 遇到相近问题就照这个说法答。")
+      : emptyState("book", kbView === "approved" ? "还没有启用的口径" : "没有停用的条目",
+          "「已启用」的条目才会被 AI 引用。");
+    return;
+  }
+  el.innerHTML = kbCache.map(k => {
+    const bad = (k.flagged || []).length;
+    return `
+    <div class="card">
+      <div class="row" style="flex-wrap:nowrap">
+        <b style="font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.question)}</b>
+        ${bad ? `<span class="badge warn" style="flex:none">合规待改</span>` : ""}
+        <span class="meta" style="margin-left:auto;flex:none">${k.hits ? "被引用 " + k.hits + " 次" : "未被引用"}</span>
+      </div>
+      <div style="font-size:14px;margin-top:6px;white-space:pre-wrap;line-height:1.6">${esc(k.answer)}</div>
+      ${bad ? `<div class="meta" style="margin-top:6px;color:var(--warn)">
+        ${ico("alert")} 踩到禁止事项：${esc(k.flagged.join("、"))}——改写措辞后才能通过审核</div>` : ""}
+      <div class="meta" style="margin-top:4px">来源：${esc(kbSource(k.source))}</div>
+      <div class="row fb-row">
+        ${k.status !== "approved"
+          ? `<button class="btn-text" data-act="kbok" data-kid="${k.id}">${ico("check")}通过并启用</button>` : ""}
+        ${k.status === "approved"
+          ? `<button class="btn-text muted" data-act="kboff" data-kid="${k.id}">停用</button>` : ""}
+        <button class="btn-text muted" data-act="kbedit" data-kid="${k.id}">改写</button>
+        <button class="btn-text muted" style="margin-left:auto" data-act="kbdel" data-kid="${k.id}">删除</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+/* 角标跨页保持新鲜：导进来一批没人审 = AI 一条也用不上，
+   而这件事在别的页面上没有任何提示，很容易就这么放着了。 */
+async function refreshKbBadge() {
+  const badge = document.getElementById("kbBadge");
+  if (!badge) return;
+  try {
+    const d = await api("/knowledge?status=draft");
+    const n = (d.counts || {}).draft || 0;
+    badge.hidden = !n;
+    badge.textContent = n > 99 ? "99+" : n;
+  } catch (e) { /* 静默：角标不是关键路径 */ }
+}
+function kbSource(s) {
+  return { douyin: "抖音后台导入", manual: "手工录入", lawyer: "律师实答提炼" }[s] || (s || "—");
+}
+async function setKbStatus(kid, status) {
+  try { await api(`/knowledge/${kid}/status`, { method: "POST", body: JSON.stringify({ status }) }); }
+  catch (e) { toast(e.detail || "操作失败，请重试", false); return; }
+  toast(status === "approved" ? "已启用，AI 现在会引用这条" : "已停用");
+  loadKb();
+}
+function delKnowledge(kid) {
+  const k = kbCache.find(x => x.id === kid);
+  openSheet(`<h2>删除这条口径？</h2>
+    <p style="font-size:15px;margin:12px 0 20px">${esc((k && k.question) || "")}</p>
+    <button class="btn-primary xl" onclick="doDelKnowledge(${kid})">确认删除</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">取消</button>`);
+}
+async function doDelKnowledge(kid) {
+  closeSheet();
+  try { await api(`/knowledge/${kid}`, { method: "DELETE" }); }
+  catch (e) { toast(e.detail || "删除失败，请重试", false); return; }
+  toast("已删除"); loadKb();
+}
+function editKnowledge(kid) {
+  const k = kbCache.find(x => x.id === kid) || { id: 0, question: "", answer: "", tags: "" };
+  const isNew = !kid;
+  openSheet(`<h2>${isNew ? "新增一条口径" : "改写口径"}</h2>
+    <div class="field"><label>客户会怎么问</label>
+      <input id="kb_q" value="${esc(k.question)}" placeholder="公司拖欠工资不发怎么办">
+      <div class="help">按意思匹配，不用穷举写法；同一个问题重复录入只会更新答案</div>
+    </div>
+    <div class="field"><label>所内统一口径</label>
+      <textarea id="kb_a" rows="5" placeholder="可以先申请劳动仲裁，需要准备劳动合同、工资流水、考勤记录…">${esc(k.answer)}</textarea>
+      <div class="help">别写具体金额、别承诺结果——这两类会被合规闸门拦下，条目也通不过审核</div>
+    </div>
+    ${isNew ? "" : `<div class="meta" style="margin-bottom:10px">改写后会退回「待审核」，需要再点一次通过才生效</div>`}
+    <button class="btn-primary xl" onclick="saveKnowledge(${isNew ? 0 : kid})">保存</button>`);
+}
+async function saveKnowledge(kid) {
+  const question = document.getElementById("kb_q").value.trim();
+  const answer = document.getElementById("kb_a").value.trim();
+  if (!question || !answer) { toast("问题和答案都要填", false); return; }
+  try {
+    if (kid) await api(`/knowledge/${kid}`, { method: "PUT", body: JSON.stringify({ question, answer }) });
+    else await api("/knowledge", { method: "POST", body: JSON.stringify({ question, answer }) });
+  } catch (e) { toast(e.detail || "保存失败，请重试", false); return; }
+  closeSheet();
+  toast("已保存，在「待审核」里点通过后生效");
+  setKbView("draft");
+}
+function openKbImport() {
+  openSheet(`<h2>批量粘贴导入</h2>
+    <p style="font-size:14px;margin:10px 0;line-height:1.7">
+      一行一条，问题和答案之间用 <b>Tab</b> 或 <b>逗号</b> 隔开。<br>
+      从抖音后台或 Excel 里整列复制过来，格式一般就是对的。</p>
+    <div class="field">
+      <textarea id="kb_bulk" rows="9" placeholder="拖欠工资怎么办&#9;可以申请劳动仲裁，需要准备…&#10;工伤怎么赔&#9;先做工伤认定，再做伤残鉴定…"></textarea>
+    </div>
+    <div class="meta" style="margin-bottom:10px">导入的条目一律落「待审核」，逐条看过再启用。</div>
+    <button class="btn-primary xl" onclick="doKbImport()">导入</button>`);
+}
+async function doKbImport() {
+  const raw = document.getElementById("kb_bulk").value;
+  if (!raw.trim()) { toast("还没粘贴内容", false); return; }
+  let r;
+  try {
+    r = await api("/knowledge/import", {
+      method: "POST", body: raw, headers: { "Content-Type": "text/plain" },
+    });
+  } catch (e) { toast(e.detail || "导入失败，请重试", false); return; }
+  closeSheet();
+  toast(`导入 ${r.added} 条${r.skipped ? `，跳过 ${r.skipped} 行` : ""}` +
+        `${r.flagged ? `，其中 ${r.flagged} 条合规待改` : ""}`);
+  setKbView("draft");
+}
+
+/* 「需要人看一眼」：待办页签取消后，它兜住的那几类不能跟着消失——
+   语音/图片消息 AI 读不了，紧急情形需要人当场看。有才显示，没有就不占地方。 */
+async function renderPending() {
+  const card = document.getElementById("pendingCard");
+  if (!card) return;
+  let list = [];
+  try { list = await api("/todo"); } catch (e) { return; }
+  list = list.filter(r => r.status !== "done");
+  paintTodoBadge(list.length);
+  if (!list.length) { card.hidden = true; return; }
+  card.hidden = false;
+  document.getElementById("pendingList").innerHTML = list.slice(0, 6).map(r => {
+    const q = r.question
+      || (r.summary || "").split("\n").find(l => l.startsWith("客户问题："))?.slice(5)
+      || r.summary || "";
+    return `
+      <div class="row" style="padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap;gap:8px">
+        ${r.urgent ? `<span class="badge bad">紧急</span>` : ""}
+        <span style="flex:1;min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(q)}</span>
+        <button class="btn-text muted" data-act="convo" data-gid="${esc(r.group_id)}">查看</button>
+        <button class="btn-tonal" onclick="doneTodo(${r.id})">已处理</button>
+      </div>`;
+  }).join("") + (list.length > 6
+    ? `<div class="meta" style="margin-top:6px">另有 ${list.length - 6} 条</div>` : "");
+}
+
+async function loadBoard() {
+  renderPending();
+  const t = document.getElementById("tiles");
+  if (!loadedOnce.board) t.innerHTML = skeleton();
+  document.querySelectorAll("[data-range]").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.range === boardRange)));
+  let m;
+  try { m = await api("/metrics?range=" + encodeURIComponent(boardRange)); }
+  catch (e) { if (String(e.message) !== "401") t.innerHTML = errCard("loadBoard"); return; }
+  loadedOnce.board = true;
+  document.getElementById("boardFoot").textContent =
+    `统计口径：线索按「${m.range_label || "全部"}」计 · 每分钟自动更新` +
+    (lastSuccess ? ` · 最后更新 ${fmtLast(lastSuccess)}` : "");
+  const sig = JSON.stringify(m);
+  if (lastSig.board === sig) return;
+  lastSig.board = sig;
+  const st = m.leads_by_status || {};
+  t.innerHTML = `
+    <div class="tile"><div class="n" style="color:var(--bad)">${m.leads_p0 || 0}</div><div class="l">P0 强意愿</div></div>
+    <div class="tile"><div class="n">${m.leads_with_contact || 0}</div><div class="l">留下联系方式</div></div>
+    <div class="tile"><div class="n">${m.decisions_total}</div><div class="l">消息判断总数</div></div>
+    <div class="tile"><div class="n">${m.replies_total}</div><div class="l">AI 回复条数</div></div>
+    <div class="tile"><div class="n" ${m.urgent_count > 0 ? 'style="color:var(--bad)"' : ""}>${m.urgent_count}</div><div class="l">紧急消息</div></div>
+    <div class="tile"><div class="n" ${m.compliance_blocked > 0 ? 'style="color:var(--warn)"' : ""}>${m.compliance_blocked}</div><div class="l">合规拦截</div></div>
+    <div class="tile"><div class="duo">
+      <div><div class="n" style="color:var(--ok)">${m.feedback_good}</div><div class="l">有帮助</div></div>
+      <div><div class="n" style="color:var(--warn)">${m.feedback_needs_fix}</div><div class="l">需修正</div></div>
+    </div><div class="l" style="margin-top:4px">话术反馈</div></div>`;
+  /* 线索漏斗：合伙人真正关心的是「进来多少 → 联系了多少 → 成交多少」 */
+  const funnel = [
+    ["线索总数", m.leads_total || 0, "var(--ink-1)"],
+    ["待跟进", st.new || 0, "var(--bad)"],
+    ["已联系", st.contacted || 0, "var(--warn)"],
+    ["已成交", st.converted || 0, "var(--ok)"],
+  ];
+  if (st.invalid) funnel.push(["无效", st.invalid, "var(--ink-2)"]);
+  const fEl = document.getElementById("funnel");
+  if (fEl) {
+    /* 分母排除无效线索：空号/骚扰不是「没转化成功」，是根本不该进分母 */
+    const valid = (m.leads_total || 0) - (st.invalid || 0);
+    const conv = valid > 0 ? Math.round((st.converted || 0) / valid * 100) : 0;
+    fEl.innerHTML = funnel.map(([label, n, c]) =>
+      `<div style="flex:1;text-align:center">
+         <div style="font-size:22px;font-weight:700;color:${c}">${n}</div>
+         <div class="l">${label}</div>
+       </div>`).join("") +
+      `<div style="flex:1;text-align:center">
+         <div style="font-size:22px;font-weight:700;color:var(--brand)">${conv}%</div>
+         <div class="l">成交率</div>
+       </div>`;
+    const bs = m.leads_by_source || {};
+    const srcEl = document.getElementById("funnelSrc");
+    if (srcEl) {
+      const bits = [["抖音", bs.dy], ["微信客服", bs.kf], ["群聊", bs.group]]
+        .filter(([, n]) => n > 0).map(([z, n]) => `${z} ${n}`);
+      srcEl.textContent = bits.length > 1 ? "来源：" + bits.join(" · ") : "";
+    }
+  }
+  /* 分律师负载（管理员）：谁手上压着 P0、派单是否均衡，一眼可见 */
+  const lbCard = document.getElementById("lawyerBoardCard");
+  if (m.by_lawyer && m.by_lawyer.length) {
+    lbCard.hidden = false;
+    document.getElementById("lawyerBoard").innerHTML =
+      m.by_lawyer.map(l => `
+        <div class="row" style="padding:7px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap">
+          <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;${l.active ? "" : "opacity:.5"}">${esc(l.name)}</span>
+          ${l.on_duty ? "" : `<span class="chip">停接新单</span>`}
+          <span class="meta" style="margin-left:auto">在办 ${l.open}</span>
+          ${l.p0 ? `<span class="pchip p0" style="margin-left:8px">P0×${l.p0}</span>` : ""}
+        </div>`).join("") +
+      (m.leads_unassigned
+        ? `<div class="meta" style="margin-top:8px;color:var(--warn)">另有 ${m.leads_unassigned} 条线索未指派（名册启用前的旧单）</div>`
+        : "");
+  } else if (lbCard) lbCard.hidden = true;
+  renderStaff(m.staff || [], m.range_label || "");
+  const order = [["answer", "--s1"], ["handoff", "--s2"], ["silence", "--s3"]];
+  const total = order.reduce((s, [k]) => s + (m.by_action[k] || 0), 0);
+  document.getElementById("dist").innerHTML = total === 0
+    ? `<div style="flex:1;background:var(--line)"></div>`
+    : order.map(([k, c]) =>
+        `<div style="flex:${m.by_action[k] || 0};background:var(${c})"></div>`).join("");
+  document.getElementById("distLegend").innerHTML = total === 0
+    ? `<span class="meta">暂无判断数据</span>`
+    : order.map(([k, c]) => {
+        const n = m.by_action[k] || 0;
+        return `<span><i style="background:var(${c})"></i>${ZH.action[k]} ${n} · ${Math.round(n / total * 100)}%</span>`;
+      }).join("");
+}
+
+/* ============ 群管理 ============ */
+async function loadGroups() {
+  const el = document.getElementById("groupList");
+  if (!loadedOnce.groups) el.innerHTML = skeleton();
+  try { groupsCache = await api("/groups"); }
+  catch (e) { if (String(e.message) !== "401") el.innerHTML = errCard("loadGroups"); return; }
+  loadedOnce.groups = true;
+  const sig = JSON.stringify(groupsCache);
+  if (lastSig.groups === sig) return;
+  lastSig.groups = sig;
+  if (!groupsCache.length) {
+    el.innerHTML = `
+      <div class="card">
+        <div style="font-size:17px;font-weight:600;margin-bottom:10px">三步开始使用</div>
+        ${["新增群档案，填入群 ID 与承办律师",
+           "在企业微信群里添加群机器人，把 Webhook 地址粘贴进档案",
+           "打开该群的 AI 开关"].map((s, i) => `
+          <div class="row" style="margin-bottom:8px;flex-wrap:nowrap;align-items:flex-start">
+            <span class="badge brand" style="border-radius:50%;width:22px;height:22px;justify-content:center;padding:0;flex:none">${i + 1}</span>
+            <span style="font-size:15px">${s}</span>
+          </div>`).join("")}
+        <button class="btn-primary xl" style="margin-top:8px" onclick="editGroup(null)">新增第一个群档案</button>
+      </div>`;
+    return;
+  }
+  renderGroups(false);
+}
+
+/* 检索 + 前端分页：导入抖音客资后会话档案有几百个，一次渲染整页会卡死手机 */
+const groupFilter = { q: "", source: "" };
+let groupShown = 0;
+const GROUP_PAGE = 40;
+let groupSearchTimer = null;
+function debouncedGroupSearch() {
+  clearTimeout(groupSearchTimer);
+  groupSearchTimer = setTimeout(() => {
+    groupFilter.q = document.getElementById("groupQ").value.trim().toLowerCase();
+    renderGroups(false);
+  }, 250);
+}
+function toggleGroupFilter(btn) {
+  groupFilter.source = groupFilter.source === btn.dataset.v ? "" : btn.dataset.v;
+  document.querySelectorAll("#groupFilters .fchip").forEach(b =>
+    b.classList.toggle("on", groupFilter.source === b.dataset.v));
+  renderGroups(false);
+}
+function groupSourceOf(g) {
+  if (g.group_id.startsWith("dy:")) return "dy";
+  if (g.group_id.startsWith("kf:") || g.kf_open_kfid) return "kf";
+  return "group";
+}
+function filteredGroups() {
+  return groupsCache.filter(g => {
+    if (groupFilter.source && groupSourceOf(g) !== groupFilter.source) return false;
+    if (groupFilter.q) {
+      const hay = `${g.name} ${g.lawyer_name} ${g.case_type} ${g.group_id}`.toLowerCase();
+      if (!hay.includes(groupFilter.q)) return false;
+    }
+    return true;
+  });
+}
+function renderGroups(more) {
+  const el = document.getElementById("groupList");
+  const rows = filteredGroups();
+  groupShown = more ? groupShown + GROUP_PAGE : GROUP_PAGE;
+  const page = rows.slice(0, groupShown);
+  document.getElementById("groupCount").textContent =
+    rows.length ? `共 ${rows.length} 个会话${page.length < rows.length ? ` · 已显示 ${page.length}` : ""}` : "";
+  document.getElementById("groupMore").hidden = page.length >= rows.length;
+  if (!rows.length) {
+    el.innerHTML = emptyState("search", "没有匹配的会话", "换个关键词，或点掉筛选条件再试");
+    return;
+  }
+  /* 值一律走 data-* + 事件委托：group_id 拼进内联 onclick 的 JS 字符串
+     无法安全转义（HTML 实体在事件属性里会先解码），是注入面 */
+  el.innerHTML = page.map(g => {
+    const metaBits = [g.lawyer_name ? g.lawyer_name + "律师" : "", g.case_type, g.case_stage]
+      .filter(Boolean).join(" · ");
+    return `
+    <div class="card">
+      <div class="row" style="flex-wrap:nowrap">
+        <b style="font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(g.name || g.group_id)}</b>
+        ${g.kf_open_kfid ? `<span class="chip" style="flex:none">微信客服</span>`
+          : g.group_id.startsWith("dy:") ? `<span class="chip" style="flex:none">抖音</span>`
+          : g.bot_webhook ? `<span class="chip" style="flex:none">群聊助手</span>` : ""}
+        <span class="badge ${g.client_status === "signed" ? "ok" : "brand"}" style="flex:none">${zh(ZH.status, g.client_status)}</span>
+        <label class="switch" style="margin-left:auto">
+          <input type="checkbox" ${g.ai_enabled ? "checked" : ""} aria-label="AI 开关"
+                 data-act="ai" data-gid="${esc(g.group_id)}">
+          <span></span>
+        </label>
+      </div>
+      ${metaBits ? `<div class="meta" style="margin-top:4px">${esc(metaBits)}</div>` : ""}
+      <div class="row" style="margin-top:10px">
+        ${g.kf_open_kfid
+          ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("message")}微信客服会话 · 自动接入</span>`
+          : g.group_id.startsWith("dy:")
+            ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("phone")}客资台账 · 电话回访</span>`
+            : g.bot_webhook
+              ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}群内 @ 助手 · 自动接入</span>`
+              : g.robot_webhook
+                ? `<span class="meta" style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--ok)"></span>${ico("bot")}机器人已配置</span>`
+                : `<span style="font-size:12px;color:var(--warn);display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:var(--warn)"></span>未绑定机器人，AI 无法在此群发言</span>`}
+        <button class="btn-text muted" style="margin-left:auto" data-act="convo" data-gid="${esc(g.group_id)}">${ico("message")}查看对话</button>
+        <button class="btn-text muted" data-act="edit" data-gid="${esc(g.group_id)}">编辑${ico("chevron")}</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+document.getElementById("groupList").addEventListener("click", e => {
+  const btn = e.target.closest("[data-act='edit']");
+  if (btn) editGroup(btn.dataset.gid);
+});
+document.getElementById("groupList").addEventListener("change", e => {
+  const input = e.target.closest("[data-act='ai']");
+  if (input) toggleAi(input.dataset.gid, input);
+});
+
+/* ============ 全站事件委托 ============
+   动态值（group_id / userid）一律走 data-* 属性，不拼进内联 onclick 的 JS 字符串：
+   esc() 做的是 HTML 实体转义，而事件属性里浏览器会先把实体解码再当 JS 执行，
+   一个带引号的群名就能越出字符串——这是存储型 XSS 的入口。 */
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const { act, gid, uid, lead } = el.dataset;
+  if (act === "convo") openConversation(gid);
+  else if (act === "takeover") takeOver(gid);
+  else if (act === "dotakeover") doTakeOver(gid);
+  else if (act === "assign") doAssign(Number(lead), uid);
+  else if (act === "sendlogin") sendLogin(uid);
+  else if (act === "copylogin") copyLogin(uid);
+  else if (act === "editlawyer") editLawyer(uid);
+  else if (act === "dellawyer") askDeleteLawyer(uid);
+  else if (act === "release") releaseToAi(gid);
+  else if (act === "forget") askForget(gid);
+  else if (act === "doforget") doForget(gid);
+  else if (act === "diagnose") diagnose(gid);
+  else if (act === "kbok") setKbStatus(Number(el.dataset.kid), "approved");
+  else if (act === "kboff") setKbStatus(Number(el.dataset.kid), "retired");
+  else if (act === "kbedit") editKnowledge(Number(el.dataset.kid));
+  else if (act === "kbdel") delKnowledge(Number(el.dataset.kid));
+});
+document.addEventListener("change", e => {
+  const el = e.target.closest("[data-act='duty']");
+  if (el) toggleDuty(el.dataset.uid, el);
+});
+let pendingEnableGid = null;
+async function toggleAi(gid, input) {
+  const on = input.checked;
+  /* 从严处理：健康状态未知时按正式模式对待（对外发言不可逆） */
+  if (on && (!healthCache || healthCache.mode === "live")) {
+    input.checked = false; // 待确认
+    pendingEnableGid = gid;
+    openSheet(`
+      <h2>在正式模式下开启该群 AI？</h2>
+      <p style="font-size:15px;margin:12px 0 20px">开启后，AI 的回复将直接发送到该客户群，客户会立即看到。</p>
+      <button class="btn-primary xl" onclick="confirmEnable()">确认开启</button>
+      <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">暂不开启</button>
+    `);
+    return;
+  }
+  await postAiSwitch(gid, on, input);
+}
+async function confirmEnable() {
+  const gid = pendingEnableGid;
+  pendingEnableGid = null;
+  forceCloseSheet();
+  if (gid) await postAiSwitch(gid, true, null);
+}
+async function postAiSwitch(gid, on, input) {
+  try {
+    await api(`/groups/${encodeURIComponent(gid)}/ai`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: on }),
+    });
+    toast(on ? "已开启本群 AI" : "已暂停本群 AI，将不再自动回复");
+    lastSig.groups = null;
+    loadGroups();
+  } catch (e) {
+    if (input) input.checked = !on;
+    toast("设置失败，请重试", false);
+  }
+}
+function editGroup(gid) {
+  /* 新档案 AI 默认关闭：正式模式下的开启必须走确认闸门（引导卡第 3 步即开 AI） */
+  const g = groupsCache.find(x => x.group_id === gid) || {
+    group_id: "", name: "", client_status: "prospect", case_type: "", case_stage: "",
+    lawyer_name: "", lawyer_userid: "", backup_userid: "", ai_enabled: false, robot_webhook: "",
+  };
+  const isNew = !gid;
+  openSheet(`
+    <h2>${isNew ? "新增群档案" : "编辑：" + esc(g.name || g.group_id)}</h2>
+    <div class="eyebrow">基础信息</div>
+    <div class="field" id="fw_gid">
+      <label>群 ID ${isNew ? '<span class="req">*</span>' : ""}</label>
+      <input id="f_gid" value="${esc(g.group_id)}" ${isNew ? "" : "readonly"}>
+      <div class="help">企业微信群的 ChatId，创建后不可修改；填错时可在本页底部删除档案后重建</div>
+    </div>
+    <div class="field"><label>群名称</label>
+      <input id="f_name" value="${esc(g.name)}" placeholder="例如：张女士劳动仲裁服务群"></div>
+    <div class="field"><label>客户状态</label>
+      <select id="f_status">
+        <option value="prospect" ${g.client_status === "prospect" ? "selected" : ""}>咨询中（未成交）</option>
+        <option value="signed" ${g.client_status === "signed" ? "selected" : ""}>已成交</option>
+      </select></div>
+    <div class="eyebrow">案件信息</div>
+    <div class="field"><label>案件类型</label>
+      <input id="f_case" value="${esc(g.case_type)}" placeholder="例如：劳动仲裁"></div>
+    <div class="field"><label>案件阶段</label>
+      <input id="f_stage" value="${esc(g.case_stage)}">
+      <div class="help">可留空，例如：已提交仲裁申请</div></div>
+    <div class="eyebrow">责任人与机器人</div>
+    <div class="field"><label>承办律师姓氏</label>
+      <input id="f_lawyer" value="${esc(g.lawyer_name)}">
+      <div class="help">仅填姓氏，用于群内称呼。例如填「魏」，客户会看到「魏律师」</div></div>
+    <div class="field"><label>律师企微账号</label>
+      <input id="f_luid" value="${esc(g.lawyer_userid)}">
+      <div class="help">用于向律师推送提醒</div></div>
+    <div class="field"><label>第二责任人企微账号</label>
+      <input id="f_buid" value="${esc(g.backup_userid)}">
+      <div class="help">律师超时未处理时升级提醒此人，可留空</div></div>
+    <div class="field" id="fw_hook"><label>群机器人 Webhook</label>
+      <input id="f_hook" value="${esc(g.robot_webhook)}">
+      <div class="help">在企业微信群 → 群机器人 → Webhook 地址中复制，粘贴完整地址或 key 均可。如群里收不到消息，请回来核对此处地址</div></div>
+    <button class="btn-primary xl" id="gSave" onclick="saveGroup(${isNew}, ${JSON.stringify(!!g.ai_enabled)})">保存群档案</button>
+    <button class="btn-text muted" style="width:100%;justify-content:center;margin-top:6px" onclick="closeSheet()">取消</button>
+    ${isNew ? "" : `<button class="btn-text btn-danger" style="width:100%;justify-content:center;margin-top:14px"
+      onclick="askDeleteGroup()">删除群档案</button>`}
+  `, true);
+}
+let pendingDeleteGid = null;
+function askDeleteGroup() {
+  /* 内嵌确认条而不是覆写整个弹层：覆写会把用户刚填了一半的档案无声丢掉，
+     「取消」也回不去。照 discardBar 的模式在表单底部就地确认。 */
+  if (document.getElementById("delBar")) return;
+  pendingDeleteGid = document.getElementById("f_gid").value.trim();
+  const bar = document.createElement("div");
+  bar.id = "delBar";
+  bar.style.cssText = "margin-top:14px;padding:12px 14px;border-radius:10px;" +
+    "background:var(--bad-bg,#FBEAEA)";
+  bar.innerHTML = `<div style="font-size:14px;color:var(--bad);line-height:1.6">
+      删除后 AI 不再关注该会话；历史消息与记录保留。此操作不可恢复。</div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn-text muted" style="min-height:36px"
+        onclick="document.getElementById('delBar').remove()">取消</button>
+      <button class="btn-text" style="margin-left:auto;min-height:36px;color:var(--bad)"
+        onclick="confirmDeleteGroup()">确认删除</button>
+    </div>`;
+  document.getElementById("sheetBody").appendChild(bar);
+  bar.scrollIntoView({ block: "nearest" });
+}
+async function confirmDeleteGroup() {
+  const gid = pendingDeleteGid;
+  pendingDeleteGid = null;
+  sheetDirty = false;
+  try {
+    await api(`/groups/${encodeURIComponent(gid)}`, { method: "DELETE" });
+    forceCloseSheet();
+    toast("群档案已删除");
+    lastSig.groups = null;
+    loadGroups();
+  } catch (e) { toast("操作失败，请重试", false); }
+}
+async function saveGroup(isNew, aiEnabled) {
+  const gid = document.getElementById("f_gid").value.trim();
+  const wrap = document.getElementById("fw_gid");
+  if (!gid) {
+    wrap.classList.add("error");
+    wrap.querySelector(".help").textContent = "请填写群 ID";
+    wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  /* Webhook 最低限度形态校验：拦下粘错内容导致的「显示已配置、实际发不出」 */
+  const hook = document.getElementById("f_hook").value.trim();
+  const hookWrap = document.getElementById("fw_hook");
+  const hookOk = !hook
+    || /^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?key=[\w-]+$/.test(hook)
+    || /^[A-Za-z0-9-]{16,64}$/.test(hook);
+  if (!hookOk) {
+    hookWrap.classList.add("error");
+    hookWrap.querySelector(".help").textContent =
+      "地址格式看起来不对：请粘贴完整的 Webhook 地址，或只粘贴其中 key= 后面的部分";
+    hookWrap.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  const btn = document.getElementById("gSave");
+  btn.disabled = true; btn.textContent = "保存中…";
+  const profile = {
+    group_id: gid,
+    name: document.getElementById("f_name").value.trim(),
+    client_status: document.getElementById("f_status").value,
+    case_type: document.getElementById("f_case").value.trim(),
+    case_stage: document.getElementById("f_stage").value.trim(),
+    lawyer_name: document.getElementById("f_lawyer").value.trim(),
+    lawyer_userid: document.getElementById("f_luid").value.trim(),
+    backup_userid: document.getElementById("f_buid").value.trim(),
+    ai_enabled: aiEnabled,
+    robot_webhook: document.getElementById("f_hook").value.trim(),
+  };
+  try {
+    await api(`/groups/${encodeURIComponent(gid)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    });
+    forceCloseSheet(); toast("群档案已保存");
+    lastSig.groups = null;
+    loadGroups();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = "保存群档案";
+    toast("操作失败，请重试", false);
+  }
+}
+
+/* ============ 框架 ============ */
+function setTab(t, byUser = false) {
+  // 用户自己点过之后就别再自动跳转（管理员默认落看板只该发生在他没选择过时）
+  if (byUser) lsSet("tab_touched", "1");
+  tab = t;
+  // 待办已不是页签（见导航处注释），但区块留在 DOM 里以复用其渲染函数
+  for (const k of ["leads", "log", "board", "groups", "team", "kb"]) {
+    document.getElementById("tab-" + k).hidden = k !== t;
+    document.getElementById("nav-" + k).classList.toggle("on", k === t);
+  }
+  document.getElementById("tab-todo").hidden = true;  // 区块留着但永不显示
+  refresh();
+}
+async function refresh() {
+  loadHealth();
+  try {
+    if (!groupsCache.length) {
+      try { groupsCache = await api("/groups"); } catch (e) { /* 各板块自行处理 */ }
+    }
+    else refreshTodoBadge(); // 角标跨页告警，不在待办页也保持新鲜
+    // 定时刷新不重置翻页：律师翻到第 3 页正在看，60 秒后被拽回第一页
+    // 且滚动位置丢失，是纯粹的骚扰。已翻页时只刷角标。
+    if (tab === "leads" && leadOffset === 0) await loadLeads();
+    else refreshLeadBadge();
+    if (tab === "log") await loadLog();
+    if (tab === "board") await loadBoard();
+    if (tab === "groups") await loadGroups();
+    if (tab === "team") { await loadTeam(); refreshBulkAssign(); }
+    if (tab === "kb") await loadKb();
+    else if (me && me.role === "admin") refreshKbBadge();
+  } catch (e) { /* 401 已弹登录层 */ }
+}
+setInterval(() => {
+  // 弹层打开时跳过本轮：不打断正在填写/阅读的用户
+  if (document.getElementById("login").hidden && !sheetOpen()) refresh();
+}, 60000);
+(async () => {
+  if (!token) { showLogin(""); return; }
+  try {
+    await whoami();
+    refresh();
+    /* 交接单里的「看完整对话」链接：进页直接把那通对话摊开。
+       律师原本要「开浏览器→找地址→登录→翻列表→找到人」五步，现在一步。
+       深链优先于新手引导——他是带着目的点进来的，不该被教程挡住。 */
+    if (deepLinkGroup) { openConversation(deepLinkGroup); return; }
+    if (!lsGet("help_seen")) {
+      lsSet("help_seen", "1");
+      setTimeout(openStatusPanel, 400);
+    }
+  } catch (e) { /* 401 已弹登录层；网络错误走离线横幅 */ refresh(); }
+})();
+</script>
+</body>
+</html>
