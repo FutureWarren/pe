@@ -560,7 +560,10 @@ class Worker:
             if self.store.get_lead(gid):
                 continue  # 已有线索，交由实时触发路径更新
             group = self.store.get_group(gid)
-            if group is None:
+            if group is None or group.is_retail:
+                # 零售会话不进律所的线索链路。**不挡的话，一个在公众号里问
+                # 保修的人会变成一张推给律师的交接单**——那张单没人看得懂，
+                # 而律师的队列被塞满之后，真的线索会排在后面。
                 continue
             try:
                 lead.dispatch(
@@ -625,6 +628,8 @@ class Worker:
         since = now - timedelta(seconds=max(s.lead_idle_seconds * 4, 86400))
         for gid in self.store.idle_conversations(since, until):
             group = self.store.get_group(gid)
+            if group is not None and group.is_retail:
+                continue  # 零售会话不进律所的长期记忆（案由/进展那套对它没意义）
             if group is None:
                 continue
             try:

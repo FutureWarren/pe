@@ -382,3 +382,47 @@ def test_two_customers_do_not_share_a_budget_or_a_receipt(store):
     p.handle(Inbound("mp", "oB", "我要退货", "b1"), now=NOW)
     assert len(p.sender.sent) == 2
     assert {u for u, _ in p.sender.sent} == {"oA", "oB"}
+
+
+# ------------------------------------------------------------ ⑩ 两条产品线的边界
+def test_a_retail_conversation_shows_up_in_the_console(store):
+    """**影子周的全部意义是「先看它会说什么」。**
+
+    控制台的会话列表按 groups 表列。没有这一行档案，那一周的对话只存在于
+    messages 表里，界面上一条都不显示——「跑了一周，什么都看不到」，
+    整个影子周白过。
+    """
+    pipe(store).handle(msg("保修多久啊"), now=NOW)
+    g = store.get_group("mp:oCUST")
+    assert g is not None and g.is_retail
+
+
+def test_the_law_firm_sweeps_never_touch_a_retail_conversation(store):
+    """**两条产品线共用一个进程，边界必须显式。**
+
+    律所侧的线索简报、客户记忆、静默挽留都是按「安静下来的会话」扫的，
+    **不看渠道**。不挡住的话，一个在公众号里问保修的人会变成一张推给律师的
+    交接单——那张单没人看得懂，而律师的队列被塞满之后真的线索会排在后面。
+    """
+    from responder.models import GroupProfile
+
+    pipe(store).handle(msg("保修多久啊"), now=NOW)
+    g = store.get_group("mp:oCUST")
+    assert g.is_retail, "少了这个标记，律所的定时事务就没有刹车"
+    # 反面：律所自己的会话不该被误判成零售
+    assert not GroupProfile(group_id="kf:a:b", case_type="劳动争议").is_retail
+
+
+def test_the_model_gets_what_was_said_before(store):
+    """「续航怎么样」——模型得知道在问哪台机器，而客户上一句刚说过型号。
+
+    **上下文缺失的表现不是答错，是答得泛**，而泛正是「一看就是机器人」
+    最主要的来源。
+    """
+    p = pipe(store, mode="shadow")
+    p.handle(msg("Mate 70 Pro 多少钱", n=1, at=NOW), now=NOW)
+    at2 = NOW + timedelta(seconds=30)
+    p.handle(msg("保修多久啊", n=2, at=at2), now=at2)
+    h = p._history("mp:oCUST")
+    assert "Mate 70 Pro" in h and "保修" in h
+    assert "客户：" in h

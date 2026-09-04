@@ -32,6 +32,13 @@ class Category(str, Enum):
     OTHER = "other"
 
 
+# 零售会话的标记（见 responder/retail/）。**两条产品线共用一个进程，
+# 边界必须显式。** 律所侧的定时事务（线索简报、客户记忆、静默挽留）是按
+# 「安静下来的会话」扫的，**不看渠道**——不挡住的话，一个在公众号里问保修
+# 的人会变成一张推给律师的交接单，甚至收到一句律所的挽留话术。
+RETAIL_CASE_TYPE = "retail"
+
+
 class GroupProfile(BaseModel):
     """每个客户群绑定的案件上下文，由人工维护，粗粒度即可。"""
 
@@ -81,6 +88,10 @@ class GroupProfile(BaseModel):
     # 比不记得更伤人。
     memory: str = ""
     memory_at: datetime | None = None
+
+    @property
+    def is_retail(self) -> bool:
+        return self.case_type == RETAIL_CASE_TYPE
 
     @property
     def is_douyin(self) -> bool:

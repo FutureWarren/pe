@@ -27,7 +27,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from responder.models import IncomingMessage
+from responder.models import RETAIL_CASE_TYPE, GroupProfile, IncomingMessage
 from responder.retail import replier
 from responder.retail.notify import TodoNotifier
 from responder.retail.phrases import Phrases
@@ -140,6 +140,8 @@ class RetailPipeline:
             msg_type="event" if msg.from_event else "text",
             created_at=msg.at or now,
         ))
+        self._ensure_group(gid)
+
         if not fresh:
             # 微信收不到及时响应会重推同一条（MsgId 相同）。不去重的话
             # 客户一句话被回三遍，而那三遍各吃掉一条额度。
@@ -168,6 +170,7 @@ class RetailPipeline:
             takeover_seconds=self.takeover_seconds,
             store_hint=self.store_hint,
             phrases=self.phrases,
+            history=self._history(gid),
         )
 
         result = Result(
@@ -208,6 +211,39 @@ class RetailPipeline:
             return result
 
         return self._deliver(msg, result, now)
+
+    def _ensure_group(self, gid: str) -> None:
+        """给这通对话建一份档案，**只为一件事：控制台里看得见。**
+
+        影子周的全部意义是「先看它会说什么」，而没有这一行，那些对话只存在于
+        messages 表里——控制台的会话列表是按 groups 表列的，一条都不显示。
+        「跑了一周，什么都看不到」会让整个影子周白过。
+
+        `case_type` 标成 retail 是**边界**不是分类：律所侧的定时事务按「安静
+        下来的会话」扫、不看渠道，这个标记是它们唯一的刹车（见 models.py）。
+        """
+        if self.store.get_group(gid) is not None:
+            return
+        self.store.upsert_group(GroupProfile(
+            group_id=gid, name=f"公众号 {gid.split(':', 1)[-1][:12]}",
+            case_type=RETAIL_CASE_TYPE,
+        ))
+
+    def _history(self, gid: str, limit: int = 8) -> str:
+        """最近几轮对话，喂给模型当上下文。
+
+        没有它，「续航怎么样」这句话模型不知道在问哪台机器——而客户上一句
+        刚说过型号。**上下文缺失的表现不是答错，是答得泛**，
+        而泛正是「一看就是机器人」最主要的来源。
+        """
+        rows = self.store.recent_messages(gid, limit)
+        lines = []
+        for r in rows:
+            if r.get("msg_type") == "event" or not (r.get("content") or "").strip():
+                continue
+            who = "同事" if r.get("sender_is_staff") else "客户"
+            lines.append(f"{who}：{' '.join(r['content'].split())[:80]}")
+        return "\n".join(lines[-limit:])
 
     def _event(self, msg: Inbound, now: datetime) -> Result:
         """关注 / 扫码 / 点菜单。
