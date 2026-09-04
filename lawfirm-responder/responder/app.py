@@ -98,6 +98,9 @@ def create_app() -> FastAPI:
                                    if retail is not None else []),
             # 待办有没有出口。没有的话客户问了 AI 答不了的话，
             # 系统一切正常，而那边没有任何人知道——最后一处静默失败。
+            # 模型档能不能走。没有它，「鸿蒙好用吗」这类（回测里占五分之一）
+            # 全部退回「我叫同事来看一下」——而它们一个数字都不需要。
+            "retail_model": bool(llm.resolve(settings)) if retail is not None else None,
             "retail_todo_routed": bool(
                 retail is not None and retail.notifier
                 and retail.notifier.available()),

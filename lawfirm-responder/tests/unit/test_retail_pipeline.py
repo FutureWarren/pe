@@ -108,15 +108,41 @@ def test_the_ai_comes_back_after_the_takeover_window(store):
 
 
 # ------------------------------------------------------------ ③ 关注事件
-def test_a_follow_event_is_not_answered_by_us(store):
-    """公众号后台自己配了关注回复（酷机时代那个号还挂在云盛 ERP 上）。
+def test_someone_who_just_followed_is_greeted(store):
+    """**接管服务器配置之后，公众号后台的「自动回复」整个失效。**
 
-    我们再发一条，客户连着看到两句招呼——那正是「一看就知道是机器人」
-    最典型的样子。**一个窗口只该有一个人在说话。**
+    原先这里一律不回，理由是「后台自己配了关注回复，一个窗口只该有一个人
+    在说话」。那个理由在开启开发者模式的那一刻就不成立了——继续不回，
+    新关注的人会一句话都收不到，而这发生在关系的第一秒。
+
+    这是一处**我们自己的改动引入的**静默失败：改回调配置的人和写这段代码的
+    是同一个，而症状出现在第三个地方（后台那个自动回复页面）。
     """
     p = pipe(store)
-    out = p.handle(msg("", from_event=True), now=NOW)
-    assert not out.reply
+    out = p.handle(msg("", from_event=True, event="subscribe"), now=NOW)
+    assert out.reply and out.delivered, "关注了却一个字都没收到"
+    assert len(p.sender.sent) == 1
+
+
+def test_the_welcome_is_not_blocked_by_our_own_accounting(store):
+    """**欢迎语差点被自己的记账挡在门里。**
+
+    额度默认按「客户最后一次开口」起算，而关注是**事件**不是发言
+    （`last_customer_message_at` 按设计排除事件）。于是一个刚关注、
+    还没说过话的人算出来是「客户还没开过口，微信不允许主动发起」——
+    发不出去，而后台一切正常。
+    """
+    p = pipe(store)
+    out = p.handle(msg("", from_event=True, event="subscribe"), now=NOW)
+    assert out.mode == "live", f"欢迎语没发出去：mode={out.mode}｜{out.reason}"
+
+
+def test_other_events_stay_quiet(store):
+    """取关的人已经走了；扫码和点菜单后面通常跟着一句正经消息，抢在前面是插嘴。"""
+    p = pipe(store)
+    for ev in ("unsubscribe", "CLICK", "SCAN"):
+        out = p.handle(msg("", n=ev, from_event=True, event=ev), now=NOW)
+        assert not out.reply, ev
     assert p.sender.sent == []
 
 

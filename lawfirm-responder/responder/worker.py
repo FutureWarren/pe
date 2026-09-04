@@ -1062,6 +1062,7 @@ class Worker:
                 text=msg.content or "",
                 msg_id=msg.dedupe_key,
                 from_event=msg.is_event,
+                event=msg.event,
                 # 客户**发出**的时刻（微信的 CreateTime），不是现在。
                 # 两者分开，48 小时那道闸才拦得住补推与积压。
                 at=msg.created_at,

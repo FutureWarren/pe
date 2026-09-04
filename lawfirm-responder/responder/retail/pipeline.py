@@ -62,6 +62,7 @@ class Inbound:
     # 客户发的不是文字（语音/图片/视频…）。**不是「空消息」**——
     # 它是有内容的，只是我们读不了，两者的正确处理完全相反。
     media: str = ""
+    event: str = ""         # subscribe / SCAN / CLICK …（from_event 为真时才有意义）
 
     @property
     def group_id(self) -> str:
@@ -151,13 +152,7 @@ class RetailPipeline:
             return Result(reason="真人发言，AI 让位")
 
         if msg.from_event:
-            # 关注/扫码/点菜单：**不由我们回**。公众号后台自己配了关注回复
-            # （酷机时代那个号还挂在云盛 ERP 上，模板消息也在那边发），
-            # 我们再发一条，客户连着看到两句招呼——那正是「一看就知道是机器人」
-            # 最典型的样子。与律所侧 `kf_welcome_on_enter` 默认关闭同一条理由：
-            # **一个窗口只该有一个人在说话。**
-            self.store.bump("retail_event")
-            return Result(reason="关注/菜单事件，由公众号后台的自动回复负责")
+            return self._event(msg, now)
 
         if msg.media:
             return self._unreadable(msg, now)
@@ -214,6 +209,41 @@ class RetailPipeline:
 
         return self._deliver(msg, result, now)
 
+    def _event(self, msg: Inbound, now: datetime) -> Result:
+        """关注 / 扫码 / 点菜单。
+
+        **只有「关注」这一件我们回，而且必须回。**
+
+        原先这里一律不回，理由是「公众号后台自己配了关注回复，一个窗口只该有
+        一个人在说话」。那个理由在我们接管**服务器配置**的那一刻就不成立了：
+        开启开发者模式之后，公众号后台的「自动回复」整个失效。
+        也就是说——**如果这里继续不回，新关注的人会一句话都收不到。**
+        那正是这套系统存在的理由要消灭的东西，而且它发生在关系的第一秒。
+
+        这是一处我们自己的改动引入的静默失败：改回调配置的人和写这段代码的人
+        是同一个，而症状出现在第三个地方（后台的自动回复页面）。
+
+        其余事件（取关、扫码、点菜单）不回：取关的人已经走了；
+        扫码和菜单点击后面跟着的通常就是一句正经消息，抢在它前面说话是插嘴。
+        """
+        self.store.bump(f"retail_event:{msg.event or 'unknown'}")
+        if (msg.event or "").lower() != "subscribe":
+            return Result(reason=f"事件 {msg.event or '未知'}，不作声")
+
+        greet = self.phrases.get("subscribe")
+        if not greet:
+            self.store.bump("retail_no_welcome")
+            self.store.set_note(
+                "retail_no_welcome",
+                f"{now:%m-%d %H:%M} 有人关注了公众号，但没有配关注语，"
+                f"他一句话都没收到。**开发者模式下后台那条自动回复是失效的。**",
+            )
+            return Result(reason="关注事件，但没有配关注语")
+
+        result = Result(reply=greet, intent="subscribe", category="subscribe",
+                        reason="关注即问候（后台自动回复在开发者模式下已失效）")
+        return self._deliver(msg, result, now)
+
     def _defer(self, msg: Inbound, result: Result, now: datetime) -> Result:
         """把这一句让给刚接手的真人：不回客户，但**原话一定送到销售那边**。"""
         said = " ".join(msg.text.split())[:60] or f"一条{_MEDIA_ZH.get(msg.media, '消息')}"
@@ -262,7 +292,8 @@ class RetailPipeline:
             self._log(gid, msg.msg_id, result, now)
             return result
 
-        b = self._budget(gid, now, from_event=msg.from_event)
+        b = self._budget(gid, now, from_event=msg.from_event,
+                         anchor=(msg.at or now) if msg.from_event else None)
         if not b.can_send:
             # **这是最贵的一种失败**：库里一切正常，客户一个字没收到。
             # 所以它既要落回复行（mode='blocked'，控制台看得见），
@@ -300,10 +331,19 @@ class RetailPipeline:
             )
         return result
 
-    def _budget(self, gid: str, now: datetime, *, from_event: bool):
+    def _budget(self, gid: str, now: datetime, *, from_event: bool,
+                anchor: datetime | None = None):
+        """还能不能发，能发几条。
+
+        `anchor`：窗口从哪一刻起算。**事件驱动的那一条必须显式传。**
+        默认取「客户最后一次开口」，而关注/扫码是**事件**不是发言
+        （`last_customer_message_at` 按设计排除 `msg_type='event'`），
+        于是一个刚关注、还没说过话的人算出来是「客户还没开过口」——
+        欢迎语被自己的记账挡在门里，一个字也发不出去，而后台一切正常。
+        """
         from responder.gateway import mp
 
-        last = self.store.last_customer_message_at(gid)
+        last = anchor or self.store.last_customer_message_at(gid)
         # 额度按「客户最后一次开口」起算——每次他说话窗口和条数一起重置。
         since = last or (now - timedelta(seconds=1))
         return mp.budget(last, self.store.sent_parts_since(gid, since),

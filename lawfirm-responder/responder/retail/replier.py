@@ -16,9 +16,11 @@
 宁可少答一句，不可错报一个价。
 """
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
+from responder.retail import answer as model_answer
 from responder.retail import catalog as cat
 from responder.retail import orders as odr
 from responder.retail import standin
@@ -50,6 +52,8 @@ def handle(
     takeover_seconds: int = 1800,
     store_hint: str = "",
     phrases: Phrases | None = None,
+    history: str = "",
+    settings=None,
 ) -> Outcome:
     """处理一条客户消息。"""
     now = now or datetime.now()
@@ -77,6 +81,41 @@ def handle(
     # ---- 取数与成文 -------------------------------------------------------
     quote: cat.Quote | None = None
     allowed: set[str] = set()
+
+    # ---- 寒暄：分清「打招呼」和「应答」 -----------------------------------
+    if intent.key == "chitchat":
+        if _is_ack(text):
+            # **对着一句「谢谢」还继续说话是打扰。**
+            # 真人聊天就是这么结束的：他说谢谢，你不用再说什么。
+            # 这里回一句「不客气还有什么问题随时问」，看着热情，
+            # 实际是把一次自然的收尾变成一次骚扰，还白吃一条额度。
+            return Outcome(reason="standin:客户在应答/道谢，不接话", intent=intent.key)
+        greet = say("chitchat")
+        if not greet:
+            return Outcome(
+                escalate=True, intent=intent.key, reason=f"{d.reason} → 没有开场话术",
+                staff_note="客户打了个招呼，但还没配开场话术。",
+            )
+        return Outcome(reply=greet, intent=intent.key, reason=d.reason,
+                       staff_note=standin.notice_for_staff(d, greet))
+
+    if intent.handling is Handling.MODEL:
+        body, why = model_answer.generate(
+            text, history=history, kind=intent.key, settings=settings,
+        )
+        if not body:
+            # 模型不可用 / 示弱 / 被闸门拦下——三种都转人工，但**理由要分开记**，
+            # 否则「AI 怎么老是转人工」这个问题永远查不出是哪一种。
+            return Outcome(
+                reply=standin.receipt_line(
+                    standin.Decision(False, escalate=True, intent=intent)
+                ),
+                escalate=True, intent=intent.key, reason=f"{d.reason} → {why}",
+                staff_note=f"客户问「{intent.zh}」，AI 这次没敢答（{why}），需要你来回。",
+                audit_failed="闸门" in why,
+            )
+        return Outcome(reply=body, intent=intent.key, reason=f"{d.reason} → {why}",
+                       staff_note=standin.notice_for_staff(d, body))
 
     if intent.handling is Handling.LOOKUP:
         body, quote, allowed, failed = _lookup_body(
@@ -117,6 +156,17 @@ def handle(
         reply=body, escalate=False, intent=intent.key,
         staff_note=standin.notice_for_staff(d, body), reason=d.reason,
     )
+
+
+# 应答词：说完这些，对话就该安静地结束。
+_ACK = re.compile(
+    r"^[\s，。！!?？~～]*(?:好的?|行|嗯+|哦+|收到|知道了|明白了?|谢谢|谢了|多谢|"
+    r"辛苦(了|啦)?|麻烦(你|您)了|OK|ok|👌|🙏[\s，。！!?？~～]*)+$"
+)
+
+
+def _is_ack(text: str) -> bool:
+    return bool(_ACK.match((text or "").strip()))
 
 
 def _why_staff(d: standin.Decision) -> str:

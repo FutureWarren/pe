@@ -149,6 +149,21 @@ def main() -> int:
     if ph.gaps():
         blockers.append("把缺的那几条话术填上（scripts/retail_demo.py --gaps 看清单）")
 
+    from responder.engine import llm
+
+    provider = llm.resolve(s)
+    if provider:
+        print(f"  {OK} 模型可用（{provider.name}:{provider.model}）——"
+              f"产品知识与使用问题由它答")
+    else:
+        print(f"  {BAD} 没有可用的模型（DEEPSEEK_API_KEY 未配）")
+        print("       后果很具体：回测里 **五分之一** 的真实客户消息属于")
+        print("       「产品知识与使用问题」（鸿蒙好用吗 / 拍照怎么样 / 充电很慢正常吗），")
+        print("       没有模型它们会全部退回「我叫同事来看一下」。")
+        print("       这些问题一个数字都不需要，模型答它们既自然又安全")
+        print("       （出口闸门会拦掉任何价格、库存、时间承诺）。")
+        blockers.append("配上 DEEPSEEK_API_KEY（产品知识那一档没它就是死的）")
+
     src = Sources(s.retail_catalog_path,
                   max_age_hours=s.retail_catalog_max_age_hours)
     print(f"  {src.health().to_text()}")

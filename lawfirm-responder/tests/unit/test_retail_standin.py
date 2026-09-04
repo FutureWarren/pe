@@ -99,11 +99,22 @@ def test_an_unrecognised_message_is_handed_over_not_improvised():
 
     反过来（认不出就让模型自由发挥）在律所尚可（最坏是答得泛），
     在零售是灾难：模型会自信地编出一个价格、一个库存、一个到货时间。
+
+    **2026-09 的修正**：这条原则没变，但执行的位置变了。以前「认不出」
+    包含了大量本来该答的问题（回测量出来是 57%），于是每两句话就有一句
+    「我叫同事来看一下」——客户不会认为那是谨慎，只会认为这里没人。
+    现在产品知识与使用问题单独成档（`Handling.MODEL`）交给模型，
+    而**「编出一个价格/库存/到货时间」这件事由出口闸门挡**
+    （`retail/answer.py` 的 gate，见 test_retail_answer.py）。
+    真正认不出的——像这句没有任何可回答内容的闲聊——仍然一律转人工。
     """
-    d = standin.decide("那个啥，你们那个东西怎么弄来着")
+    d = standin.decide("我朋友说你们这边不错")
     assert d.speak is False
     assert d.escalate is True
-    assert handling_of("那个啥，你们那个东西怎么弄来着") is Handling.HUMAN
+    assert handling_of("我朋友说你们这边不错") is Handling.HUMAN
+    # 而「怎么弄」这类**是**问题，现在归模型档——它比一句「我叫同事来」有用，
+    # 且模型自己答不上时有示弱出口（NEED_HUMAN），照样落回转人工。
+    assert handling_of("那个啥，你们那个东西怎么弄来着") is Handling.MODEL
 
 
 # ------------------------------------------------------ ③ 售前售后同句异义

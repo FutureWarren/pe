@@ -79,6 +79,9 @@ INSTANT = {
     "activate", "data_migration", "store_info", "promo",
     "installment", "compare", "accessory", "repair_status",
     "authenticity", "payment", "new_launch",
+    # 寒暄与产品知识同样零等待——**它们是对话的第一句**。
+    # 让客户对着「在吗」等三十秒，后面说什么都晚了。
+    "chitchat", "product_qa", "howto",
 }
 
 
@@ -136,7 +139,7 @@ def decide(
         )
 
     # ⑤ 剩下的按意图自己的档位走，且给真人留缓冲
-    if intent.can_auto:
+    if intent.can_auto or intent.handling is Handling.MODEL:
         return Decision(
             True, wait_seconds=max(grace_seconds, 30), intent=intent,
             reason=f"standin:{intent.zh} 可自动答，先等 30 秒给真人机会",
@@ -183,4 +186,9 @@ def receipt_line(decision: Decision) -> str:
         return "好嘞，我这就通知店里的同事，您到了直接说找我们就行，有人接您。"
     if key == "buy_now":
         return "好的，我这就叫同事过来跟您对接。"
+    if key == "want_human":
+        # 他已经开口要人了。这时候再解释什么都是废话，**只说一件事：人在来的路上**。
+        # 也绝不能否认或含糊——「你是机器人吧」这句是试探，硬撑一句
+        # 「我是客服小王」被戳穿之后，这家店在他眼里就没有可信的东西了。
+        return "好的，我这就叫同事来跟您说。"
     return "收到，我叫同事来看一下，稍等一会儿。"
